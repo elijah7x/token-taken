@@ -1,0 +1,80 @@
+name: TokenTaken
+options:
+  bundleIdPrefix: io.github.elijah7x
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    ENABLE_HARDENED_RUNTIME: "YES"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+targets:
+  TokenTakenKit:
+    type: framework
+    platform: macOS
+    sources: [TokenTakenKit]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTakenKit
+        GENERATE_INFOPLIST_FILE: "YES"
+        SKIP_INSTALL: "YES"
+  TokenTaken:
+    type: application
+    platform: macOS
+    sources: [TokenTaken]
+    dependencies:
+      - target: TokenTakenKit
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTaken
+        PRODUCT_NAME: Token Taken
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: Token Taken
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        ENABLE_APP_SANDBOX: "NO"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        LOCALIZATION_PREFERS_STRING_CATALOGS: "YES"
+  TokenTakenCLI:
+    type: tool
+    platform: macOS
+    sources: [TokenTakenCLI]
+    dependencies:
+      - target: TokenTakenKit
+    settings:
+      base:
+        PRODUCT_NAME: token-taken
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTaken.CLI
+        # A command-line tool cannot embed the framework; find it beside the tool or in an app bundle.
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path @executable_path/../Frameworks @loader_path/../Frameworks"
+  TokenTakenKitTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources: [TokenTakenKitTests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTakenKitTests
+    dependencies:
+      - target: TokenTakenKit
+schemes:
+  TokenTaken:
+    build:
+      targets:
+        TokenTaken: all
+    test:
+      targets: [TokenTakenKitTests]
+  token-taken:
+    build:
+      targets:
+        TokenTakenCLI: all
+    run:
+      executable: TokenTakenCLI
+      commandLineArguments:
+        "summary": true

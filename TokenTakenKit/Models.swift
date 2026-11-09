@@ -1,0 +1,185 @@
+import Foundation
+
+public enum TokenCategory: String, CaseIterable, Codable, Sendable, Identifiable {
+    case input, cacheRead, cacheWrite, output, reasoning
+
+    public var id: String { rawValue }
+}
+
+public struct TokenCounts: Hashable, Codable, Sendable {
+    public var input: Int64
+    public var cacheRead: Int64
+    public var cacheWrite: Int64
+    public var output: Int64
+    public var reasoning: Int64
+
+    public init(input: Int64 = 0, cacheRead: Int64 = 0, cacheWrite: Int64 = 0, output: Int64 = 0, reasoning: Int64 = 0) {
+        self.input = input
+        self.cacheRead = cacheRead
+        self.cacheWrite = cacheWrite
+        self.output = output
+        self.reasoning = reasoning
+    }
+
+    /// Token Taken stores reasoning disjoint from output (statistics.md), so all five categories add up.
+    public var total: Int64 { input + cacheRead + cacheWrite + output + reasoning }
+
+    public subscript(_ category: TokenCategory) -> Int64 {
+        get {
+            switch category {
+            case .input: input
+            case .cacheRead: cacheRead
+            case .cacheWrite: cacheWrite
+            case .output: output
+            case .reasoning: reasoning
+            }
+        }
+        set {
+            switch category {
+            case .input: input = newValue
+            case .cacheRead: cacheRead = newValue
+            case .cacheWrite: cacheWrite = newValue
+            case .output: output = newValue
+            case .reasoning: reasoning = newValue
+            }
+        }
+    }
+
+    public static let zero = TokenCounts()
+
+    public static func + (lhs: TokenCounts, rhs: TokenCounts) -> TokenCounts {
+        TokenCounts(
+            input: lhs.input + rhs.input,
+            cacheRead: lhs.cacheRead + rhs.cacheRead,
+            cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
+            output: lhs.output + rhs.output,
+            reasoning: lhs.reasoning + rhs.reasoning
+        )
+    }
+
+    public static func += (lhs: inout TokenCounts, rhs: TokenCounts) {
+        lhs = lhs + rhs
+    }
+}
+
+public struct UsageRecord: Hashable, Codable, Sendable {
+    /// Start of the UTC day.
+    public var day: Date
+    public var deviceID: String
+    public var sourceID: String
+    public var modelID: String
+    public var counts: TokenCounts
+
+    public init(day: Date, deviceID: String, sourceID: String, modelID: String, counts: TokenCounts) {
+        self.day = day
+        self.deviceID = deviceID
+        self.sourceID = sourceID
+        self.modelID = modelID
+        self.counts = counts
+    }
+}
+
+public struct Device: Hashable, Codable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+public enum Period: String, CaseIterable, Codable, Sendable, Identifiable {
+    case day, month, year, all
+
+    public var id: String { rawValue }
+}
+
+/// One group of a breakdown. Lists of breakdowns are sorted by `counts.total`, descending.
+public struct Breakdown: Hashable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let counts: TokenCounts
+
+    public init(id: String, name: String, counts: TokenCounts) {
+        self.id = id
+        self.name = name
+        self.counts = counts
+    }
+}
+
+public struct SeriesPoint: Hashable, Sendable, Identifiable {
+    /// Index of the bucket within its series.
+    public let id: Int
+    public let start: Date
+    public let label: String
+    public let total: Int64
+    public let bySource: [String: Int64]
+    public let isFuture: Bool
+
+    public init(id: Int, start: Date, label: String, total: Int64, bySource: [String: Int64], isFuture: Bool) {
+        self.id = id
+        self.start = start
+        self.label = label
+        self.total = total
+        self.bySource = bySource
+        self.isFuture = isFuture
+    }
+}
+
+public struct CostEstimate: Hashable, Sendable {
+    /// Covers priced tokens only; positive `unpricedTokens` means the estimate is incomplete.
+    public let estimatedUSD: Double
+    public let unpricedTokens: Int64
+    public let priceTableVersion: String
+
+    public init(estimatedUSD: Double, unpricedTokens: Int64, priceTableVersion: String) {
+        self.estimatedUSD = estimatedUSD
+        self.unpricedTokens = unpricedTokens
+        self.priceTableVersion = priceTableVersion
+    }
+}
+
+public struct UsageSummary: Sendable {
+    public let period: Period
+    public let start: Date
+    /// Exclusive.
+    public let end: Date
+    public let total: TokenCounts
+    public let bySource: [Breakdown]
+    public let byModel: [Breakdown]
+    public let byDevice: [Breakdown]
+    public let series: [SeriesPoint]
+    public let cost: CostEstimate
+    public let devices: [Device]
+
+    public init(
+        period: Period, start: Date, end: Date, total: TokenCounts,
+        bySource: [Breakdown], byModel: [Breakdown], byDevice: [Breakdown],
+        series: [SeriesPoint], cost: CostEstimate, devices: [Device]
+    ) {
+        self.period = period
+        self.start = start
+        self.end = end
+        self.total = total
+        self.bySource = bySource
+        self.byModel = byModel
+        self.byDevice = byDevice
+        self.series = series
+        self.cost = cost
+        self.devices = devices
+    }
+}
+
+public protocol UsageStore: Sendable {
+    func records() -> [UsageRecord]
+    var devices: [Device] { get }
+}
+
+extension Calendar {
+    static let utcGregorian: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+}
