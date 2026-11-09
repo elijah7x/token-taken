@@ -48,6 +48,16 @@ Code reading only; nothing was built or run. Candidates read at official tokscal
 - **TokenTracker:** collectors for all twelve target agents, including current Qoder. Stores 30-minute UTC buckets. Stitches legacy and native Zcode history. Reads Cursor from the account CSV export and deduplicates across devices by keeping one whole row per (source, bucket, model). Needs Node 20+; collectors are monolithic and not a standalone module. Telemetry is on by default and must be disabled. React Bits assets are MIT + Commons Clause.
 - **Token Monitor sync:** reference only for its atomic write sequence (temp file, fsync, rename, directory fsync). Its hostname-based device IDs, whole-device snapshots, local-day keys, and tombstones that a later revision can override conflict with ADR-0002.
 
+## Local reconciliation, round 1 (2026-11-09)
+
+Both engines ran offline on one Mac's real data (Cursor excluded). Raw samples and evidence stay outside the repository.
+
+- Claude Code, Codex, Grok, Kimi Code, oh-my-pi, and OpenCode totals agree within 0.02%. Kimi Code: one call with only a `usage.record` and no `step.end` is counted by tokscale and missed by TokenTracker.
+- Zcode: TokenTracker matched an independent SQL rebuild on all 67 days. tokscale reads only the native `model_usage` table and misses all legacy history (about 88% of this sample). The correct rule: native `model_usage` from the first completed native request; legacy assistant `message` tokens before that boundary; exact cross-session copies removed; inclusive input/output split into the five disjoint categories.
+- Category semantics differ even when totals match: for Codex, TokenTracker keeps reasoning inside output while tokscale splits it out. The adapter must normalize to `docs/contracts/statistics.md`.
+- pi differs by 1.6%; the cause is still under investigation.
+- Cold full scan: tokscale 12.5 s and 700 MB peak RSS; TokenTracker 23 s and 1.6 GB. Warm runs: 0.7 s and 100 MB, versus 0.9 s and 320 MB.
+
 Leading hypothesis for the spike: option A with a small, recorded tokscale patch or adapter step that exposes UTC-timestamped events with dedup keys, plus Zcode and Cursor semantics ported from TokenTracker. Option B remains the comparison baseline for numbers.
 
 ## Consequences
