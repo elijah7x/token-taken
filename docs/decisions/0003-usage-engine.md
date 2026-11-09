@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-11-10)
 
 ## Date
 
@@ -18,7 +18,21 @@ Proposed
 
 ## Decision
 
-No engine is selected yet. Close this ADR only after a spike compares the candidates on the same sanitized local samples and records the selected version, adapter boundary, coverage, and unresolved discrepancies.
+Use a combined engine: pinned official tokscale as the base, with source rules ported from TokenTracker where tokscale is wrong on real data. Both are MIT.
+
+- **Base:** official tokscale, one pinned native binary per architecture, run as a subprocess with `--offline` and an isolated `TOKSCALE_CONFIG_DIR` inside the app's Application Support folder. Day buckets pinned to UTC. Used for Claude Code, Codex (category split and fork-replay dedup), Grok, Kimi Code, OpenCode, Gemini CLI, Factory Droid, and pi operation records (compaction, branch summary, tool results).
+- **Ported rules (Swift, in the adapter):**
+  - Zcode: native `model_usage` from the first completed native request, legacy assistant `message` tokens before that boundary, exact cross-session copies removed, inclusive input/output split into disjoint categories.
+  - pi assistant usage: dedup by entry id, never by `responseId` alone (short provider ids collide).
+  - oh-my-pi: read `reasoningTokens` as a breakdown inside output.
+  - Codex legacy total-only records: keep as "total known, categories unknown".
+- **Not counted as tokens:** Qoder records carry credits only; show activity, mark tokens unavailable.
+- **Cursor:** deferred; needs account credentials and network, so it is opt-in and not part of v1 collection until separately approved.
+- **Gap to close upstream or in the adapter:** tokscale has no per-event export. The adapter needs UTC-timestamped records with dedup keys for sync; first choice is an upstream `events --json` contribution, fallback a recorded local patch.
+
+The spike requirements below remain the acceptance bar for each source before it is marked supported.
+
+## Spike requirements
 
 The spike must:
 
@@ -55,10 +69,11 @@ Both engines ran offline on one Mac's real data (Cursor excluded). Raw samples a
 - Claude Code, Codex, Grok, Kimi Code, oh-my-pi, and OpenCode totals agree within 0.02%. Kimi Code: one call with only a `usage.record` and no `step.end` is counted by tokscale and missed by TokenTracker.
 - Zcode: TokenTracker matched an independent SQL rebuild on all 67 days. tokscale reads only the native `model_usage` table and misses all legacy history (about 88% of this sample). The correct rule: native `model_usage` from the first completed native request; legacy assistant `message` tokens before that boundary; exact cross-session copies removed; inclusive input/output split into the five disjoint categories.
 - Category semantics differ even when totals match: for Codex, TokenTracker keeps reasoning inside output while tokscale splits it out. The adapter must normalize to `docs/contracts/statistics.md`.
-- pi differs by 1.6%; the cause is still under investigation.
+- pi differs by 1.6%: tokscale deduplicates by `responseId`, and short Ollama ids collide across different calls, so it undercounts assistant usage; TokenTracker's entry-id dedup matches the raw records. tokscale additionally counts operation records (about 4.6M) that TokenTracker ignores.
+- oh-my-pi: raw `reasoningTokens` (2.6M) sit inside output; tokscale reports 0 reasoning. Claude's one-day gap was a 90-second snapshot difference. Qoder records contain credits but zero tokens.
 - Cold full scan: tokscale 12.5 s and 700 MB peak RSS; TokenTracker 23 s and 1.6 GB. Warm runs: 0.7 s and 100 MB, versus 0.9 s and 320 MB.
 
-Leading hypothesis for the spike: option A with a small, recorded tokscale patch or adapter step that exposes UTC-timestamped events with dedup keys, plus Zcode and Cursor semantics ported from TokenTracker. Option B remains the comparison baseline for numbers.
+Leading hypothesis before round 1 (superseded by the Decision): option A with a small, recorded tokscale patch or adapter step that exposes UTC-timestamped events with dedup keys, plus Zcode and Cursor semantics ported from TokenTracker. Option B remains the comparison baseline for numbers.
 
 ## Consequences
 
