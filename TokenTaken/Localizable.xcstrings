@@ -401,12 +401,12 @@
         }
       }
     },
-    "Trail length = usage · Ripple = output" : {
+    "Trail length and ripple = usage" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "雨痕长度 = 用量 · 涟漪 = 输出"
+            "value" : "雨痕长度与涟漪 = 用量"
           }
         }
       }

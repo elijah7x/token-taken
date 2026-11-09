@@ -161,7 +161,7 @@ private struct FieldCaptions: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(verbatim: layout.firstLabel)
                 Spacer()
-                Text("Trail length = usage · Ripple = output")
+                Text("Trail length and ripple = usage")
                 Spacer()
                 Text(verbatim: layout.lastLabel)
             }
