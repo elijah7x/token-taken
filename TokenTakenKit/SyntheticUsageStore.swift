@@ -9,13 +9,58 @@ public struct SyntheticUsageStore: UsageStore {
 
     public let devices: [Device]
     private let generated: [UsageRecord]
+    private let generatedHourly: [HourlyUsage]
 
     public init(seed: UInt64 = 20261109, today: Date = SyntheticUsageStore.defaultToday) {
         devices = Self.profiles.map(\.device)
-        generated = Self.generate(seed: seed, today: today)
+        let records = Self.generate(seed: seed, today: today)
+        generated = records
+        generatedHourly = Self.generateHourly(records: records, today: today)
     }
 
     public func records() -> [UsageRecord] { generated }
+    public func hourly() -> [HourlyUsage] { generatedHourly }
+
+    private static func generateHourly(records: [UsageRecord], today: Date) -> [HourlyUsage] {
+        let calendar = Calendar.utcGregorian
+        let currentHour = calendar.dateInterval(of: .hour, for: today)!.start
+        let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
+        struct Key: Hashable {
+            let device: String
+            let source: String
+            let hour: Date
+        }
+        var rows: [Key: HourlyUsage] = [:]
+        for record in records {
+            guard let interval = record.dayInterval, interval.end > cutoff else { continue }
+            let hours = (0..<24).map { interval.start.addingTimeInterval(Double($0) * 3_600) }.filter { $0 <= currentHour }
+            guard !hours.isEmpty else { continue }
+            let weights = hours.indices.map { Int64(1 + ($0 * 7) % 11) }
+            let weightSum = weights.reduce(0, +)
+            var assigned = TokenCounts.zero
+            for (index, hour) in hours.enumerated() {
+                var counts = TokenCounts.zero
+                for category in TokenCategory.allCases {
+                    counts[category] = index == hours.count - 1
+                        ? record.counts[category] - assigned[category]
+                        : record.counts[category] * weights[index] / weightSum
+                }
+                assigned += counts
+                guard hour >= cutoff else { continue }
+                let key = Key(device: record.deviceID, source: record.sourceID, hour: hour)
+                var row = rows[key] ?? HourlyUsage(hourStart: hour, deviceID: record.deviceID,
+                    sourceID: record.sourceID, counts: .zero, eventCount: 0, reasoningKnown: true)
+                row.counts += counts
+                row.eventCount += 1
+                rows[key] = row
+            }
+        }
+        return rows.values.sorted {
+            if $0.hourStart != $1.hourStart { return $0.hourStart < $1.hourStart }
+            if $0.deviceID != $1.deviceID { return $0.deviceID < $1.deviceID }
+            return $0.sourceID < $1.sourceID
+        }
+    }
 
     // MARK: - Generation
 
@@ -90,7 +135,8 @@ public struct SyntheticUsageStore: UsageStore {
                         let tokens = sourceVolume * model.share
                         guard tokens >= 1 else { continue }
                         records.append(UsageRecord(
-                            day: day,
+                            day: UsageDay.string(from: day, in: utc.timeZone),
+                            timeZoneID: utc.timeZone.identifier,
                             deviceID: profile.device.id,
                             sourceID: source.id,
                             modelID: model.id,

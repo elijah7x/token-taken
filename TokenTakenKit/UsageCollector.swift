@@ -1,48 +1,53 @@
 import Foundation
 
-public protocol UsageCollector: Sendable {
-    var sourceIDs: [String] { get }
-    func collect() async throws -> [UsageRecord]
+public struct CollectionBatch: Sendable {
+    public var daily: [UsageRecord]
+    public var hourly: [HourlyUsage]
+    public var skippedRecords: Int
+
+    public init(daily: [UsageRecord] = [], hourly: [HourlyUsage] = [], skippedRecords: Int = 0) {
+        self.daily = daily
+        self.hourly = hourly
+        self.skippedRecords = skippedRecords
+    }
 }
 
-enum CollectorError: LocalizedError {
+public protocol UsageCollector: Sendable {
+    var sourceIDs: [String] { get }
+    func collect() async throws -> CollectionBatch
+}
+
+public enum CollectorError: LocalizedError, Sendable {
+    case sourceUnavailable
     case process(String)
     case invalidOutput(String)
     case open(String)
     case sql(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
-        case .process(let message), .invalidOutput(let message), .open(let message), .sql(let message):
-            message
+        case .sourceUnavailable: "Source data is unavailable"
+        case .process(let message), .invalidOutput(let message), .open(let message), .sql(let message): message
         }
     }
 }
 
-enum UsageDay {
-    static func date(from string: String) -> Date? {
+public enum UsageDay {
+    public static func date(from string: String, in timeZone: TimeZone = .current) -> Date? {
         let parts = string.split(separator: "-", omittingEmptySubsequences: false)
-        guard parts.count == 3,
-              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]),
-              string == Self.string(from: DateComponents(year: year, month: month, day: day)) else {
-            return nil
-        }
-        return Calendar.utcGregorian.date(from: DateComponents(year: year, month: month, day: day))
+        guard parts.count == 3, string.count == 10,
+              let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        guard let date = calendar.date(from: DateComponents(year: year, month: month, day: day)),
+              Self.string(from: date, in: timeZone) == string else { return nil }
+        return calendar.startOfDay(for: date)
     }
 
-    static func string(from date: Date) -> String {
-        let components = Calendar.utcGregorian.dateComponents([.year, .month, .day], from: date)
-        return string(from: components)
-    }
-
-    static func date(milliseconds: Int64) -> Date? {
-        date(from: string(from: Date(timeIntervalSince1970: Double(milliseconds) / 1_000)))
-    }
-
-    private static func string(from components: DateComponents) -> String {
-        guard let year = components.year, let month = components.month, let day = components.day else {
-            return ""
-        }
-        return String(format: "%04d-%02d-%02d", year, month, day)
+    public static func string(from date: Date, in timeZone: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year!, parts.month!, parts.day!)
     }
 }

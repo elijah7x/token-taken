@@ -32,7 +32,8 @@ struct MenuBarContent: View {
                 ForEach(today.bySource.prefix(3)) { source in
                     HStack(spacing: 7) {
                         Circle().fill(Palette.color(forSource: source.id)).frame(width: 6, height: 6)
-                        Text(source.name).foregroundStyle(Palette.muted).lineLimit(1)
+                            .accessibilityHidden(true)
+                        Text(verbatim: source.name).foregroundStyle(Palette.muted).lineLimit(1)
                         Spacer(minLength: 8)
                         Text(TokenFormat.short(source.counts.total)).fontWeight(.medium)
                     }

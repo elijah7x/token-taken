@@ -256,7 +256,7 @@ private struct ConfluenceStreamLabel: View {
                 .foregroundStyle(dimmed ? Palette.muted : Color.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Text(valueText)
+            valueText
                 .font(.system(size: compact ? 9 : 10))
                 .foregroundStyle(Palette.muted)
                 .monospacedDigit()
@@ -275,12 +275,12 @@ private struct ConfluenceStreamLabel: View {
         .accessibilityValue(Text("\(TokenFormat.short(stream.tokens)) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
     }
 
-    private var valueText: String {
+    private var valueText: Text {
         switch stream.side {
         case .source:
-            TokenFormat.short(stream.tokens)
+            Text(verbatim: TokenFormat.short(stream.tokens))
         case .category:
-            "\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))"
+            Text("\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))")
         }
     }
 }

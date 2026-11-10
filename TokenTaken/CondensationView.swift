@@ -27,11 +27,10 @@ struct CondensationView: View {
                             .draw(in: &context)
                     }
                 }
-                .accessibilityElement()
-                .accessibilityLabel(Text("Source mist and daily usage rain trails"))
-                .accessibilityValue(Text(layout.fog.prefix(3).map(\.name).joined(separator: ", ")))
+                .accessibilityHidden(true)
 
                 DewDrops(layout: layout, namespace: dropSpace, total: summary.total.total)
+                FieldAccessibility(layout: layout, total: summary.total.total)
                 FieldCaptions(layout: layout)
 
                 if let hover {
@@ -39,6 +38,7 @@ struct CondensationView: View {
                         .fixedSize()
                         .offset(tooltipOffset(for: hover.location, in: proxy.size))
                         .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                         .transition(.opacity)
                 }
             }
@@ -64,6 +64,8 @@ struct CondensationView: View {
             )
             .allowsHitTesting(false)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Source mist and daily usage rain trails"))
     }
 
     @ViewBuilder private var surface: some View {
@@ -100,24 +102,36 @@ enum FieldTarget: Equatable {
 
 // MARK: - Dew drops
 
-/// Each device is one native glass drop; `glassEffectID` lets drops morph
+/// Each device is one native drop; `glassEffectID` lets drops morph
 /// in size when the period changes and merge or split as they appear.
+/// Reduce Transparency replaces the glass with opaque circles.
 private struct DewDrops: View {
     let layout: CondensationLayout
     let namespace: Namespace.ID
     let total: Int64
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             GlassEffectContainer(spacing: 18) {
                 ZStack(alignment: .topLeading) {
                     ForEach(layout.drops) { drop in
-                        Color.clear
-                            .frame(width: drop.radius * 2, height: drop.radius * 2)
-                            .glassEffect(.regular.interactive(), in: .circle)
-                            .glassEffectID(drop.id, in: namespace)
-                            .position(drop.center)
-                            .accessibilityHidden(true)
+                        Group {
+                            if reduceTransparency {
+                                Circle()
+                                    .fill(Palette.solid)
+                                    .overlay { Circle().strokeBorder(Palette.hairline) }
+                                    .frame(width: drop.radius * 2, height: drop.radius * 2)
+                            } else {
+                                Color.clear
+                                    .frame(width: drop.radius * 2, height: drop.radius * 2)
+                                    .glassEffect(.regular.interactive(), in: .circle)
+                                    .glassEffectID(drop.id, in: namespace)
+                            }
+                        }
+                        .position(drop.center)
+                        .accessibilityHidden(true)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -125,7 +139,7 @@ private struct DewDrops: View {
 
             ForEach(layout.drops) { drop in
                 VStack(spacing: 1) {
-                    Text(drop.name)
+                    Text(verbatim: drop.name)
                         .font(.system(size: 10))
                         .foregroundStyle(Palette.muted)
                     Text(TokenFormat.short(drop.value))
@@ -137,11 +151,52 @@ private struct DewDrops: View {
                 .fixedSize()
                 .position(x: drop.center.x, y: drop.center.y + drop.radius + 17)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(drop.name))
-                .accessibilityValue(Text("\(TokenFormat.short(drop.value)) tokens, \(Share.percent(drop.value, of: total))"))
+                .accessibilityLabel(Text(verbatim: drop.name))
+                .accessibilityValue(Text("\(TokenFormat.short(drop.value)) tokens, \(Share.percent(drop.value, of: total)) of total"))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private struct FieldAccessibility: View {
+    let layout: CondensationLayout
+    let total: Int64
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(layout.fog) { fog in
+                Color.clear
+                    .frame(width: fog.radii.width * 2, height: fog.radii.height * 2)
+                    .position(fog.center)
+                    .accessibilityElement()
+                    .accessibilityLabel(Text(verbatim: fog.name))
+                    .accessibilityValue(
+                        Text("\(TokenFormat.short(fog.value)) tokens")
+                        + Text(verbatim: " · ")
+                        + Text("Rank \(fog.rank + 1) · \(Share.percent(fog.value, of: total))")
+                    )
+            }
+            ForEach(layout.trails) { trail in
+                Color.clear
+                    .frame(width: 12, height: trail.length + 12)
+                    .position(x: trail.x, y: trail.top + trail.length / 2)
+                    .accessibilityElement()
+                    .accessibilityLabel(Text(verbatim: trail.point.label))
+                    .accessibilityValue(trailValue(trail))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func trailValue(_ trail: CondensationLayout.Trail) -> Text {
+        let value = Text("\(TokenFormat.short(trail.point.total)) tokens")
+        guard let top = trail.point.bySource.max(by: { $0.value < $1.value }), top.value > 0 else {
+            return value
+        }
+        return value + Text(verbatim: " · ") + Text("Top: \(SourceCatalog.info(for: top.key).name)")
     }
 }
 

@@ -4,12 +4,13 @@ public struct UsageAggregator: Sendable {
     private let store: any UsageStore
     private let calendar: Calendar
     private let now: Date
-    private let priceTable = PriceTable.synthetic
+    private let priceTable: PriceTable
 
-    public init(store: any UsageStore, calendar: Calendar = .current, now: Date = .now) {
+    public init(store: any UsageStore, calendar: Calendar = .current, now: Date = .now, priceTable: PriceTable? = nil) {
         self.store = store
         self.calendar = calendar
         self.now = now
+        self.priceTable = priceTable ?? (store is SyntheticUsageStore ? .synthetic : .bundled)
     }
 
     /// Ranges run from the period start through the end of today in `calendar`'s time zone.
@@ -37,8 +38,11 @@ public struct UsageAggregator: Sendable {
             sources[record.sourceID, default: .zero] += record.counts
             models[record.modelID, default: .zero] += record.counts
             deviceTotals[record.deviceID, default: .zero] += record.counts
-            if let cost = priceTable.cost(model: record.modelID, counts: record.counts) {
+            var categorized = record.counts
+            categorized.uncategorized = 0
+            if let cost = priceTable.cost(model: record.modelID, counts: categorized) {
                 usd += cost
+                unpriced += record.counts.uncategorized
             } else {
                 unpriced += record.counts.total
             }
@@ -54,7 +58,7 @@ public struct UsageAggregator: Sendable {
             bySource: Self.breakdowns(sources) { SourceCatalog.info(for: $0).name },
             byModel: Self.breakdowns(models) { $0 },
             byDevice: Self.breakdowns(deviceTotals) { deviceNames[$0] ?? $0 },
-            series: series(for: period, start: start, today: today, entries: inRange),
+            series: try series(for: period, start: start, today: today, entries: inRange),
             cost: CostEstimate(estimatedUSD: usd, unpricedTokens: unpriced, priceTableVersion: priceTable.version),
             devices: devices
         )
@@ -77,10 +81,10 @@ public struct UsageAggregator: Sendable {
 
     // MARK: - Series
 
-    private func series(for period: Period, start: Date, today: Date, entries: [Entry]) -> [SeriesPoint] {
+    private func series(for period: Period, start: Date, today: Date, entries: [Entry]) throws -> [SeriesPoint] {
         switch period {
         case .day:
-            return hourlySeries(dayStart: start, entries: entries)
+            return try hourlySeries(dayStart: start, entries: entries)
         case .month:
             let monthEnd = calendar.dateInterval(of: .month, for: start)!.end
             var starts: [Date] = []
@@ -145,43 +149,25 @@ public struct UsageAggregator: Sendable {
         }
     }
 
-    /// Relative activity per local hour. Records are daily, so a day's total is spread over this fixed curve.
-    private static let hourlyActivity: [Int64] = [
-        10, 6, 3, 2, 2, 3, 6, 12, 22, 34, 42, 44, 32, 36, 46, 48, 46, 42, 34, 30, 34, 32, 24, 16,
-    ]
-
-    private func hourlySeries(dayStart: Date, entries: [Entry]) -> [SeriesPoint] {
-        let starts = (0..<24).map { calendar.date(byAdding: .hour, value: $0, to: dayStart)! }
-        // Only elapsed hours receive usage, so the series still sums to the day total.
-        let active = starts.indices.filter { starts[$0] <= now }
-        let lastActive = active.last ?? 0
-        let weightSum = active.reduce(Int64(0)) { $0 + Self.hourlyActivity[$1] }
-
-        var dayBySource: [String: Int64] = [:]
-        for entry in entries {
-            dayBySource[entry.record.sourceID, default: 0] += entry.record.counts.total
+    private func hourlySeries(dayStart: Date, entries: [Entry]) throws -> [SeriesPoint] {
+        let end = addDays(1, to: dayStart)
+        var starts: [Date] = []
+        var hour = dayStart
+        while hour < end {
+            starts.append(hour)
+            hour = calendar.date(byAdding: .hour, value: 1, to: hour)!
         }
-
-        var bySource = [[String: Int64]](repeating: [:], count: 24)
-        for (source, tokens) in dayBySource {
-            var assigned: Int64 = 0
-            for hour in active {
-                let share = weightSum > 0 ? tokens * Self.hourlyActivity[hour] / weightSum : 0
-                bySource[hour][source] = share
-                assigned += share
-            }
-            bySource[lastActive][source, default: 0] += tokens - assigned
-        }
-
-        return starts.indices.map { hour in
-            SeriesPoint(
-                id: hour,
-                start: starts[hour],
-                label: String(hour),
-                total: bySource[hour].values.reduce(0, +),
-                bySource: bySource[hour],
-                isFuture: starts[hour] > now
-            )
+        let rows = try store.hourly().filter { $0.hourStart >= dayStart && $0.hourStart < end }
+        let grouped = Dictionary(grouping: rows) { calendar.dateInterval(of: .hour, for: $0.hourStart)!.start }
+        let expected = Set(entries.map { $0.record.deviceID + "\u{0}" + $0.record.sourceID })
+        return starts.enumerated().map { index, start in
+            let bucket = grouped[start] ?? []
+            var bySource: [String: Int64] = [:]
+            for row in bucket { bySource[row.sourceID, default: 0] += row.counts.total }
+            let covered = Set(bucket.map { $0.deviceID + "\u{0}" + $0.sourceID })
+            return SeriesPoint(id: index, start: start, label: String(calendar.component(.hour, from: start)),
+                total: bySource.values.reduce(0, +), bySource: bySource, isFuture: start > now,
+                isKnown: !bucket.isEmpty && expected.isSubset(of: covered))
         }
     }
 
@@ -192,14 +178,14 @@ public struct UsageAggregator: Sendable {
         let record: UsageRecord
     }
 
-    /// Records carry UTC days. Each is placed on the viewer's calendar day with the same date, a deliberate
-    /// simplification until hourly UTC buckets exist (see the sync contract).
+    /// Preserve the collecting device's date label; cross-zone daily re-bucketing is not possible (ADR-0005).
     private func localizedEntries() throws -> [Entry] {
-        var cache: [Date: Date] = [:]
+        var cache: [String: Date] = [:]
         return try store.records().map { record in
             if let day = cache[record.day] { return Entry(day: day, record: record) }
-            let date = Calendar.utcGregorian.dateComponents([.year, .month, .day], from: record.day)
-            let day = calendar.date(from: date).map { calendar.startOfDay(for: $0) } ?? record.day
+            guard let day = UsageDay.date(from: record.day, in: calendar.timeZone) else {
+                throw StoreError.sql("Invalid usage day")
+            }
             cache[record.day] = day
             return Entry(day: day, record: record)
         }

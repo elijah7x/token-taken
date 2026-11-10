@@ -1,6 +1,6 @@
 # Token Taken architecture
 
-Status: pre-alpha. No application or CLI target exists yet.
+Status: pre-alpha. The macOS app and CLI share a local SQLite collection and aggregation pipeline; sync transport remains unimplemented.
 
 ## Platform choices
 
@@ -39,25 +39,28 @@ TokenTakenCLI ────────┘
 ### Collector
 
 - Runs the pinned usage engine and adapts its output into Token Taken's canonical model.
-- Normalizes source, model, timestamp, token categories, event count, source identity, and source scope class.
-- Distinguishes device-local sources from account-scoped sources for later attribution and deduplication.
+- Returns `CollectionBatch` with complete-history local-day/model records, rolling 48-hour per-source records, and skipped-record counts. Daily records preserve collection-zone and raw-model identifiers; hourly instants are absolute and carry reasoning knowledge.
+- tokscale handles Claude Code, Codex, Grok, Kimi Code, OpenCode, Gemini CLI, and Factory Droid. Native Swift collectors handle Zcode, pi, and oh-my-pi; pi/oh-my-pi are not also counted by tokscale.
+- Explicitly sets the process `TZ` to the collecting device's current IANA zone, runs offline with an isolated config directory, and uses a 300-second timeout. Graph supplies daily/model totals; concurrent per-client hourly exports have merged models and omit reasoning.
+- Retains device attribution. Account-scoped collection and exact cross-device event deduplication remain deferred.
 - Reads agent logs read-only. Raw prompts, responses, paths, project names, and credentials do not enter sync output.
 - Contains no upstream parser forks beyond separately reviewed patches. Engine upgrades pin a new version and rerun contract and reconciliation checks.
 
-The engine interface is the integration point selected by [ADR-0003](decisions/0003-usage-engine.md) and governed by `docs/contracts/upstream.md`.
+The engine interface is selected by [ADR-0003](decisions/0003-usage-engine.md), refined by [ADR-0005](decisions/0005-collection-granularity.md), and governed by `docs/contracts/upstream.md`.
 
 ### Store
 
 - Owns the local database under `~/Library/Application Support/Token Taken/`.
-- Persists canonical usage data, source cursors where supported, device identity, tombstones, and cached metadata needed for launch and reconciliation.
-- Supplies consistent reads to app and CLI through `TokenTakenKit`.
-- Preserves cached data across failed refreshes and exposes freshness and error state.
+- SQLite schema version 2 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
+- Rebuilds usage-cache tables when migrating an older version, retaining devices and health metadata and marking health stale. Rejects newer unknown schemas. The CLI opens read-only and asks the app to migrate an old cache.
+- Replaces both usage tables for one source/device in a single transaction. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()` and `hourly()` throw on failed reads.
+- Preserves cached rows and last success on failed/unavailable collection. Source health tracks skipped records and `ok`, `unavailable`, `failed`, and `stale` states; health read/write errors remain visible through throwing reads and runner results.
 
-The database technology, schema migrations, and app/CLI write coordination are open; see below.
+See ADR-0005 for the rebuild policy. Sync cursors, tombstones, and transport metadata are not yet implemented.
 
 ### Pricing
 
-- Maintains a versioned price table and maps normalized model IDs to prices.
+- Uses `PriceTable.bundled` for real usage and `PriceTable.synthetic` for synthetic previews. Maps normalized model IDs to versioned rates; uncategorized tokens remain unpriced.
 - Derives cost at read time and returns the price-table version with the estimate.
 - Never syncs cost and never presents an estimate as a bill.
 - Keeps pricing semantics aligned with `docs/contracts/statistics.md`.
@@ -66,14 +69,14 @@ The database technology, schema migrations, and app/CLI write coordination are o
 
 - Uses the opt-in iCloud Drive folder `iCloud Drive/Token Taken/`, stored on disk at `~/Library/Mobile Documents/com~apple~CloudDocs/Token Taken/`. Sync is off by default.
 - Gives each Mac a random UUID `deviceId` created on first launch. Hardware identifiers are not used.
-- Writes only `Token Taken/v1/devices/<deviceId>/`, containing `device.json` and atomically rewritten monthly `usage-YYYY-MM.json` snapshots. Each folder has one writer.
+- Writes only `Token Taken/v1/devices/<deviceId>/`, containing `device.json`, atomically rewritten monthly daily-history `usage-YYYY-MM.json` snapshots, and a rolling per-source `hourly.json`. Each folder has one writer.
 - Reads and merges every device folder. A removed device leaves a tombstone and does not resurrect unless the user re-enables it.
-- Syncs UTC hourly buckets keyed by `(deviceId, sourceId, modelId, hourStartUTC)`, with per-category token counts and event count. Viewers re-bucket into their own time zone.
-- Never cross-deduplicates device-local sources. Deduplicates account-scoped sources across devices using the source-specific rule established after the engine spike.
+- Preserves daily local-date labels and collection zones per model; preserves absolute hourly instants per source without model attribution. Both kinds include event counts and uncategorized tokens; hourly rows preserve reasoning knowledge and explicit zero coverage. Hourly activity is never added to daily totals.
+- Never cross-deduplicates device-local sources. Aggregate-only export cannot support exact account-scoped deduplication; Cursor and that capability remain deferred.
 - Never syncs prompts, responses, file paths, project or repository names, credentials, or cost.
 - Defines a backend interface so local folder, S3, and WebDAV implementations can reuse the layout later. V1 ships iCloud Drive only.
 
-See [ADR-0002](decisions/0002-icloud-drive-sync.md) and `docs/contracts/sync.md`. Non-whole-hour time zones are a known limitation of hourly buckets.
+See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity decision [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/sync.md`. Daily cross-zone re-bucketing is inexact; fractional-offset boundaries and ambiguous fall-back hour labels also limit hourly attribution. Sync is a contract here, not an implemented transport.
 
 ### Presentation and themes
 
@@ -96,21 +99,21 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md) and `docs/contracts/sync.md`
 
 ## Data flow
 
-1. The Collector invokes the pinned engine on a refresh and adapts its output into canonical records. Device-local records carry their device attribution; account-scoped records carry source identity for deduplication.
-2. The Store validates and persists local records and refresh metadata. It applies the identity and statistics rules in `docs/contracts/statistics.md`.
-3. When sync is enabled, Sync writes this Mac's aggregate UTC hourly buckets to its own monthly files and reads other device folders. It applies source-scope attribution, cross-device deduplication, and tombstones before producing merged input for queries.
-4. `TokenTakenKit` converts stored or merged buckets into the requested period, source, model, and device groupings. Pricing adds cost estimates at read time.
+1. Collectors return daily and hourly batches with device attribution. Missing locations throw `sourceUnavailable`, never a successful empty snapshot.
+2. The runner replaces each successful source/device's two tables transactionally and records source health. Complete reads establish 48 hours of explicit hourly coverage; partial reads do not invent missing zero rows. Failures preserve cached data.
+3. Future opt-in sync writes daily history and a separate rolling hourly snapshot to this Mac's folder and reads other device folders, preserving single-writer ownership and tombstones. Exact account-scoped deduplication is not supported by these aggregates.
+4. `TokenTakenKit` applies viewer-calendar period boundaries to original daily date labels for totals and breakdowns, without shifting them. The Day chart instead reads actual hourly rows in viewer-local hours, including DST and coverage gaps; it can differ from the daily total because hourly reasoning is unavailable or zones/coverage differ. Pricing adds versioned estimates at read time.
 5. The main window, menu bar extra, and CLI query that shared pipeline. They do not implement separate aggregation rules.
 
-The exact account-scoped deduplication key and its representation in aggregate-only sync remain open. ADR-0003 and the statistics and sync contracts must close them without weakening P1 or P3.
+Exact account-scoped deduplication remains unsupported without privacy-preserving event identity. ADR-0005 and the statistics/sync contracts record that limitation rather than assuming aggregates can recover it.
 
 ## Refresh policy
 
 - **On launch:** display cached data first, then start a refresh. Keep stale data labeled until the refresh succeeds.
-- **Periodic:** refresh while the app is running. Prevent overlapping collection runs and expose the last successful refresh and any error. The default interval and pause policy are open.
+- **Periodic:** refresh while the app is running. Prevent overlapping runs; run independent source collectors concurrently and expose last success and errors. `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records for future UI. Source health becomes stale by default after 24 hours.
 - **On demand:** let the user request a refresh from the app.
 - **Incremental:** use source cursors or incremental engine output when available and verified. Otherwise run a complete enough collection to prevent gaps. Never treat an unsupported incremental mode as complete.
-- **Engine boundary:** ADR-0003 must establish which candidates support incremental collection and whether timestamps have event-level or at least hourly resolution.
+- **Engine boundary:** ADR-0005 accepts complete daily history and rolling per-source hourly exports without a per-event export. Model-level hourly attribution and recovery of Codex total-only legacy records are not available.
 
 ## Open questions
 
@@ -118,9 +121,8 @@ The exact account-scoped deduplication key and its representation in aggregate-o
 | --- | --- |
 | Which engine ships, which agents it covers, and whether it needs a bundled runtime? | ADR-0003 and `docs/contracts/upstream.md` |
 | What source event identity deduplicates Cursor and other account-scoped data across Macs, including old Zcode samples? | ADR-0003 and `docs/contracts/statistics.md` |
-| How can aggregate-only hourly sync represent that identity without losing exact cross-device deduplication? | `docs/contracts/sync.md`, informed by ADR-0003 |
-| Do candidate engines expose timestamps at hourly resolution or finer, and how should non-whole-hour time zones be documented? | ADR-0003, `docs/contracts/statistics.md`, and `docs/contracts/sync.md` |
-| Which local database, migration policy, and app/CLI write coordination should the Store use? | A future local-store ADR before implementation |
+| Can a future privacy-preserving identity export enable exact account-scoped deduplication? | ADR-0005 and `docs/contracts/sync.md`; unsupported today |
+| How should sync transport publish consistent multi-file generations and per-source health? | `docs/contracts/sync.md` before enabling sync |
 | What periodic interval, power policy, and incremental fallback should refresh use? | A future refresh-policy ADR after ADR-0003 |
 | What price-table sources, update cadence, and model aliases should Pricing use? | `docs/contracts/statistics.md` and `docs/contracts/upstream.md` |
 

@@ -22,6 +22,25 @@ final class AppModel {
     /// Set when the last read failed; the previous numbers stay on screen instead of partial ones.
     private(set) var readError: String?
 
+    struct DataIssues {
+        let failed: Int
+        let unavailable: Int
+        let stale: Int
+        let skippedRecords: Int
+        let isPartial: Bool
+        var count: Int { failed + unavailable + stale }
+    }
+
+    var dataIssues: DataIssues {
+        let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
+        let failed = health.filter { $0.state == .failed }.count
+        let unavailable = health.filter { $0.state == .unavailable }.count
+        let stale = health.filter { $0.state == .stale }.count
+        let skipped = health.reduce(0) { $0 + $1.skippedRecords }
+        return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped,
+            isPartial: failed + unavailable + stale > 0 || skipped > 0 || storageError != nil || readError != nil)
+    }
+
     var isEmpty: Bool {
         if settings != nil {
             return realStore?.isEmpty ?? true
@@ -150,4 +169,5 @@ final class AppModel {
 private struct EmptyUsageStore: UsageStore {
     let devices: [Device] = []
     func records() -> [UsageRecord] { [] }
+    func hourly() -> [HourlyUsage] { [] }
 }

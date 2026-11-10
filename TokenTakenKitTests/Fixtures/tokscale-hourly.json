@@ -1,0 +1,8 @@
+{
+  "entries": [
+    { "hour": "2026-03-08 00:00", "clients": ["claude"], "models": ["fixture-model-a"], "input": 100, "output": 20, "cacheRead": 30, "cacheWrite": 10, "messageCount": 2, "cost": 0.001 },
+    { "hour": "2026-03-08 01:00", "clients": ["claude"], "models": ["fixture-model-a", "fixture-model-b"], "input": 200, "output": 40, "cacheRead": 60, "cacheWrite": 20, "messageCount": 3, "cost": 0.002 },
+    { "hour": "2026-03-08 03:00", "clients": ["claude"], "models": ["fixture-model-b"], "input": 300, "output": 60, "cacheRead": 90, "cacheWrite": 30, "messageCount": 4, "cost": 0.003 },
+    { "hour": "2026-03-08 23:00", "clients": ["claude"], "models": ["fixture-model-b"], "input": 400, "output": 80, "cacheRead": 120, "cacheWrite": 40, "messageCount": 5, "cost": 0.004 }
+  ]
+}

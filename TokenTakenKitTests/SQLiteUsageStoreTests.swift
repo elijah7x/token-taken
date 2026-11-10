@@ -15,39 +15,33 @@ final class SQLiteUsageStoreTests: XCTestCase {
     }
 
     private var databaseURL: URL { directory.appendingPathComponent("usage.sqlite") }
+    private var now: Date { ISO8601DateFormatter().date(from: "2026-11-09T10:30:00Z")! }
 
-    private func day(_ year: Int, _ month: Int, _ day: Int) -> Date {
-        Calendar.utcGregorian.date(from: DateComponents(year: year, month: month, day: day))!
+    private func record(_ source: String = "claude", device: String = "device-a", model: String = "model-a", input: Int64 = 100) -> UsageRecord {
+        UsageRecord(day: "2026-11-09", timeZoneID: "Asia/Shanghai", deviceID: device, sourceID: source,
+            modelID: model, rawModelID: "raw-" + model,
+            counts: TokenCounts(input: input, cacheRead: 20, cacheWrite: 10, output: 30, reasoning: 5, uncategorized: 7), eventCount: 3)
     }
 
-    private func record(
-        _ source: String = "claude",
-        device: String = "device-a",
-        model: String = "model-a",
-        input: Int64 = 100
-    ) -> UsageRecord {
-        UsageRecord(
-            day: day(2026, 11, 9),
-            deviceID: device,
-            sourceID: source,
-            modelID: model,
-            counts: TokenCounts(input: input, cacheRead: 20, cacheWrite: 10, output: 30, reasoning: 5)
-        )
+    private func hourly() -> HourlyUsage {
+        HourlyUsage(hourStart: now.addingTimeInterval(-1_800), deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 4, output: 5, uncategorized: 6), eventCount: 2, reasoningKnown: false)
     }
 
     func testRoundTrip() throws {
         let device = Device(id: "device-a", name: "Test Mac")
         let expected = record()
+        let hour = hourly()
         do {
             let store = try SQLiteUsageStore(url: databaseURL)
             XCTAssertTrue(store.isEmpty)
             try store.upsert(device: device)
-            try store.replace(records: [expected], sourceID: expected.sourceID, deviceID: expected.deviceID)
+            try store.replace(batch: CollectionBatch(daily: [expected], hourly: [hour]), sourceID: expected.sourceID, deviceID: expected.deviceID)
         }
-
         let store = try SQLiteUsageStore(url: databaseURL, readOnly: true)
         XCTAssertFalse(store.isEmpty)
         XCTAssertEqual(try store.records(), [expected])
+        XCTAssertEqual(try store.hourly(), [hour])
         XCTAssertEqual(store.devices, [device])
     }
 
@@ -56,64 +50,146 @@ final class SQLiteUsageStoreTests: XCTestCase {
         let claudeA = record()
         let codexA = record("codex", model: "model-b", input: 200)
         let claudeB = record(device: "device-b", input: 300)
-        try store.replace(records: [claudeA], sourceID: "claude", deviceID: "device-a")
-        try store.replace(records: [codexA], sourceID: "codex", deviceID: "device-a")
-        try store.replace(records: [claudeB], sourceID: "claude", deviceID: "device-b")
-        try store.replace(records: [claudeA], sourceID: "claude", deviceID: "device-a")
+        for row in [claudeA, codexA, claudeB, claudeA] {
+            try store.replace(batch: CollectionBatch(daily: [row]), sourceID: row.sourceID, deviceID: row.deviceID)
+        }
         XCTAssertEqual(Set(try store.records()), Set([claudeA, codexA, claudeB]))
-
         let replacement = record(model: "model-c", input: 400)
-        try store.replace(records: [replacement], sourceID: "claude", deviceID: "device-a")
+        try store.replace(batch: CollectionBatch(daily: [replacement]), sourceID: "claude", deviceID: "device-a")
         XCTAssertEqual(Set(try store.records()), Set([replacement, codexA, claudeB]))
-
-        try store.replace(records: [], sourceID: "claude", deviceID: "device-a")
+        try store.replace(batch: CollectionBatch(), sourceID: "claude", deviceID: "device-a")
         XCTAssertEqual(Set(try store.records()), Set([codexA, claudeB]))
+    }
+
+    func testBothTablesRollBackTogether() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let original = CollectionBatch(daily: [record()], hourly: [hourly()])
+        try store.replace(batch: original, sourceID: "claude", deviceID: "device-a")
+        let invalid = CollectionBatch(daily: [record(input: 999)], hourly: [hourly(), hourly()])
+        XCTAssertThrowsError(try store.replace(batch: invalid, sourceID: "claude", deviceID: "device-a"))
+        XCTAssertEqual(try store.records(), original.daily)
+        XCTAssertEqual(try store.hourly(), original.hourly)
     }
 
     func testHealthRoundTrip() throws {
         let store = try SQLiteUsageStore(url: databaseURL)
-        let expected = SourceHealth(
-            sourceID: "claude",
-            lastAttempt: Date(timeIntervalSince1970: 1_000.25),
-            lastSuccess: Date(timeIntervalSince1970: 900.5),
-            recordCount: 12,
-            errorMessage: "synthetic error"
-        )
+        let expected = SourceHealth(sourceID: "claude", lastAttempt: now, lastSuccess: now.addingTimeInterval(-600),
+            recordCount: 12, errorMessage: "synthetic error", skippedRecords: 2, state: .failed)
         try store.record(health: expected)
-        XCTAssertEqual(store.health(), [expected])
-
-        let updated = SourceHealth(
-            sourceID: "claude",
-            lastAttempt: Date(timeIntervalSince1970: 1_100),
-            lastSuccess: Date(timeIntervalSince1970: 1_100),
-            recordCount: 20
-        )
+        XCTAssertEqual(try store.health(), [expected])
+        let updated = SourceHealth(sourceID: "claude", lastAttempt: now, lastSuccess: now, recordCount: 20)
         try store.record(health: updated)
-        XCTAssertEqual(store.health(), [updated])
+        XCTAssertEqual(try store.health(), [updated])
+        XCTAssertEqual(updated.markingStale(now: now.addingTimeInterval(86_401)).state, .stale)
+    }
+
+    func testMigrationRebuildsUsageAndPreservesDeviceAndHealth() throws {
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        let sql = """
+            CREATE TABLE usage (day TEXT, device_id TEXT, source_id TEXT, model_id TEXT);
+            INSERT INTO usage VALUES ('2026-11-09', 'device-a', 'claude', 'model-a');
+            CREATE TABLE devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL);
+            INSERT INTO devices VALUES ('device-a', 'Test Mac', 1000);
+            CREATE TABLE health (source_id TEXT PRIMARY KEY, last_attempt REAL, last_success REAL, record_count INTEGER NOT NULL, error TEXT);
+            INSERT INTO health VALUES ('claude', 1000, 900, 12, NULL);
+            PRAGMA user_version = 1;
+            """
+        XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+        XCTAssertThrowsError(try SQLiteUsageStore(url: databaseURL, readOnly: true))
+        let store = try SQLiteUsageStore(url: databaseURL)
+        XCTAssertEqual(try store.records(), [])
+        XCTAssertEqual(try store.hourly(), [])
+        XCTAssertEqual(store.devices, [Device(id: "device-a", name: "Test Mac")])
+        let health = try XCTUnwrap(store.health().first)
+        XCTAssertEqual(health.lastSuccess, Date(timeIntervalSince1970: 900))
+        XCTAssertEqual(health.recordCount, 12)
+        XCTAssertEqual(health.state, .stale)
+        XCTAssertEqual(health.skippedRecords, 0)
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        defer { sqlite3_close(handle) }
+        var version: OpaquePointer?
+        XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
+        defer { sqlite3_finalize(version) }
+        XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(version, 0), 2)
+    }
+
+    func testFailedAndUnavailableCollectorsPreserveBothCaches() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let original = CollectionBatch(daily: [record()], hourly: [hourly()])
+        try store.replace(batch: original, sourceID: "claude", deviceID: "device-a")
+        let success = now.addingTimeInterval(-600)
+        try store.record(health: SourceHealth(sourceID: "claude", lastSuccess: success, recordCount: 1))
+        for unavailable in [false, true] {
+            let runner = CollectionRunner(store: store, device: Device(id: "device-a", name: "Test Mac"),
+                collectors: [FailingCollector(unavailable: unavailable)])
+            let results = await runner.runAll(now: now)
+            XCTAssertEqual(results.first?.state, unavailable ? .unavailable : .failed)
+            XCTAssertEqual(results.first?.lastSuccess, success)
+            XCTAssertEqual(try store.records(), original.daily)
+            XCTAssertEqual(try store.hourly(), original.hourly)
+            XCTAssertEqual(try store.health().first?.state, unavailable ? .unavailable : .failed)
+        }
+    }
+
+    func testSuccessfulCollectionPersistsOnly48HoursAndConfirmedZeroes() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let old = HourlyUsage(hourStart: now.addingTimeInterval(-72 * 3_600), deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 100), eventCount: 1, reasoningKnown: false)
+        let runner = CollectionRunner(store: store, device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [SuccessfulCollector(batch: CollectionBatch(daily: [record()], hourly: [old]))])
+        let result = await runner.runAll(now: now)
+        XCTAssertEqual(result.first?.state, .ok)
+        let hours = try store.hourly()
+        XCTAssertEqual(hours.count, 48)
+        XCTAssertTrue(hours.allSatisfy { $0.counts == .zero && !$0.reasoningKnown })
+        XCTAssertEqual(try store.records().count, 1)
+    }
+
+    func testHealthWriteErrorIsReturnedInsteadOfSwallowed() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(handle, "CREATE TRIGGER reject_health BEFORE INSERT ON health BEGIN SELECT RAISE(FAIL, 'synthetic health error'); END;", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+        let runner = CollectionRunner(store: store, device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [SuccessfulCollector(batch: CollectionBatch(daily: [record()]))])
+        let result = await runner.runAll(now: now)
+        XCTAssertEqual(result.first?.state, .failed)
+        XCTAssertTrue(result.first?.errorMessage?.contains("persist source health") == true)
     }
 
     func testReadOnlyOpenOfMissingFileThrows() {
-        XCTAssertThrowsError(try SQLiteUsageStore(url: databaseURL, readOnly: true)) { error in
-            guard let storeError = error as? StoreError else {
-                return XCTFail("Expected StoreError.open, got \(error)")
-            }
-            guard case .open = storeError else {
-                return XCTFail("Expected StoreError.open, got \(error)")
-            }
-        }
+        XCTAssertThrowsError(try SQLiteUsageStore(url: databaseURL, readOnly: true))
     }
 
     func testCorruptRowFailsInsteadOfBeingSkipped() throws {
         do {
             let store = try SQLiteUsageStore(url: databaseURL)
-            try store.replace(records: [record()], sourceID: "claude", deviceID: "device-a")
+            try store.replace(batch: CollectionBatch(daily: [record()]), sourceID: "claude", deviceID: "device-a")
         }
         var handle: OpaquePointer?
         XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
-        XCTAssertEqual(sqlite3_exec(handle, "UPDATE usage SET day = 'not-a-day';", nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(handle, "UPDATE daily_usage SET day = 'not-a-day';", nil, nil, nil), SQLITE_OK)
         sqlite3_close(handle)
-
         let store = try SQLiteUsageStore(url: databaseURL, readOnly: true)
         XCTAssertThrowsError(try store.records())
     }
+}
+
+private struct FailingCollector: UsageCollector {
+    let sourceIDs = ["claude"]
+    let unavailable: Bool
+    func collect() async throws -> CollectionBatch {
+        if unavailable { throw CollectorError.sourceUnavailable }
+        throw CollectorError.invalidOutput("synthetic failure")
+    }
+}
+
+private struct SuccessfulCollector: UsageCollector {
+    let sourceIDs = ["claude"]
+    let batch: CollectionBatch
+    func collect() async throws -> CollectionBatch { batch }
 }

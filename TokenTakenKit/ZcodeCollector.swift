@@ -6,19 +6,25 @@ public struct ZcodeCollector: UsageCollector {
 
     private let databaseURL: URL
     private let deviceID: String
+    private let timeZone: TimeZone
+    private let now: Date
 
     public init(
         databaseURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".zcode/cli/db/db.sqlite"),
-        deviceID: String
+        deviceID: String,
+        timeZone: TimeZone = .current,
+        now: Date = .now
     ) {
         self.databaseURL = databaseURL
         self.deviceID = deviceID
+        self.timeZone = timeZone
+        self.now = now
     }
 
-    public func collect() async throws -> [UsageRecord] {
+    public func collect() async throws -> CollectionBatch {
         let manager = FileManager.default
-        guard manager.fileExists(atPath: databaseURL.path) else { return [] }
+        guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
 
         // SQLite documents immutable=1 as unsafe while another process can write, so read a temporary snapshot.
         // Source: https://www.sqlite.org/c3ref/open.html#uri-filenames
@@ -52,15 +58,45 @@ public struct ZcodeCollector: UsageCollector {
         defer { sqlite3_close(handle) }
 
         let boundary = try nativeBoundary(db: handle)
-        var totals: [Key: TokenCounts] = [:]
-        try collectNative(db: handle, into: &totals)
-        try collectLegacy(db: handle, boundary: boundary, into: &totals)
-        return totals.map { key, counts in
-            UsageRecord(day: key.day, deviceID: deviceID, sourceID: "zcode", modelID: key.modelID, counts: counts)
-        }.sorted {
+        var events: [Event] = []
+        try collectNative(db: handle, into: &events)
+        try collectLegacy(db: handle, boundary: boundary, into: &events)
+        guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
+        var daily: [Key: UsageRecord] = [:]
+        var hourly: [Date: HourlyUsage] = [:]
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
+        let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
+        var skipped = 0
+        for event in events {
+            guard event.timestamp > 0, !event.modelID.isEmpty else { skipped += 1; continue }
+            let date = Date(timeIntervalSince1970: Double(event.timestamp) / 1_000)
+            let day = UsageDay.string(from: date, in: timeZone)
+            let model = event.modelID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !model.isEmpty, TokenCategory.allCases.allSatisfy({ event.counts[$0] >= 0 }) else {
+                skipped += 1
+                continue
+            }
+            let key = Key(day: day, modelID: model)
+            var record = daily[key] ?? UsageRecord(day: day, timeZoneID: timeZone.identifier, deviceID: deviceID,
+                sourceID: "zcode", modelID: model, rawModelID: event.modelID, counts: .zero)
+            record.rawModelID = min(record.rawModelID, event.modelID)
+            record.counts += event.counts
+            record.eventCount += 1
+            daily[key] = record
+            let hour = calendar.dateInterval(of: .hour, for: date)!.start
+            if hour >= cutoff, hour <= currentHour {
+                var row = hourly[hour] ?? HourlyUsage(hourStart: hour, deviceID: deviceID, sourceID: "zcode", counts: .zero, eventCount: 0, reasoningKnown: true)
+                row.counts += event.counts
+                row.eventCount += 1
+                hourly[hour] = row
+            }
+        }
+        return CollectionBatch(daily: daily.values.sorted {
             if $0.day != $1.day { return $0.day < $1.day }
             return $0.modelID < $1.modelID
-        }
+        }, hourly: hourly.values.sorted { $0.hourStart < $1.hourStart }, skippedRecords: skipped)
     }
 
     private static let nativeCondition = """
@@ -83,7 +119,7 @@ public struct ZcodeCollector: UsageCollector {
         return sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 0)
     }
 
-    private func collectNative(db: OpaquePointer, into totals: inout [Key: TokenCounts]) throws {
+    private func collectNative(db: OpaquePointer, into events: inout [Event]) throws {
         let statement = try prepare(db, """
             SELECT started_at, model_id, input_tokens, output_tokens, reasoning_tokens,
                    cache_read_input_tokens, cache_creation_input_tokens
@@ -94,7 +130,6 @@ public struct ZcodeCollector: UsageCollector {
             let result = sqlite3_step(statement)
             guard result != SQLITE_DONE else { break }
             guard result == SQLITE_ROW else { throw lastError(db) }
-            guard let day = UsageDay.date(milliseconds: sqlite3_column_int64(statement, 0)) else { continue }
             let counts = normalized(
                 input: sqlite3_column_int64(statement, 2),
                 output: sqlite3_column_int64(statement, 3),
@@ -102,12 +137,11 @@ public struct ZcodeCollector: UsageCollector {
                 cacheRead: sqlite3_column_int64(statement, 5),
                 cacheWrite: sqlite3_column_int64(statement, 6)
             )
-            let key = Key(day: day, modelID: text(statement, 1))
-            totals[key, default: .zero] += counts
+            events.append(Event(timestamp: sqlite3_column_int64(statement, 0), modelID: text(statement, 1), counts: counts))
         }
     }
 
-    private func collectLegacy(db: OpaquePointer, boundary: Int64?, into totals: inout [Key: TokenCounts]) throws {
+    private func collectLegacy(db: OpaquePointer, boundary: Int64?, into events: inout [Event]) throws {
         let statement = try prepare(db, """
             SELECT session_id, time_created, rowid,
                    COALESCE(json_extract(data, '$.time.created'), 0),
@@ -180,8 +214,7 @@ public struct ZcodeCollector: UsageCollector {
             }
             for row in retained {
                 let timestamp = row.completed == 0 ? row.created : row.completed
-                guard let day = UsageDay.date(milliseconds: timestamp) else { continue }
-                totals[Key(day: day, modelID: row.modelID), default: .zero] += row.counts
+                events.append(Event(timestamp: timestamp, modelID: row.modelID, counts: row.counts))
             }
         }
     }
@@ -214,8 +247,14 @@ public struct ZcodeCollector: UsageCollector {
     }
 
     private struct Key: Hashable {
-        let day: Date
+        let day: String
         let modelID: String
+    }
+
+    private struct Event {
+        let timestamp: Int64
+        let modelID: String
+        let counts: TokenCounts
     }
 
     private struct LegacyRow {

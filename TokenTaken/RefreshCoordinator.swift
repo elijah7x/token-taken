@@ -26,7 +26,7 @@ final class RefreshCoordinator {
         self.settings = settings
         store = try SQLiteUsageStore(url: AppPaths.databaseURL)
         device = LocalDevice.current()
-        health = store.health()
+        health = try store.health().map { $0.markingStale() }
         lastRefresh = health.compactMap(\.lastSuccess).max()
         updateEngineStatus()
         settings.onRefreshIntervalChange = { [weak self] in
@@ -76,11 +76,11 @@ final class RefreshCoordinator {
         let device = device
         let attemptedAt = Date.now
         let runner = CollectionRunner(store: store, device: device, collectors: collectors)
-        _ = await Task.detached(priority: .utility) {
+        let results = await Task.detached(priority: .utility) {
             await runner.runAll(now: attemptedAt)
         }.value
 
-        health = store.health()
+        health = results.map { $0.markingStale() }
         if health.contains(where: { $0.lastSuccess.map({ $0 >= attemptedAt }) ?? false }) {
             lastRefresh = health.compactMap(\.lastSuccess).max()
         }
@@ -89,15 +89,26 @@ final class RefreshCoordinator {
     private func makeCollectors() -> [any UsageCollector] {
         var collectors: [any UsageCollector] = []
         if case .found(let path) = engineStatus {
-            collectors.append(TokscaleCollector(
-                executableURL: URL(fileURLWithPath: path),
-                configDirectory: AppPaths.tokscaleConfigDirectory,
-                clients: TokscaleCollector.defaultClients,
-                deviceID: device.id
-            ))
+            for client in TokscaleCollector.defaultClients {
+                collectors.append(TokscaleCollector(
+                    executableURL: URL(fileURLWithPath: path),
+                    configDirectory: AppPaths.tokscaleConfigDirectory,
+                    clients: [client],
+                    deviceID: device.id
+                ))
+            }
+        } else {
+            collectors.append(UnavailableEngineCollector())
         }
         collectors.append(ZcodeCollector(deviceID: device.id))
+        collectors.append(PiCollector(deviceID: device.id))
+        collectors.append(OmpCollector(deviceID: device.id))
         return collectors
+    }
+
+    private struct UnavailableEngineCollector: UsageCollector {
+        let sourceIDs = TokscaleCollector.defaultClients.map { $0 == "droid" ? "factory" : $0 }
+        func collect() async throws -> CollectionBatch { throw CollectorError.sourceUnavailable }
     }
 
     private func scheduleLoop(refreshImmediately: Bool) {

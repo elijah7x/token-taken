@@ -93,6 +93,7 @@ private struct SettingsSidebar: View {
                             Image(systemName: section.symbol)
                                 .font(.system(size: 13, weight: .medium))
                                 .frame(width: 18)
+                                .accessibilityHidden(true)
                             Text(section.title)
                             Spacer()
                         }
@@ -151,6 +152,7 @@ private struct SettingsBackButton: View {
             HStack(spacing: 5) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 12, weight: .semibold))
+                    .accessibilityHidden(true)
                 Text("Back")
                     .font(.system(size: 13, weight: .medium))
             }
@@ -400,6 +402,7 @@ private struct InterfaceTransparencySlider: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .help(Text("Solid"))
+                .accessibilityLabel(Text("Solid"))
             Slider(value: $value, in: 0...1)
                 .labelsHidden()
                 .controlSize(.small)
@@ -409,6 +412,7 @@ private struct InterfaceTransparencySlider: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .help(Text("Transparent"))
+                .accessibilityLabel(Text("Transparent"))
         }
         .accessibilityElement(children: .contain)
     }
@@ -447,6 +451,7 @@ private struct SourcesSettingsTab: View {
                         Circle()
                             .fill(Color(hex: source.colorHex))
                             .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
                         Text(verbatim: source.name)
                         Spacer()
                         Text(isDetected(source) ? "Detected" : "Not found")

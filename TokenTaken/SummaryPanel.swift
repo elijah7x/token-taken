@@ -18,10 +18,11 @@ struct SummaryRail: View {
                     .tracking(-1.6)
                     .monospacedDigit()
                     .contentTransition(.numericText())
-                Text(verbatim: "tokens")
+                Text("tokens")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Palette.muted)
             }
+            .accessibilityElement(children: .combine)
             .padding(.top, 6)
             .padding(.bottom, 8)
 
@@ -34,6 +35,7 @@ struct SummaryRail: View {
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
             }
+            .accessibilityElement(children: .combine)
             .help(Text("Price table \(summary.cost.priceTableVersion)"))
 
             if summary.cost.unpricedTokens > 0 {
@@ -60,7 +62,7 @@ struct SummaryRail: View {
                 VStack(spacing: 9) {
                     ForEach(summary.byDevice) { device in
                         HStack(alignment: .firstTextBaseline) {
-                            Text(device.name).foregroundStyle(Palette.muted).lineLimit(1)
+                            Text(verbatim: device.name).foregroundStyle(Palette.muted).lineLimit(1)
                             Spacer(minLength: 8)
                             VStack(alignment: .trailing, spacing: 1) {
                                 Text(TokenFormat.short(device.counts.total)).fontWeight(.semibold)
@@ -89,6 +91,7 @@ private struct CategoryRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Circle().fill(Palette.color(for: category)).frame(width: 7, height: 7)
                 .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(category.title).foregroundStyle(Palette.muted)
                 Text("\(TokenFormat.short(value)) tokens")
@@ -202,7 +205,8 @@ struct BreakdownColumns: View {
     private func row(_ item: Breakdown, color: Color) -> some View {
         HStack(spacing: 8) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text(item.name).lineLimit(1).truncationMode(.tail)
+                .accessibilityHidden(true)
+            Text(verbatim: item.name).lineLimit(1).truncationMode(.tail)
             Spacer(minLength: 8)
             Text(TokenFormat.short(item.counts.total)).fontWeight(.medium)
             Text(Share.percent(item.counts.total, of: summary.total.total))

@@ -121,7 +121,11 @@ func selectStore(synthetic: Bool) -> StoreSelection {
     }
     do {
         let store = try SQLiteUsageStore(url: AppPaths.databaseURL, readOnly: true)
-        return StoreSelection(store: store, now: .now, health: store.health(), warnings: [])
+        let health = try store.health().map { $0.markingStale() }
+        let warnings = health.filter { $0.state != .ok || $0.skippedRecords > 0 }.map {
+            Warning(code: "partial-data", message: "\($0.sourceID): \($0.state.rawValue), \($0.skippedRecords) skipped records")
+        }
+        return StoreSelection(store: store, now: .now, health: health, warnings: warnings)
     } catch {
         writeError("token-taken: could not open usage store")
         exit(1)
@@ -231,6 +235,9 @@ func runSummary(_ arguments: [String]) -> Never {
     lines.append(row("Total", TokenFormat.short(summary.total.total), indent: 0))
     for category in TokenCategory.allCases {
         lines.append(row(category.rawValue, TokenFormat.short(summary.total[category])))
+    }
+    if summary.total.uncategorized > 0 {
+        lines.append(row("uncategorized", TokenFormat.short(summary.total.uncategorized)))
     }
     for (title, groups) in [("By source", summary.bySource), ("By model", summary.byModel), ("By device", summary.byDevice)] {
         lines.append("")

@@ -150,6 +150,7 @@ private struct PeriodBar: View {
             Spacer(minLength: 12)
             HStack(spacing: 7) {
                 Circle().fill(Palette.liveDot).frame(width: 6, height: 6)
+                    .accessibilityHidden(true)
                 // Relative time ("5 min ago") must re-render as the clock advances.
                 TimelineView(.everyMinute) { _ in Text(model.statusText) }
                     .font(.system(size: 12))

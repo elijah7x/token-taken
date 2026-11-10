@@ -12,17 +12,32 @@ public struct TokenCounts: Hashable, Codable, Sendable {
     public var cacheWrite: Int64
     public var output: Int64
     public var reasoning: Int64
+    public var uncategorized: Int64
 
-    public init(input: Int64 = 0, cacheRead: Int64 = 0, cacheWrite: Int64 = 0, output: Int64 = 0, reasoning: Int64 = 0) {
+    public init(input: Int64 = 0, cacheRead: Int64 = 0, cacheWrite: Int64 = 0, output: Int64 = 0, reasoning: Int64 = 0, uncategorized: Int64 = 0) {
         self.input = input
         self.cacheRead = cacheRead
         self.cacheWrite = cacheWrite
         self.output = output
         self.reasoning = reasoning
+        self.uncategorized = uncategorized
     }
 
-    /// Token Taken stores reasoning disjoint from output (statistics.md), so all five categories add up.
-    public var total: Int64 { input + cacheRead + cacheWrite + output + reasoning }
+    private enum CodingKeys: String, CodingKey {
+        case input, cacheRead, cacheWrite, output, reasoning, uncategorized
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        input = try values.decode(Int64.self, forKey: .input)
+        cacheRead = try values.decode(Int64.self, forKey: .cacheRead)
+        cacheWrite = try values.decode(Int64.self, forKey: .cacheWrite)
+        output = try values.decode(Int64.self, forKey: .output)
+        reasoning = try values.decode(Int64.self, forKey: .reasoning)
+        uncategorized = try values.decodeIfPresent(Int64.self, forKey: .uncategorized) ?? 0
+    }
+
+    public var total: Int64 { input + cacheRead + cacheWrite + output + reasoning + uncategorized }
 
     public subscript(_ category: TokenCategory) -> Int64 {
         get {
@@ -53,7 +68,8 @@ public struct TokenCounts: Hashable, Codable, Sendable {
             cacheRead: lhs.cacheRead + rhs.cacheRead,
             cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
             output: lhs.output + rhs.output,
-            reasoning: lhs.reasoning + rhs.reasoning
+            reasoning: lhs.reasoning + rhs.reasoning,
+            uncategorized: lhs.uncategorized + rhs.uncategorized
         )
     }
 
@@ -63,19 +79,50 @@ public struct TokenCounts: Hashable, Codable, Sendable {
 }
 
 public struct UsageRecord: Hashable, Codable, Sendable {
-    /// Start of the UTC day.
-    public var day: Date
+    public var day: String
+    public var timeZoneID: String
     public var deviceID: String
     public var sourceID: String
     public var modelID: String
+    public var rawModelID: String
     public var counts: TokenCounts
+    public var eventCount: Int64
 
-    public init(day: Date, deviceID: String, sourceID: String, modelID: String, counts: TokenCounts) {
+    public init(day: String, timeZoneID: String, deviceID: String, sourceID: String, modelID: String, rawModelID: String? = nil, counts: TokenCounts, eventCount: Int64 = 0) {
         self.day = day
+        self.timeZoneID = timeZoneID
         self.deviceID = deviceID
         self.sourceID = sourceID
         self.modelID = modelID
+        self.rawModelID = rawModelID ?? modelID
         self.counts = counts
+        self.eventCount = eventCount
+    }
+
+    public var dayInterval: DateInterval? {
+        guard let zone = TimeZone(identifier: timeZoneID),
+              let start = UsageDay.date(from: day, in: zone) else { return nil }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        return calendar.dateInterval(of: .day, for: start)
+    }
+}
+
+public struct HourlyUsage: Hashable, Codable, Sendable {
+    public var hourStart: Date
+    public var deviceID: String
+    public var sourceID: String
+    public var counts: TokenCounts
+    public var eventCount: Int64
+    public var reasoningKnown: Bool
+
+    public init(hourStart: Date, deviceID: String, sourceID: String, counts: TokenCounts, eventCount: Int64, reasoningKnown: Bool) {
+        self.hourStart = hourStart
+        self.deviceID = deviceID
+        self.sourceID = sourceID
+        self.counts = counts
+        self.eventCount = eventCount
+        self.reasoningKnown = reasoningKnown
     }
 }
 
@@ -116,14 +163,17 @@ public struct SeriesPoint: Hashable, Sendable, Identifiable {
     public let total: Int64
     public let bySource: [String: Int64]
     public let isFuture: Bool
+    /// False when hourly coverage is missing for any contributing daily device/source.
+    public let isKnown: Bool
 
-    public init(id: Int, start: Date, label: String, total: Int64, bySource: [String: Int64], isFuture: Bool) {
+    public init(id: Int, start: Date, label: String, total: Int64, bySource: [String: Int64], isFuture: Bool, isKnown: Bool = true) {
         self.id = id
         self.start = start
         self.label = label
         self.total = total
         self.bySource = bySource
         self.isFuture = isFuture
+        self.isKnown = isKnown
     }
 }
 
@@ -174,6 +224,7 @@ public struct UsageSummary: Sendable {
 public protocol UsageStore: Sendable {
     /// Throws rather than returning partial data, so callers never report incomplete totals as complete.
     func records() throws -> [UsageRecord]
+    func hourly() throws -> [HourlyUsage]
     var devices: [Device] { get }
 }
 

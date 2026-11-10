@@ -22,10 +22,6 @@ final class ZcodeCollectorTests: XCTestCase {
         Int64(ISO8601DateFormatter().date(from: value)!.timeIntervalSince1970 * 1_000)
     }
 
-    private func day(_ value: String) -> Date {
-        ISO8601DateFormatter().date(from: "\(value)T00:00:00Z")!
-    }
-
     private func execute(_ db: OpaquePointer, _ sql: String) throws {
         var message: UnsafeMutablePointer<Int8>?
         guard sqlite3_exec(db, sql, nil, nil, &message) == SQLITE_OK else {
@@ -149,30 +145,49 @@ final class ZcodeCollectorTests: XCTestCase {
     }
 
     func testCollectsNativeAndLegacyWithBoundaryDeduplicationAndNormalization() async throws {
-        let collector = ZcodeCollector(databaseURL: try makeDatabase(), deviceID: "device-a")
-        let records = try await collector.collect()
+        let collector = ZcodeCollector(databaseURL: try makeDatabase(), deviceID: "device-a", timeZone: TimeZone(identifier: "UTC")!)
+        let batch = try await collector.collect()
+        let records = batch.daily
         XCTAssertEqual(records.count, 3)
         XCTAssertTrue(records.allSatisfy { $0.deviceID == "device-a" && $0.sourceID == "zcode" })
 
-        XCTAssertEqual(records[0].day, day("2026-01-01"))
+        XCTAssertEqual(records[0].day, "2026-01-01")
         XCTAssertEqual(records[0].modelID, "glm-legacy")
         XCTAssertEqual(records[0].counts, TokenCounts(input: 350, cacheRead: 100, cacheWrite: 50, output: 100, reasoning: 20))
 
-        XCTAssertEqual(records[1].day, day("2026-01-02"))
+        XCTAssertEqual(records[1].day, "2026-01-02")
         XCTAssertEqual(records[1].modelID, "glm-copy")
         XCTAssertEqual(records[1].counts, TokenCounts(input: 220, cacheRead: 50, cacheWrite: 30, output: 80, reasoning: 10))
 
-        XCTAssertEqual(records[2].day, day("2026-01-03"))
+        XCTAssertEqual(records[2].day, "2026-01-03")
         XCTAssertEqual(records[2].modelID, "glm-native")
         XCTAssertEqual(records[2].counts, TokenCounts(input: 600, cacheRead: 300, cacheWrite: 100, output: 150, reasoning: 50))
     }
 
-    func testMissingDatabaseReturnsEmpty() async throws {
+    func testLocalDaysAndRealHourlyTimestamps() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-01-03T00:30:00Z")!
+        let collector = ZcodeCollector(databaseURL: try makeDatabase(), deviceID: "device-a",
+            timeZone: TimeZone(identifier: "America/Los_Angeles")!, now: now)
+        let batch = try await collector.collect()
+        XCTAssertEqual(batch.daily.map(\.day), ["2026-01-01", "2026-01-02", "2026-01-02"])
+        XCTAssertTrue(batch.daily.allSatisfy { $0.timeZoneID == "America/Los_Angeles" && $0.rawModelID == $0.modelID && $0.eventCount == 1 })
+        XCTAssertEqual(batch.hourly.count, 3)
+        XCTAssertEqual(batch.hourly.last?.hourStart, ISO8601DateFormatter().date(from: "2026-01-03T00:00:00Z"))
+        XCTAssertTrue(batch.hourly.allSatisfy(\.reasoningKnown))
+        XCTAssertEqual(batch.hourly.reduce(.zero) { $0 + $1.counts }, batch.daily.reduce(.zero) { $0 + $1.counts })
+        XCTAssertEqual(batch.hourly.reduce(Int64(0)) { $0 + $1.eventCount }, 3)
+        XCTAssertEqual(batch.skippedRecords, 0)
+    }
+
+    func testMissingDatabaseThrowsUnavailable() async throws {
         let collector = ZcodeCollector(
             databaseURL: directory.appendingPathComponent("missing.sqlite"),
             deviceID: "device-a"
         )
-        let records = try await collector.collect()
-        XCTAssertEqual(records, [])
+        do {
+            _ = try await collector.collect()
+            XCTFail("Missing data must not replace the cached rows with empty data")
+        } catch CollectorError.sourceUnavailable {
+        }
     }
 }
