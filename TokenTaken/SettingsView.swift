@@ -137,7 +137,7 @@ private struct SettingsSidebar: View {
 private struct SettingsNavigationButton: View {
     let section: SettingsSection
     @Binding var selection: SettingsSection
-    @Environment(\.accessibilityIncreaseContrast) private var increaseContrast
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var isHovered = false
 
     private var isSelected: Bool { selection == section }
@@ -160,7 +160,7 @@ private struct SettingsNavigationButton: View {
             .frame(height: 34)
             .background {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected || isHovered ? Color.primary.opacity(isSelected ? (increaseContrast ? 0.14 : 0.08) : 0.04) : .clear)
+                    .fill(isSelected || isHovered ? Color.primary.opacity(isSelected ? (contrast == .increased ? 0.14 : 0.08) : 0.04) : .clear)
             }
             .contentShape(Rectangle())
         }
