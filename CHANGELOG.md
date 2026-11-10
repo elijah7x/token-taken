@@ -10,3 +10,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Initialized the project specification, architecture, decision records, and contracts.
 - Added a Developer ID release pipeline with hardened-runtime signing, DMG packaging, and notarization; v0.1 updates are manual.
+- Added the app icon (paired measuring-cup TT on a glass plate, with dedicated 16 and 32 pt renders) and a matching menu bar template glyph.

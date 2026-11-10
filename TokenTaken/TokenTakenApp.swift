@@ -46,7 +46,7 @@ struct TokenTakenApp: App {
             withEnvironment(MenuBarContent())
                 .onAppear { refreshCoordinator?.start() }
         } label: {
-            Label(TokenFormat.short(model.todaySummary.total.total), systemImage: "drop.fill")
+            Label(TokenFormat.short(model.todaySummary.total.total), image: "MenuBarGlyph")
                 .labelStyle(.titleAndIcon)
                 .monospacedDigit()
         }
