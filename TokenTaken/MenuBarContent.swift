@@ -6,6 +6,7 @@ import TokenTakenKit
 /// Uses the same summary semantics as the main window.
 struct MenuBarContent: View {
     @Environment(AppModel.self) private var model
+    @Environment(MainWindowRouter.self) private var router
     @Environment(\.openWindow) private var openWindow
 
     private var today: UsageSummary { model.todaySummary }
@@ -58,12 +59,26 @@ struct MenuBarContent: View {
                         .foregroundStyle(Palette.muted)
                 }
                 Spacer(minLength: 12)
-                Button("Open Token Taken") {
-                    openWindow(id: MainWindowView.windowID)
-                    NSApplication.shared.activate()
+                HStack(spacing: 6) {
+                    Button {
+                        router.route = .settings
+                        openWindow(id: MainWindowView.windowID)
+                        NSApplication.shared.activate()
+                    } label: {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                    .help(Text("Settings"))
+                    .accessibilityLabel(Text("Settings"))
+                    Button("Open Token Taken") {
+                        openWindow(id: MainWindowView.windowID)
+                        NSApplication.shared.activate()
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
                 }
-                .buttonStyle(.glass)
-                .controlSize(.small)
             }
         }
         .padding(14)

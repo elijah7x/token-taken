@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TokenTakenKit
 
@@ -6,6 +7,8 @@ struct TokenTakenApp: App {
     @State private var settings: AppSettings
     @State private var model: AppModel
     @State private var refreshCoordinator: RefreshCoordinator?
+    @State private var router = MainWindowRouter()
+    @Environment(\.openWindow) private var openWindow
 
     init() {
         let settings = AppSettings()
@@ -32,7 +35,8 @@ struct TokenTakenApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: MainWindowView.windowID) {
+        // A single-instance Window, so openWindow (Cmd-, and the menu bar) focuses it instead of adding another.
+        Window(Text(verbatim: "Token Taken"), id: MainWindowView.windowID) {
             withEnvironment(MainWindowView())
                 .frame(minWidth: 900, minHeight: 620)
                 .task { refreshCoordinator?.start() }
@@ -41,6 +45,16 @@ struct TokenTakenApp: App {
         .windowBackgroundDragBehavior(.enabled)
         .defaultSize(width: 1100, height: 720)
         .windowResizability(.contentMinSize)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    router.route = .settings
+                    openWindow(id: MainWindowView.windowID)
+                    NSApplication.shared.activate()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
 
         MenuBarExtra {
             withEnvironment(MenuBarContent())
@@ -51,10 +65,6 @@ struct TokenTakenApp: App {
                 .monospacedDigit()
         }
         .menuBarExtraStyle(.window)
-
-        Settings {
-            withEnvironment(SettingsView())
-        }
     }
 
     @ViewBuilder
@@ -64,10 +74,12 @@ struct TokenTakenApp: App {
                 .environment(settings)
                 .environment(model)
                 .environment(refreshCoordinator)
+                .environment(router)
         } else {
             content
                 .environment(settings)
                 .environment(model)
+                .environment(router)
         }
     }
 }

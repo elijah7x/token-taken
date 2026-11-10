@@ -41,6 +41,22 @@
         }
       }
     },
+    "%@ tokens, %@ of total" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tokens, %@ of total"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tokens，占总量 %@"
+          }
+        }
+      }
+    },
     "%@: %@ tokens" : {
       "localizations" : {
         "zh-Hans" : {
@@ -141,6 +157,16 @@
         }
       }
     },
+    "Back" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "返回"
+          }
+        }
+      }
+    },
     "Binary" : {
       "localizations" : {
         "zh-Hans" : {
@@ -157,16 +183,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按 Token 降序"
-          }
-        }
-      }
-    },
-    "CONDENSATION FIELD" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "凝露视场"
           }
         }
       }
@@ -197,6 +213,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "缓存写入"
+          }
+        }
+      }
+    },
+    "Categories" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "类别"
           }
         }
       }
@@ -286,7 +312,37 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "凝雨之窗"
+            "value" : "凝露"
+          }
+        }
+      }
+    },
+    "CONDENSATION FIELD" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "凝露视场"
+          }
+        }
+      }
+    },
+    "Confluence" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "汇流"
+          }
+        }
+      }
+    },
+    "Confluence of sources into categories" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源汇入类别"
           }
         }
       }
@@ -367,6 +423,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "通用"
+          }
+        }
+      }
+    },
+    "iCloud sync" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 同步"
+          }
+        }
+      }
+    },
+    "iCloud sync is in development" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 同步正在开发"
           }
         }
       }
@@ -467,6 +543,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "许可证"
+          }
+        }
+      }
+    },
+    "Main view" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主视图"
           }
         }
       }
@@ -631,6 +717,22 @@
         }
       }
     },
+    "Other" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他"
+          }
+        }
+      }
+    },
     "Output" : {
       "localizations" : {
         "zh-Hans" : {
@@ -741,6 +843,36 @@
         }
       }
     },
+    "Reservoir" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "总量"
+          }
+        }
+      }
+    },
+    "Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置"
+          }
+        }
+      }
+    },
+    "Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置…"
+          }
+        }
+      }
+    },
     "Source mist and daily usage rain trails" : {
       "localizations" : {
         "zh-Hans" : {
@@ -801,16 +933,6 @@
         }
       }
     },
-    "TOTAL TOKENS" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "TOTAL TOKENS / 总用量"
-          }
-        }
-      }
-    },
     "The bundled token-taken tool was not found." : {
       "localizations" : {
         "zh-Hans" : {
@@ -861,16 +983,6 @@
         }
       }
     },
-    "Token Taken reads agent logs on this Mac. Choose sources in Settings, or wait for the first collection to finish." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Token Taken 读取这台 Mac 上的 Agent 日志。可以在设置中选择来源，或等待首次采集完成。"
-          }
-        }
-      }
-    },
     "Token mix" : {
       "localizations" : {
         "zh-Hans" : {
@@ -881,12 +993,38 @@
         }
       }
     },
+    "Token Taken reads supported agent logs on this Mac. Use Refresh now in Settings, or wait for the first collection to finish." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken reads supported agent logs on this Mac. Use Refresh now in Settings, or wait for the first collection to finish."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken 读取这台 Mac 上受支持的 Agent 日志。可以在设置中点击“立即刷新”，或等待首次采集完成。"
+          }
+        }
+      }
+    },
     "Top: %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "最多：%@"
+          }
+        }
+      }
+    },
+    "TOTAL TOKENS" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "TOTAL TOKENS / 总用量"
           }
         }
       }
@@ -951,26 +1089,6 @@
         }
       }
     },
-    "iCloud sync" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud 同步"
-          }
-        }
-      }
-    },
-    "iCloud sync is in development" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud 同步正在开发"
-          }
-        }
-      }
-    },
     "• Hourly UTC buckets contain token and event counts with a random device ID." : {
       "localizations" : {
         "zh-Hans" : {
@@ -997,6 +1115,150 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "• 同步由用户主动开启，仅包含聚合用量。"
+          }
+        }
+      }
+    },
+    "Appearance" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Appearance"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "外观"
+          }
+        }
+      }
+    },
+    "Detected" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detected"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已检测到"
+          }
+        }
+      }
+    },
+    "How much shows through the window" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How much shows through the window"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "调整桌面透过窗口显示的程度"
+          }
+        }
+      }
+    },
+    "Interface transparency" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Interface transparency"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "界面透明度"
+          }
+        }
+      }
+    },
+    "Liquid Glass" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Liquid Glass"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "液态玻璃"
+          }
+        }
+      }
+    },
+    "Manual" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manual"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动"
+          }
+        }
+      }
+    },
+    "Solid" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Solid"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不透明"
+          }
+        }
+      }
+    },
+    "Theme" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Theme"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主题"
+          }
+        }
+      }
+    },
+    "Transparent" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transparent"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "透明"
           }
         }
       }

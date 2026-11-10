@@ -7,6 +7,8 @@ import TokenTakenKit
 struct SummaryRail: View {
     let summary: UsageSummary
 
+    @Environment(AppSettings.self) private var settings
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Eyebrow("TOTAL TOKENS")
@@ -51,7 +53,10 @@ struct SummaryRail: View {
                 }
             }
 
-            RailSection(title: "Devices", note: "Drop area ∝ tokens") {
+            RailSection(
+                title: "Devices",
+                note: settings.heroStyle == .condensation ? "Drop area ∝ tokens" : nil
+            ) {
                 VStack(spacing: 9) {
                     ForEach(summary.byDevice) { device in
                         HStack(alignment: .firstTextBaseline) {
@@ -112,7 +117,7 @@ private struct CategoryRow: View {
 
 private struct RailSection<Content: View>: View {
     let title: LocalizedStringKey
-    let note: LocalizedStringKey
+    let note: LocalizedStringKey?
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -128,16 +133,18 @@ private struct RailSection<Content: View>: View {
 
 struct SectionHead: View {
     let title: LocalizedStringKey
-    let note: LocalizedStringKey
+    let note: LocalizedStringKey?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title).font(.system(size: 12, weight: .semibold))
             Spacer(minLength: 8)
-            Text(note)
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.muted)
-                .lineLimit(1)
+            if let note {
+                Text(note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(1)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)

@@ -94,20 +94,92 @@ enum Palette {
 }
 
 struct WindowBackdrop: View {
+    let theme: AppTheme
+    let transparency: Double
+
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    private var opacity: Double {
+        theme == .liquidGlass ? 1 - min(max(transparency, 0), 1) : 1
+    }
+
+    private var isTransparent: Bool {
+        theme == .liquidGlass && !reduceTransparency
+    }
+
+    /// Matches Tivano's stock scrim at the midpoint, clear glass at 0 opacity,
+    /// and a solid base at 1, with a linear ramp on either side.
+    private static func scrim(for opacity: Double, isDark: Bool) -> Double {
+        let stock = isDark ? 0.26 : 0.18
+        let value = min(max(opacity, 0), 1)
+        return value <= 0.5
+            ? stock * (value / 0.5)
+            : stock + (1 - stock) * ((value - 0.5) / 0.5)
+    }
 
     var body: some View {
-        MeshGradient(
-            width: 3,
-            height: 3,
-            points: [
-                [0, 0], [0.55, 0], [1, 0],
-                [0, 0.5], [0.45, 0.55], [1, 0.45],
-                [0, 1], [0.5, 1], [1, 1],
-            ],
-            colors: Palette.meshColors(scheme)
-        )
+        Group {
+            if !isTransparent || opacity >= 0.98 {
+                Palette.solid
+            } else {
+                let shape = ContainerRelativeShape()
+                ZStack {
+                    shape
+                        .fill(.clear)
+                        .glassEffect(in: shape)
+                    MeshGradient(
+                        width: 3,
+                        height: 3,
+                        points: [
+                            [0, 0], [0.55, 0], [1, 0],
+                            [0, 0.5], [0.45, 0.55], [1, 0.45],
+                            [0, 1], [0.5, 1], [1, 1],
+                        ],
+                        colors: Palette.meshColors(scheme)
+                    )
+                    .opacity(opacity)
+                    shape
+                        .fill(scheme == .dark ? Color.black : Color.white)
+                        .opacity(Self.scrim(for: opacity, isDark: scheme == .dark))
+                }
+            }
+        }
         .ignoresSafeArea()
+        .background { BackdropWindowConfigurator(isTransparent: isTransparent) }
+    }
+}
+
+private struct BackdropWindowConfigurator: NSViewRepresentable {
+    let isTransparent: Bool
+
+    func makeNSView(context: Context) -> BackdropWindowView {
+        let view = BackdropWindowView()
+        view.isTransparent = isTransparent
+        return view
+    }
+
+    func updateNSView(_ view: BackdropWindowView, context: Context) {
+        view.isTransparent = isTransparent
+    }
+}
+
+private final class BackdropWindowView: NSView {
+    var isTransparent = false {
+        didSet { applyWindowAppearance() }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyWindowAppearance()
+    }
+
+    private func applyWindowAppearance() {
+        guard let window else { return }
+        window.isOpaque = !isTransparent
+        window.backgroundColor = isTransparent
+            ? NSColor.white.withAlphaComponent(0.000001)
+            : NSColor(Palette.solid)
     }
 }
 

@@ -1,25 +1,65 @@
+import Observation
 import SwiftUI
 import TokenTakenKit
 
-/// Two-column Condensation window: summary rail on the left, the condensation
-/// field with source and model lists on the right.
+@Observable
+@MainActor
+final class MainWindowRouter {
+    enum Route: Equatable {
+        case dashboard
+        case settings
+    }
+
+    var route: Route = .dashboard
+}
+
+/// Two-column main window: summary rail on the left, the selected hero view
+/// with source and model lists on the right.
 struct MainWindowView: View {
     static let windowID = "main"
 
     @Environment(AppModel.self) private var model
+    @Environment(AppSettings.self) private var settings
+    @Environment(MainWindowRouter.self) private var router
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        Group {
+            switch router.route {
+            case .dashboard:
+                dashboard
+                    .transition(.opacity)
+            case .settings:
+                SettingsView()
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { WindowBackdrop(theme: settings.theme, transparency: settings.interfaceTransparency) }
+        .ignoresSafeArea(.container, edges: .top)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: router.route)
+    }
+
+    private var dashboard: some View {
         VStack(spacing: 0) {
             TitleRow()
             PeriodBar()
             Rectangle().fill(Palette.hairline).frame(height: 1)
             HStack(spacing: 0) {
-                ScrollView {
-                    SummaryRail(summary: model.summary)
-                        .padding(.horizontal, 22)
-                        .padding(.vertical, 22)
+                VStack(spacing: 0) {
+                    ScrollView {
+                        SummaryRail(summary: model.summary)
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 22)
+                    }
+                    .scrollIndicators(.never)
+                    .frame(maxHeight: .infinity)
+
+                    RailSettingsButton()
+                        .padding(.leading, 22)
+                        .padding(.top, 6)
+                        .padding(.bottom, 18)
                 }
-                .scrollIndicators(.never)
                 .frame(width: 284)
 
                 Rectangle().fill(Palette.hairline).frame(width: 1)
@@ -29,14 +69,21 @@ struct MainWindowView: View {
                         ContentUnavailableView {
                             Label("No usage collected yet", systemImage: "drop")
                         } description: {
-                            Text("Token Taken reads agent logs on this Mac. Choose sources in Settings, or wait for the first collection to finish.")
+                            Text("Token Taken reads supported agent logs on this Mac. Use Refresh now in Settings, or wait for the first collection to finish.")
                         } actions: {
-                            SettingsLink { Text("Open Settings…") }
+                            Button("Open Settings…") { router.route = .settings }
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        CondensationView(summary: model.summary)
-                            .frame(maxWidth: .infinity, minHeight: 340, maxHeight: .infinity)
+                        Group {
+                            switch settings.heroStyle {
+                            case .confluence:
+                                ConfluenceView(summary: model.summary)
+                            case .condensation:
+                                CondensationView(summary: model.summary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 340, maxHeight: .infinity)
                         BreakdownColumns(summary: model.summary)
                     }
                 }
@@ -45,28 +92,50 @@ struct MainWindowView: View {
                 .padding(.bottom, 18)
             }
         }
-        .background { WindowBackdrop() }
-        .ignoresSafeArea(.container, edges: .top)
     }
 }
 
-/// Sits in the hidden title bar band, level with the traffic lights.
+/// Keeps the hidden title bar band clear for the traffic lights.
 private struct TitleRow: View {
     var body: some View {
-        HStack(spacing: 12) {
-            Text(verbatim: "Token Taken")
-                .font(.system(size: 13, weight: .semibold))
-            Rectangle().fill(Palette.hairline).frame(width: 1, height: 12)
-            Text("Condensation")
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.muted)
-            Spacer(minLength: 0)
+        Color.clear
+            .frame(height: 30)
+            .padding(.top, 2)
+    }
+}
+
+private struct RailSettingsButton: View {
+    @Environment(MainWindowRouter.self) private var router
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            router.route = .settings
+        } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(isHovered ? Color.primary : Palette.muted)
+                .frame(width: 30, height: 30)
+                .scaleEffect(!reduceMotion && isHovered ? 1.06 : 1)
+                .contentShape(Rectangle())
         }
-        // Leaves room for the traffic lights drawn over the content.
-        .padding(.leading, 84)
-        .padding(.trailing, 20)
-        .frame(height: 30)
-        .padding(.top, 2)
+        .buttonStyle(RailSettingsButtonStyle(reduceMotion: reduceMotion))
+        .onHover { isHovered = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHovered)
+        .help(Text("Settings"))
+        .accessibilityLabel(Text("Settings"))
+    }
+}
+
+private struct RailSettingsButtonStyle: ButtonStyle {
+    let reduceMotion: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.65 : 1)
+            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.92 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
 

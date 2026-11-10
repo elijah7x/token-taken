@@ -64,7 +64,7 @@ final class RefreshCoordinator {
 
     func refresh() async {
         updateEngineStatus()
-        guard !settings.useSyntheticData, !isRefreshing else { return }
+        guard !isRefreshing else { return }
 
         isRefreshing = true
         defer {
@@ -88,18 +88,15 @@ final class RefreshCoordinator {
 
     private func makeCollectors() -> [any UsageCollector] {
         var collectors: [any UsageCollector] = []
-        let clients = settings.enabledTokscaleClients
-        if !clients.isEmpty, case .found(let path) = engineStatus {
+        if case .found(let path) = engineStatus {
             collectors.append(TokscaleCollector(
                 executableURL: URL(fileURLWithPath: path),
                 configDirectory: AppPaths.tokscaleConfigDirectory,
-                clients: clients,
+                clients: TokscaleCollector.defaultClients,
                 deviceID: device.id
             ))
         }
-        if settings.enabledSources.contains("zcode") {
-            collectors.append(ZcodeCollector(deviceID: device.id))
-        }
+        collectors.append(ZcodeCollector(deviceID: device.id))
         return collectors
     }
 
@@ -112,6 +109,7 @@ final class RefreshCoordinator {
             }
             while !Task.isCancelled {
                 let interval = self.settings.refreshIntervalMinutes
+                guard interval > 0 else { break }
                 do {
                     try await Task.sleep(for: .seconds(interval * 60))
                 } catch {

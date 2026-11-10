@@ -23,35 +23,29 @@ final class AppModel {
     private(set) var readError: String?
 
     var isEmpty: Bool {
-        if let settings {
-            if settings.useSyntheticData { return false }
+        if settings != nil {
             return realStore?.isEmpty ?? true
         }
         return (try? fixedStore?.records().isEmpty) ?? true
     }
 
     var statusText: LocalizedStringKey {
-        if settings?.useSyntheticData == true || (settings == nil && fixedStore is SyntheticUsageStore) {
-            return "Synthetic data"
-        }
         if storageError != nil || readError != nil {
             return "Storage unavailable"
         }
-        guard let settings, let refreshCoordinator else {
+        guard let refreshCoordinator else {
             return "Not collected yet"
         }
         if refreshCoordinator.isRefreshing {
             return "Collecting…"
         }
-        if !settings.enabledTokscaleClients.isEmpty {
-            switch refreshCoordinator.engineStatus {
-            case .found:
-                break
-            case .missing:
-                return "Collection engine not found"
-            case .invalidOverride:
-                return "Invalid engine override"
-            }
+        switch refreshCoordinator.engineStatus {
+        case .found:
+            break
+        case .missing:
+            return "Collection engine not found"
+        case .invalidOverride:
+            return "Invalid engine override"
         }
         if let lastRefresh = refreshCoordinator.lastRefresh {
             // Collection finishes a moment after the view samples `.now`; never phrase it as future time.
@@ -66,7 +60,6 @@ final class AppModel {
     @ObservationIgnored private let settings: AppSettings?
     @ObservationIgnored private let fixedStore: (any UsageStore)?
     @ObservationIgnored private let realStore: SQLiteUsageStore?
-    @ObservationIgnored private let syntheticStore: SyntheticUsageStore
     @ObservationIgnored private let emptyStore: EmptyUsageStore
     @ObservationIgnored private weak var refreshCoordinator: RefreshCoordinator?
 
@@ -74,7 +67,6 @@ final class AppModel {
         settings = nil
         fixedStore = store
         realStore = nil
-        syntheticStore = SyntheticUsageStore()
         emptyStore = EmptyUsageStore()
         storageError = nil
         selectedPeriod = period
@@ -86,16 +78,12 @@ final class AppModel {
         self.settings = settings
         fixedStore = nil
         realStore = store
-        let syntheticStore = SyntheticUsageStore()
-        self.syntheticStore = syntheticStore
         let emptyStore = EmptyUsageStore()
         self.emptyStore = emptyStore
         self.storageError = storageError
         selectedPeriod = period
         let initialStore: any UsageStore
-        if settings.useSyntheticData {
-            initialStore = syntheticStore
-        } else if let store {
+        if let store {
             initialStore = store
         } else {
             initialStore = emptyStore
@@ -138,8 +126,7 @@ final class AppModel {
     }
 
     private var store: any UsageStore {
-        if let settings {
-            if settings.useSyntheticData { return syntheticStore }
+        if settings != nil {
             if let realStore { return realStore }
             return emptyStore
         }

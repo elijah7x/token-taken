@@ -3,18 +3,32 @@ import Observation
 import ServiceManagement
 import TokenTakenKit
 
+enum AppTheme: String, CaseIterable {
+    case liquidGlass = "liquid-glass"
+}
+
 @Observable
 @MainActor
 final class AppSettings {
-    static let refreshIntervalOptions = [5, 15, 30, 60]
-    static var defaultEnabledSources: Set<String> {
-        Set(SourceCatalog.all.map(\.id)).union(["factory"])
+    enum HeroStyle: String, CaseIterable {
+        case confluence
+        case condensation
     }
 
-    var enabledSources: Set<String> {
+    static let refreshIntervalOptions = [0, 5, 15, 30, 60]
+    static let defaultInterfaceTransparency = 0.5
+
+    var theme: AppTheme {
         didSet {
-            guard enabledSources != oldValue else { return }
-            defaults.set(enabledSources.sorted(), forKey: Keys.enabledSources)
+            guard theme != oldValue else { return }
+            defaults.set(theme.rawValue, forKey: Keys.theme)
+        }
+    }
+
+    var interfaceTransparency: Double {
+        didSet {
+            guard interfaceTransparency != oldValue else { return }
+            defaults.set(interfaceTransparency, forKey: Keys.interfaceTransparency)
         }
     }
 
@@ -33,17 +47,17 @@ final class AppSettings {
         }
     }
 
-    var useSyntheticData: Bool {
-        didSet {
-            guard useSyntheticData != oldValue else { return }
-            defaults.set(useSyntheticData, forKey: Keys.useSyntheticData)
-        }
-    }
-
     var syncEnabled: Bool {
         didSet {
             guard syncEnabled != oldValue else { return }
             defaults.set(syncEnabled, forKey: Keys.syncEnabled)
+        }
+    }
+
+    var heroStyle: HeroStyle {
+        didSet {
+            guard heroStyle != oldValue else { return }
+            defaults.set(heroStyle.rawValue, forKey: Keys.heroStyle)
         }
     }
 
@@ -77,35 +91,32 @@ final class AppSettings {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored var onRefreshIntervalChange: (() -> Void)?
 
-    var enabledTokscaleClients: [String] {
-        TokscaleCollector.defaultClients.filter { client in
-            enabledSources.contains(client == "droid" ? "factory" : client)
-        }
-    }
-
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         defaults.register(defaults: [
-            Keys.enabledSources: Self.defaultEnabledSources.sorted(),
+            Keys.theme: AppTheme.liquidGlass.rawValue,
+            Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
             Keys.refreshIntervalMinutes: 15,
-            Keys.useSyntheticData: false,
             Keys.syncEnabled: false,
+            Keys.heroStyle: HeroStyle.confluence.rawValue,
         ])
 
-        enabledSources = Set(defaults.stringArray(forKey: Keys.enabledSources) ?? Self.defaultEnabledSources.sorted())
+        theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
+        interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
         let storedInterval = defaults.integer(forKey: Keys.refreshIntervalMinutes)
         refreshIntervalMinutes = Self.refreshIntervalOptions.contains(storedInterval) ? storedInterval : 15
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
-        useSyntheticData = defaults.bool(forKey: Keys.useSyntheticData)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
+        heroStyle = HeroStyle(rawValue: defaults.string(forKey: Keys.heroStyle) ?? "") ?? .confluence
         launchAtLoginStatus = SMAppService.mainApp.status
     }
 
     private enum Keys {
-        static let enabledSources = "enabledSources"
+        static let theme = "theme"
+        static let interfaceTransparency = "interfaceTransparency"
         static let refreshIntervalMinutes = "refreshIntervalMinutes"
         static let tokscalePathOverride = "tokscalePathOverride"
-        static let useSyntheticData = "useSyntheticData"
         static let syncEnabled = "syncEnabled"
+        static let heroStyle = "heroStyle"
     }
 }
