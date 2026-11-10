@@ -1,6 +1,6 @@
 # Token Taken architecture
 
-Status: pre-alpha. The macOS app and CLI share a local SQLite collection and aggregation pipeline; sync transport remains unimplemented.
+Status: pre-alpha. The macOS app and CLI share a local SQLite collection and aggregation pipeline. Opt-in iCloud Drive sync is implemented; real multi-Mac acceptance is pending.
 
 ## Platform choices
 
@@ -54,9 +54,9 @@ The engine interface is selected by [ADR-0003](decisions/0003-usage-engine.md), 
 - SQLite schema version 2 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
 - Rebuilds usage-cache tables when migrating an older version, retaining devices and health metadata and marking health stale. Rejects newer unknown schemas. The CLI opens read-only and asks the app to migrate an old cache.
 - Replaces both usage tables for one source/device in a single transaction. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()` and `hourly()` throw on failed reads.
-- Preserves cached rows and last success on failed/unavailable collection. Source health tracks skipped records and `ok`, `unavailable`, `failed`, and `stale` states; health read/write errors remain visible through throwing reads and runner results.
+- Preserves cached rows and last success on failed/unavailable collection. Source health tracks skipped records and `ok`, `unavailable`, `failed`, `stale`, and `notInstalled` states; health read/write errors remain visible through throwing reads and runner results.
 
-See ADR-0005 for the rebuild policy. Sync cursors, tombstones, and transport metadata are not yet implemented.
+See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merge rules follow `docs/contracts/sync.md`.
 
 ### Pricing
 
