@@ -18,7 +18,10 @@ final class RefreshCoordinator {
     private(set) var engineStatus: EngineStatus = .missing
     private(set) var remoteSnapshots: [RemoteDeviceSnapshot] = []
     private(set) var iCloudAvailable = ICloudSync.defaultRoot != nil
-    private(set) var syncFailed = false
+    /// Read and write failures are tracked separately so a later success of one clears only its own failure.
+    private(set) var syncReadFailed = false
+    private(set) var syncWriteFailed = false
+    var syncFailed: Bool { syncReadFailed || syncWriteFailed }
 
     @ObservationIgnored let store: SQLiteUsageStore
     @ObservationIgnored var onChange: (() -> Void)?
@@ -45,7 +48,7 @@ final class RefreshCoordinator {
                 Task { [weak self] in await self?.readRemotes() }
             } else {
                 self.remoteSnapshots = []
-                self.syncFailed = false
+                self.syncReadFailed = false; self.syncWriteFailed = false
                 self.onChange?()
             }
         }
@@ -119,13 +122,18 @@ final class RefreshCoordinator {
         guard settings.syncEnabled else { return }
         guard let snapshots else {
             markRemotesUnavailable()
-            syncFailed = true
+            syncReadFailed = true
             onChange?()
             return
         }
+        syncReadFailed = false
         let previous = Dictionary(remoteSnapshots.map { ($0.device.id, $0) }, uniquingKeysWith: { first, _ in first })
         remoteSnapshots = snapshots.map { snapshot in
-            guard snapshot.status.state != .ok, let cached = previous[snapshot.device.id] else { return snapshot }
+            // A stale snapshot still carries its newest data; fall back to the cache only when this read got none.
+            guard snapshot.status.state == .unavailable || snapshot.status.state == .partial,
+                  let cached = previous[snapshot.device.id],
+                  (cached.status.lastWrite ?? .distantPast) >= (snapshot.status.lastWrite ?? .distantPast) || snapshot.daily.isEmpty
+            else { return snapshot }
             return RemoteDeviceSnapshot(device: cached.device, daily: cached.daily, hourly: cached.hourly, status: RemoteDeviceStatus(
                 deviceID: cached.device.id, displayName: cached.device.name,
                 lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state))
@@ -149,7 +157,7 @@ final class RefreshCoordinator {
         }.value
         guard settings.syncEnabled else { return }
         guard case .success(let snapshot) = publication else {
-            syncFailed = true
+            syncWriteFailed = true
             return
         }
         let health = health
@@ -158,7 +166,7 @@ final class RefreshCoordinator {
             guard let self, self.settings.syncEnabled else { return }
             self.iCloudAvailable = ICloudSync.defaultRoot != nil
             guard let root = ICloudSync.defaultRoot else {
-                self.syncFailed = true
+                self.syncWriteFailed = true
                 self.onChange?()
                 return
             }
@@ -166,7 +174,7 @@ final class RefreshCoordinator {
             let succeeded = await self.syncWorker.write(store: snapshot, device: self.device, root: root,
                 appVersion: version, health: health)
             guard self.settings.syncEnabled else { return }
-            self.syncFailed = !succeeded
+            self.syncWriteFailed = !succeeded
             await self.readRemotes()
         }
     }

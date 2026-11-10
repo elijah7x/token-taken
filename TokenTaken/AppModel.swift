@@ -57,12 +57,8 @@ final class AppModel {
                 || (settings?.syncEnabled == true && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false)))
     }
 
-    var isEmpty: Bool {
-        if settings != nil {
-            return summary.total.total == 0 && ((try? store.records().isEmpty) ?? true)
-        }
-        return (try? fixedStore?.records().isEmpty) ?? true
-    }
+    /// Computed when data loads, never from a view body: checking the store reads every record.
+    private(set) var isEmpty = true
 
     var statusText: LocalizedStringKey {
         if storageError != nil || readError != nil {
@@ -107,6 +103,7 @@ final class AppModel {
         selectedPeriod = period
         let loaded = Self.load(store, period: period)
         (summary, todaySummary, last7, readError) = (loaded.summary, loaded.today, loaded.last7, loaded.error)
+        isEmpty = Self.storeIsEmpty(store, summary: loaded.summary)
     }
 
     init(settings: AppSettings, store: SQLiteUsageStore?, period: Period = .month, storageError: String? = nil) {
@@ -125,6 +122,12 @@ final class AppModel {
         }
         let loaded = Self.load(initialStore, period: period)
         (summary, todaySummary, last7, readError) = (loaded.summary, loaded.today, loaded.last7, loaded.error)
+        isEmpty = Self.storeIsEmpty(initialStore, summary: loaded.summary)
+    }
+
+    private static func storeIsEmpty(_ store: any UsageStore, summary: UsageSummary) -> Bool {
+        guard summary.total.total == 0 else { return false }
+        return (try? store.records().isEmpty) ?? true
     }
 
     func attach(to refreshCoordinator: RefreshCoordinator) {
@@ -139,6 +142,7 @@ final class AppModel {
                 try aggregator.summary(for: .day),
                 try aggregator.dailyTotals(lastDays: 7)
             )
+            isEmpty = Self.storeIsEmpty(store, summary: summary)
             readError = nil
         } catch {
             readError = error.localizedDescription
