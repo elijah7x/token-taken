@@ -122,6 +122,11 @@ public enum UsageCSV {
         return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 
+    private static func escapedText(_ value: String) -> String {
+        guard let first = value.first, "=+-@\t\r".contains(first) else { return escaped(value) }
+        return escaped("'" + value)
+    }
+
     public static func fields(_ row: ExportRow) -> [String] {
         [
             row.day, row.timeZoneID, row.deviceID, row.sourceID, row.modelID, row.rawModelID,
@@ -131,7 +136,9 @@ public enum UsageCSV {
     }
 
     public static func line(_ row: ExportRow) -> String {
-        fields(row).map(escaped).joined(separator: ",")
+        fields(row).enumerated().map { index, field in
+            index < 6 ? escapedText(field) : escaped(field)
+        }.joined(separator: ",")
     }
 
     /// Header plus one line per row, each terminated by CRLF as RFC 4180 requires.
@@ -194,7 +201,15 @@ public enum UsageExport {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let filtered = FilteredUsageStore(store: store, filter: filter, timeZone: timeZone)
-        let aggregator = UsageAggregator(store: filtered, calendar: calendar, now: now, priceTable: priceTable)
+        var effectiveNow = now
+        if filter.hasDateRange, filter.until == nil {
+            // An open-ended range must include records dated after today.
+            effectiveNow = try filtered.records().reduce(now) { latest, record in
+                guard let day = UsageDay.date(from: record.day, in: timeZone) else { return latest }
+                return max(latest, day)
+            }
+        }
+        let aggregator = UsageAggregator(store: filtered, calendar: calendar, now: effectiveNow, priceTable: priceTable)
 
         guard filter.hasDateRange else {
             let summary = try aggregator.summary(for: period)
@@ -207,11 +222,11 @@ public enum UsageExport {
         }
 
         let all = try aggregator.summary(for: .all)
-        let tomorrow = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))!
+        let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: effectiveNow))!
         let start = filter.since.flatMap { UsageDay.date(from: $0, in: timeZone) } ?? all.start
         // `until` is inclusive, so the aggregator's exclusive end is the following day.
         let end = filter.until.flatMap { UsageDay.date(from: $0, in: timeZone) }
-            .flatMap { calendar.date(byAdding: .day, value: 1, to: $0) } ?? tomorrow
+            .flatMap { calendar.date(byAdding: .day, value: 1, to: $0) } ?? nextDay
         let summary = UsageSummary(
             period: .all, start: min(start, end), end: end, total: all.total,
             bySource: all.bySource, byModel: all.byModel, byDevice: all.byDevice,

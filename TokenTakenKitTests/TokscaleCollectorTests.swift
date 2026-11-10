@@ -127,16 +127,20 @@ final class TokscaleCollectorTests: XCTestCase {
         try Data(script.utf8).write(to: scriptURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
 
+        let availability = AvailabilityProbe(available: ["claude", "codex"])
         let collector = TokscaleCollector(
             executableURL: scriptURL,
             configDirectory: dir.appendingPathComponent("config", isDirectory: true),
             clients: ["claude", "codex", "kimi"],
             deviceID: "device-a",
-            isClientAvailable: { $0 == "claude" || $0 == "codex" }
+            isClientAvailable: { availability.isAvailable($0) }
         )
         let batch = try await collector.collect()
         XCTAssertEqual(batch.unavailableSourceIDs, ["kimi"])
         XCTAssertEqual(batch.daily.map(\.sourceID), ["claude"])
+        for client in ["claude", "codex", "kimi"] {
+            XCTAssertEqual(availability.count(for: client), 1)
+        }
 
         let log = try String(contentsOf: invocationsURL, encoding: .utf8)
         let lines = log.split(separator: "\n").map(String.init)
@@ -146,4 +150,132 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertTrue(graphLines.first?.contains("-c claude,codex") == true)
         XCTAssertEqual(hourlyLines.count, 2)
     }
+
+    func testHourlyFailureIsLimitedToOneClientAndPreservesItsCache() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-hourly-failure.sh")
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then
+                  shift
+                  out="$1"
+                fi
+                shift
+              done
+              printf '%s' '{"contributions":[{"date":"2026-11-09","clients":[{"client":"claude","modelId":"claude-sonnet","messages":1,"tokens":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"reasoning":0}},{"client":"codex","modelId":"gpt-5","messages":1,"tokens":{"input":20,"output":6,"cacheRead":0,"cacheWrite":0,"reasoning":0}}]}]}' > "$out"
+            elif [ "$1" = "hourly" ] && [ "$4" = "codex" ]; then
+              exit 7
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let now = ISO8601DateFormatter().date(from: "2026-11-09T10:30:00Z")!
+        let device = Device(id: "device-a", name: "Test Mac")
+        let store = try SQLiteUsageStore(url: dir.appendingPathComponent("usage.sqlite"))
+        let cachedDaily = UsageRecord(
+            day: "2026-11-08", timeZoneID: "UTC", deviceID: device.id, sourceID: "codex",
+            modelID: "cached", counts: TokenCounts(input: 1)
+        )
+        let cachedHourly = HourlyUsage(
+            hourStart: now.addingTimeInterval(-1_800), deviceID: device.id, sourceID: "codex",
+            counts: TokenCounts(input: 2), eventCount: 1, reasoningKnown: false
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [cachedDaily], hourly: [cachedHourly]),
+            sourceID: "codex", deviceID: device.id
+        )
+        let lastSuccess = now.addingTimeInterval(-60)
+        try store.record(health: SourceHealth(sourceID: "codex", lastSuccess: lastSuccess, recordCount: 1))
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude", "codex"],
+            deviceID: device.id,
+            isClientAvailable: { _ in true }
+        )
+        let results = await CollectionRunner(store: store, device: device, collectors: [collector]).runAll(now: now)
+        let bySource = Dictionary(uniqueKeysWithValues: results.map { ($0.sourceID, $0) })
+        XCTAssertEqual(bySource["claude"]?.state, .ok)
+        XCTAssertEqual(bySource["codex"]?.state, .failed)
+        XCTAssertEqual(bySource["codex"]?.lastSuccess, lastSuccess)
+        XCTAssertEqual(bySource["codex"]?.errorMessage, "tokscale exited with status 7")
+        XCTAssertEqual(try store.records().filter { $0.sourceID == "codex" }, [cachedDaily])
+        XCTAssertEqual(try store.hourly().filter { $0.sourceID == "codex" }, [cachedHourly])
+        XCTAssertEqual(try store.records().first { $0.sourceID == "claude" }?.modelID, "claude-sonnet")
+    }
+
+    func testSourceWithoutOutcomeKeepsItsCache() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let now = ISO8601DateFormatter().date(from: "2026-11-09T10:30:00Z")!
+        let device = Device(id: "device-a", name: "Test Mac")
+        let store = try SQLiteUsageStore(url: dir.appendingPathComponent("usage.sqlite"))
+        let cachedDaily = UsageRecord(
+            day: "2026-11-08", timeZoneID: "UTC", deviceID: device.id, sourceID: "codex",
+            modelID: "cached", counts: TokenCounts(input: 1)
+        )
+        let cachedHourly = HourlyUsage(
+            hourStart: now.addingTimeInterval(-1_800), deviceID: device.id, sourceID: "codex",
+            counts: TokenCounts(input: 2), eventCount: 1, reasoningKnown: false
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [cachedDaily], hourly: [cachedHourly]),
+            sourceID: "codex", deviceID: device.id
+        )
+        let fresh = UsageRecord(
+            day: "2026-11-09", timeZoneID: "UTC", deviceID: device.id, sourceID: "claude",
+            modelID: "fresh", counts: TokenCounts(input: 3)
+        )
+        let collector = BatchCollector(
+            sourceIDs: ["claude", "codex"],
+            batch: CollectionBatch(daily: [fresh])
+        )
+        let results = await CollectionRunner(store: store, device: device, collectors: [collector]).runAll(now: now)
+        XCTAssertEqual(results.first { $0.sourceID == "codex" }?.state, .failed)
+        XCTAssertEqual(try store.records().filter { $0.sourceID == "codex" }, [cachedDaily])
+        XCTAssertEqual(try store.hourly().filter { $0.sourceID == "codex" }, [cachedHourly])
+        XCTAssertEqual(try store.records().filter { $0.sourceID == "claude" }, [fresh])
+    }
+}
+
+private final class AvailabilityProbe: @unchecked Sendable {
+    private let available: Set<String>
+    private var counts: [String: Int] = [:]
+    private let lock = NSLock()
+
+    init(available: Set<String>) {
+        self.available = available
+    }
+
+    func isAvailable(_ client: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        counts[client, default: 0] += 1
+        return available.contains(client)
+    }
+
+    func count(for client: String) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts[client, default: 0]
+    }
+}
+
+private struct BatchCollector: UsageCollector {
+    let sourceIDs: [String]
+    let batch: CollectionBatch
+
+    func collect() async throws -> CollectionBatch { batch }
 }

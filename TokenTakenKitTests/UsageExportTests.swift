@@ -50,6 +50,19 @@ final class UsageExportTests: XCTestCase {
         XCTAssertEqual(UsageCSV.line(row), fields.joined(separator: ","))
     }
 
+    func testCSVPrefixesFormulaLikeTextButLeavesNumericFieldsUntouched() {
+        for prefix in ["=", "+", "-", "@", "\t", "\r"] {
+            let row = ExportRow(record(day: "2026-11-09", source: prefix + "formula"))
+            let field = UsageCSV.line(row).split(separator: ",", omittingEmptySubsequences: false)[3]
+            let expected = prefix == "\r" ? "\"'\rformula\"" : "'\(prefix)formula"
+            XCTAssertEqual(String(field), expected)
+        }
+
+        let counts = TokenCounts(input: -1, cacheRead: -2, cacheWrite: -3, output: -4, reasoning: -5, uncategorized: -6)
+        let line = UsageCSV.line(ExportRow(record(day: "2026-11-09", counts: counts, events: -7)))
+        XCTAssertTrue(line.hasSuffix(",-1,-2,-3,-4,-5,-6,-21,-7"), line)
+    }
+
     func testCSVDocumentHasHeaderAndCRLFTerminators() {
         let rows = [
             ExportRow(record(day: "2026-11-08")),
@@ -151,10 +164,13 @@ final class UsageExportTests: XCTestCase {
         XCTAssertEqual(UsageDay.string(from: result.summary.end, in: zone), "2026-11-04")
     }
 
-    func testSinceWithoutUntilRunsThroughToday() throws {
-        let store = FakeStore(daily: [record(day: "2026-11-08"), record(day: "2026-11-09")])
+    func testSinceWithoutUntilIncludesAllLaterDates() throws {
+        let store = FakeStore(daily: [
+            record(day: "2026-11-08"),
+            record(day: "2026-11-09"),
+            record(day: "2026-11-11"),
+        ])
         let zone = shanghai()
-        // 2026-11-09 09:30 UTC is 17:30 in Shanghai, still 2026-11-09.
         let now = SyntheticUsageStore.defaultToday
         let result = try UsageExport.summary(
             from: store, period: .month, filter: UsageFilter(since: "2026-11-09"), timeZone: zone,
@@ -163,9 +179,9 @@ final class UsageExportTests: XCTestCase {
         XCTAssertEqual(result.from, "2026-11-09")
         XCTAssertNil(result.to)
         XCTAssertEqual(result.summary.total, TokenCounts(
-            input: 10, cacheRead: 20, cacheWrite: 30, output: 40, reasoning: 5, uncategorized: 1
+            input: 20, cacheRead: 40, cacheWrite: 60, output: 80, reasoning: 10, uncategorized: 2
         ))
-        XCTAssertEqual(UsageDay.string(from: result.summary.end, in: zone), "2026-11-10")
+        XCTAssertEqual(UsageDay.string(from: result.summary.end, in: zone), "2026-11-12")
     }
 
     func testDayLabelsBoundExportRowsToTheNamedPeriod() {

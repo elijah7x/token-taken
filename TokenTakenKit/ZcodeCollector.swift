@@ -108,6 +108,7 @@ public struct ZcodeCollector: UsageCollector {
 
     private static let nativeBoundaryCondition = """
         \(nativeBaseCondition)
+        AND typeof(started_at) = 'integer' AND started_at > 0
         AND COALESCE(input_tokens, 0) >= 0 AND COALESCE(output_tokens, 0) >= 0
         AND COALESCE(reasoning_tokens, 0) >= 0 AND COALESCE(cache_read_input_tokens, 0) >= 0
         AND COALESCE(cache_creation_input_tokens, 0) >= 0

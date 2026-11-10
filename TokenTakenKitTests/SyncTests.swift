@@ -133,6 +133,32 @@ final class SyncTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(read().first).daily.isEmpty)
     }
 
+    func testNoDownloadReadLeavesEvictedMonthUnavailable() throws {
+        try publish(other)
+        let backend = SyncBackend(root: directory)
+        let month = directory.appendingPathComponent("v1/devices/device-b/usage-2026-11.json")
+        try FileManager.default.removeItem(at: month)
+        try backend.write(Data(), to: "v1/devices/device-b/.usage-2026-11.json.icloud")
+        let remote = try XCTUnwrap(ICloudSync.readRemote(
+            root: directory,
+            excludingDeviceID: local.id,
+            now: now,
+            requestDownloads: false
+        ).first)
+        XCTAssertEqual(remote.status.state, .partial)
+        XCTAssertTrue(remote.daily.isEmpty)
+        XCTAssertEqual(remote.hourly, [hour(device: other)])
+    }
+
+    func testNotInstalledRemoteSourceDoesNotMakeDevicePartial() throws {
+        let health = SourceHealth(sourceID: "codex", state: .notInstalled)
+        try ICloudSync.write(
+            local: store(device: other), device: other, root: directory,
+            appVersion: "1.0", health: [health], now: now
+        )
+        XCTAssertEqual(read().first?.status.state, .ok)
+    }
+
     func testTombstonedDeviceExcludedAndNotImplicitlyRevivedByWriter() throws {
         try publish(other)
         let backend = SyncBackend(root: directory)

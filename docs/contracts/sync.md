@@ -56,6 +56,8 @@ Token Taken/
 - A readable device is stale when `lastWriteUTC` is more than 24 hours old; available data remains included. Otherwise, failed/unavailable/stale source health, missing last-success timestamps, or skipped records make the device partial. Device freshness never establishes source-level coverage. Staleness is fixed at 24 hours in v1, not configurable.
 - Failed/unavailable local collection keeps both cached record kinds. During the app session, a previously readable remote snapshot is retained when a subsequent read is not `ok`, and labelled using the new status. The reader API itself is stateless; the app cache is in memory, not a durable offline replica. A missing iCloud Drive root retains cached snapshots as unavailable. Unknown versions and readable tombstones are excluded, not cached back into the merge.
 
+- The CLI reads synced devices without requesting iCloud downloads (`ICloudSync.readRemote(..., requestDownloads: false)`); files not yet downloaded count as unavailable, never zero. The app requests downloads.
+
 ## Merge and removal
 
 - Device-local sources remain attributed to their device and MUST NOT be cross-device deduplicated.

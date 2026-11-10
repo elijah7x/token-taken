@@ -146,7 +146,9 @@ func parseOptions(_ arguments: [String], command: Command) -> Options {
             if let inline {
                 guard let number = Int(inline) else { usageError("invalid schema '\(inline)'") }
                 version = number
-            } else if index < arguments.count, let number = Int(arguments[index]) {
+            } else if index < arguments.count, !arguments[index].hasPrefix("--") {
+                let value = arguments[index]
+                guard let number = Int(value) else { usageError("invalid schema '\(value)'") }
                 version = number
                 index += 1
             } else {
@@ -393,7 +395,11 @@ func selectStore(_ options: Options) -> StoreSelection {
         if !options.localOnly,
            let root = ICloudSync.defaultRoot,
            FileManager.default.fileExists(atPath: root.appendingPathComponent("v1/devices", isDirectory: true).path) {
-            remote = ICloudSync.readRemote(root: root, excludingDeviceID: localDeviceID(store: local))
+            remote = ICloudSync.readRemote(
+                root: root,
+                excludingDeviceID: localDeviceID(store: local),
+                requestDownloads: false
+            )
             merged = true
         }
         let store: any UsageStore
@@ -422,7 +428,7 @@ func write(_ text: String, to path: String?) {
     do {
         try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
     } catch {
-        writeError("token-taken: could not write \(path)")
+        writeError("token-taken: could not write output file")
         exit(1)
     }
 }

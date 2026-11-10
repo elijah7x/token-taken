@@ -48,6 +48,13 @@ public actor CollectionRunner {
                             hasHistory: hasHistory, now: now,
                             message: CollectorError.sourceUnavailable.errorDescription ?? "Source data is unavailable"
                         )
+                    } else if let message = batch.failedSourceIDs[sourceID] {
+                        health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                            now: now, message: message, state: .failed)
+                    } else if !batch.daily.contains(where: { $0.sourceID == sourceID })
+                        && !batch.hourly.contains(where: { $0.sourceID == sourceID }) {
+                        health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                            now: now, message: "Collection produced no source data", state: .failed)
                     } else {
                         do {
                             let scoped = sourceBatch(batch, sourceID: sourceID, now: now)

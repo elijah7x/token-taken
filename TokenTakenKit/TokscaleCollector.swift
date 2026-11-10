@@ -89,9 +89,10 @@ public struct TokscaleCollector: UsageCollector {
         let zone = TimeZone.current
         let now = Date.now
         let mappedClients = clients.filter { Self.sourceMap[$0] != nil }
-        let availableClients = mappedClients.filter { isClientAvailable($0) }
-        var unavailableSourceIDs = Set(
-            mappedClients.filter { !isClientAvailable($0) }.compactMap { Self.sourceMap[$0] }
+        let availability = mappedClients.map { ($0, isClientAvailable($0)) }
+        let availableClients = availability.filter { $0.1 }.map { $0.0 }
+        let unavailableSourceIDs = Set(
+            availability.filter { !$0.1 }.compactMap { Self.sourceMap[$0.0] }
         )
         guard !availableClients.isEmpty else {
             throw CollectorError.sourceUnavailable
@@ -102,42 +103,49 @@ public struct TokscaleCollector: UsageCollector {
         let since = UsageDay.string(from: calendar.date(byAdding: .day, value: -2, to: now)!, in: zone)
         async let graphData = run(arguments: ["graph", "-c", availableClients.joined(separator: ",")], timeZone: zone, graph: true)
         let maxConcurrent = 3
-        let hourly = try await withThrowingTaskGroup(of: [HourlyUsage].self) { group in
+        let hourly = await withTaskGroup(of: (client: String, rows: [HourlyUsage], errorMessage: String?).self) { group in
             var iterator = availableClients.makeIterator()
             for _ in 0..<min(maxConcurrent, availableClients.count) {
                 if let client = iterator.next() {
-                    group.addTask {
-                        let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: zone)
-                        return try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: zone, now: now)
-                    }
+                    group.addTask { await hourlyOutcome(client: client, since: since, timeZone: zone, now: now) }
                 }
             }
             var rows: [HourlyUsage] = []
-            while let result = try await group.next() {
-                rows += result
+            var failedSourceIDs: [String: String] = [:]
+            while let result = await group.next() {
+                rows += result.rows
+                if let message = result.errorMessage, let sourceID = Self.sourceMap[result.client] {
+                    failedSourceIDs[sourceID] = message
+                }
                 if let client = iterator.next() {
-                    group.addTask {
-                        let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: zone)
-                        return try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: zone, now: now)
-                    }
+                    group.addTask { await hourlyOutcome(client: client, since: since, timeZone: zone, now: now) }
                 }
             }
-            return rows
+            return (rows: rows, failedSourceIDs: failedSourceIDs)
         }
-        // Recheck after the subprocesses: a vanished source must not erase its cache.
-        var stillAvailableClients: [String] = []
-        for client in availableClients {
-            if isClientAvailable(client) {
-                stillAvailableClients.append(client)
-            } else if let sourceID = Self.sourceMap[client] {
-                unavailableSourceIDs.insert(sourceID)
-            }
+        let daily = try await Self.parse(data: graphData, clients: availableClients, deviceID: deviceID, timeZone: zone)
+        return CollectionBatch(
+            daily: daily,
+            hourly: hourly.rows,
+            unavailableSourceIDs: unavailableSourceIDs,
+            failedSourceIDs: hourly.failedSourceIDs
+        )
+    }
+
+    private func hourlyOutcome(
+        client: String,
+        since: String,
+        timeZone: TimeZone,
+        now: Date
+    ) async -> (client: String, rows: [HourlyUsage], errorMessage: String?) {
+        do {
+            let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: timeZone)
+            let rows = try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: timeZone, now: now)
+            return (client, rows, nil)
+        } catch {
+            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            return (client, [], CollectionRunner.sanitizeErrorMessage(message))
         }
-        guard !stillAvailableClients.isEmpty else { throw CollectorError.sourceUnavailable }
-        let stillAvailableSources = Set(stillAvailableClients.compactMap { Self.sourceMap[$0] })
-        let daily = try await Self.parse(data: graphData, clients: stillAvailableClients, deviceID: deviceID, timeZone: zone)
-        let filteredHourly = hourly.filter { stillAvailableSources.contains($0.sourceID) }
-        return CollectionBatch(daily: daily, hourly: filteredHourly, unavailableSourceIDs: unavailableSourceIDs)
     }
 
     static func parse(data: Data, clients: [String], deviceID: String, timeZone: TimeZone = .current) throws -> [UsageRecord] {

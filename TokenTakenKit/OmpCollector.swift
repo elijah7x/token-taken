@@ -31,8 +31,10 @@ public struct OmpCollector: UsageCollector {
     }
 
     public func collect() async throws -> CollectionBatch {
-        try PiFormatScan(
-            root: root, sourceID: "omp", deviceID: deviceID, timeZone: timeZone, now: now()
-        ).run()
+        try autoreleasepool {
+            try PiFormatScan(
+                root: root, sourceID: "omp", deviceID: deviceID, timeZone: timeZone, now: now()
+            ).run()
+        }
     }
 }

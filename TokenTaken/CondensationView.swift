@@ -9,6 +9,8 @@ struct CondensationView: View {
 
     @Namespace private var dropSpace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // Closed or background windows keep their views alive; animate only while the window is active.
+    @Environment(\.appearsActive) private var appearsActive
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
     @State private var hover: FieldHover?
@@ -20,7 +22,7 @@ struct CondensationView: View {
         GeometryReader { proxy in
             let layout = CondensationLayout(summary: summary, size: proxy.size)
             ZStack(alignment: .topLeading) {
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { timeline in
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !appearsActive)) { timeline in
                     let time = reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch)
                     Canvas { context, _ in
                         CondensationRenderer(layout: layout, time: time, hover: hover?.target, isDark: scheme == .dark)

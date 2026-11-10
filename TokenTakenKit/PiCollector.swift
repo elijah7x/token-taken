@@ -28,9 +28,11 @@ public struct PiCollector: UsageCollector {
     }
 
     public func collect() async throws -> CollectionBatch {
-        try PiFormatScan(
-            root: root, sourceID: "pi", deviceID: deviceID, timeZone: timeZone, now: now()
-        ).run()
+        try autoreleasepool {
+            try PiFormatScan(
+                root: root, sourceID: "pi", deviceID: deviceID, timeZone: timeZone, now: now()
+            ).run()
+        }
     }
 }
 
@@ -93,29 +95,29 @@ struct PiFormatScan: Sendable {
         let files = try sessionFiles()
         var totals = Totals(sourceID: sourceID, deviceID: deviceID, timeZone: timeZone, now: now)
 
-        let decoder = JSONDecoder()
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let plain = ISO8601DateFormatter()
         plain.formatOptions = [.withInternetDateTime]
 
         for file in files {
-            let modificationDate = Self.modificationDate(of: file) ?? now
-            var state = FileState()
-            try Self.forEachLine(in: file, onLine: { line in
-                autoreleasepool {
-                    totals.scan(
-                        line: line,
-                        state: &state,
-                        fallbackDate: modificationDate,
-                        decoder: decoder,
-                        fractional: fractional,
-                        plain: plain
-                    )
-                }
-            }, onOverlongLine: {
-                totals.skippedRecords += 1
-            })
+            try autoreleasepool {
+                let modificationDate = Self.modificationDate(of: file) ?? now
+                var state = FileState()
+                try Self.forEachLine(in: file, onLine: { line in
+                    autoreleasepool {
+                        totals.scan(
+                            line: line,
+                            state: &state,
+                            fallbackDate: modificationDate,
+                            fractional: fractional,
+                            plain: plain
+                        )
+                    }
+                }, onOverlongLine: {
+                    totals.skippedRecords += 1
+                })
+            }
         }
 
         return totals.batch()
@@ -143,9 +145,11 @@ struct PiFormatScan: Sendable {
         }
         var files: [URL] = []
         for case let url as URL in enumerator {
-            guard url.pathExtension == "jsonl" else { continue }
-            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-            files.append(url)
+            autoreleasepool {
+                guard url.pathExtension == "jsonl" else { return }
+                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return }
+                files.append(url)
+            }
         }
         if let enumerationError {
             throw enumerationError
@@ -295,6 +299,343 @@ struct PiFormatScan: Sendable {
         }
     }
 
+    /// Projects large records onto the fields in ScanRecord, leaving bulky content out of JSONDecoder's
+    /// input. The original line remains available for the id-less dedup fingerprint.
+    private struct LargeLineProjector {
+        private enum Mode {
+            case record, message, usage
+        }
+
+        private enum Action {
+            case string, number, object(Mode)
+        }
+
+        private enum Failure: Error {
+            case invalid
+        }
+
+        private struct StringToken {
+            let range: Range<Data.Index>
+            let hasEscapes: Bool
+        }
+
+        let bytes: Data
+        var index: Data.Index
+
+        init(bytes: Data) {
+            self.bytes = bytes
+            index = bytes.startIndex
+        }
+
+        mutating func project() -> Data? {
+            do {
+                var output = Data()
+                output.reserveCapacity(min(bytes.count, 64 << 10))
+                skipWhitespace()
+                guard peek == 0x7B else { return nil }
+                try projectObject(mode: .record, into: &output)
+                skipWhitespace()
+                guard index == bytes.endIndex else { return nil }
+                return output
+            } catch {
+                return nil
+            }
+        }
+
+        private var peek: UInt8? {
+            index < bytes.endIndex ? bytes[index] : nil
+        }
+
+        private mutating func consume(_ byte: UInt8) -> Bool {
+            guard peek == byte else { return false }
+            index += 1
+            return true
+        }
+
+        private mutating func require(_ byte: UInt8) throws {
+            guard consume(byte) else { throw Failure.invalid }
+        }
+
+        private mutating func skipWhitespace() {
+            while let byte = peek, byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D {
+                index += 1
+            }
+        }
+
+        private mutating func projectObject(mode: Mode, into output: inout Data) throws {
+            try require(0x7B)
+            output.append(0x7B)
+            skipWhitespace()
+            if consume(0x7D) {
+                output.append(0x7D)
+                return
+            }
+
+            var emitted = false
+            while true {
+                let key = try parseString()
+                // An escaped spelling could name a projected field; use the original line instead.
+                guard !key.hasEscapes else { throw Failure.invalid }
+                skipWhitespace()
+                try require(0x3A)
+                skipWhitespace()
+
+                if let action = action(for: key, mode: mode) {
+                    if emitted { output.append(0x2C) }
+                    output.append(contentsOf: bytes[key.range])
+                    output.append(0x3A)
+                    switch action {
+                    case .string:
+                        if peek == 0x22 {
+                            let value = try parseString()
+                            output.append(contentsOf: bytes[value.range])
+                        } else {
+                            try skipValue()
+                            output.append(contentsOf: "null".utf8)
+                        }
+                    case .number:
+                        if let byte = peek, byte == 0x2D || (0x30...0x39).contains(byte) {
+                            let value = try parseNumber()
+                            output.append(contentsOf: bytes[value])
+                        } else {
+                            try skipValue()
+                            output.append(contentsOf: "null".utf8)
+                        }
+                    case .object(let nestedMode):
+                        if peek == 0x7B {
+                            try projectObject(mode: nestedMode, into: &output)
+                        } else {
+                            try skipValue()
+                            output.append(contentsOf: "null".utf8)
+                        }
+                    }
+                    emitted = true
+                } else {
+                    try skipValue()
+                }
+
+                skipWhitespace()
+                if consume(0x2C) {
+                    skipWhitespace()
+                    continue
+                }
+                try require(0x7D)
+                output.append(0x7D)
+                return
+            }
+        }
+
+        private func action(for key: StringToken, mode: Mode) -> Action? {
+            switch mode {
+            case .record:
+                if keyEquals("message", key) { return .object(.message) }
+                if keyEquals("usage", key) { return .object(.usage) }
+                if keyEquals("type", key) || keyEquals("id", key) || keyEquals("timestamp", key)
+                    || keyEquals("model", key) || keyEquals("modelId", key) || keyEquals("responseId", key) {
+                    return .string
+                }
+            case .message:
+                if keyEquals("usage", key) { return .object(.usage) }
+                if keyEquals("timestamp", key) { return .number }
+                if keyEquals("role", key) || keyEquals("model", key) || keyEquals("responseId", key) {
+                    return .string
+                }
+            case .usage:
+                if keyEquals("input", key) || keyEquals("cacheRead", key) || keyEquals("cacheWrite", key)
+                    || keyEquals("output", key) || keyEquals("reasoningTokens", key) || keyEquals("reasoning", key) {
+                    return .number
+                }
+            }
+            return nil
+        }
+
+        private func keyEquals(_ literal: String, _ key: StringToken) -> Bool {
+            guard key.range.count == literal.utf8.count + 2 else { return false }
+            var position = key.range.lowerBound + 1
+            for expected in literal.utf8 {
+                guard bytes[position] == expected else { return false }
+                position += 1
+            }
+            return true
+        }
+
+        private mutating func skipValue(depth: Int = 0) throws {
+            guard depth < 512, let byte = peek else { throw Failure.invalid }
+            switch byte {
+            case 0x7B:
+                try skipObject(depth: depth)
+            case 0x5B:
+                try skipArray(depth: depth)
+            case 0x22:
+                _ = try parseString()
+            case 0x74:
+                try consumeLiteral("true")
+            case 0x66:
+                try consumeLiteral("false")
+            case 0x6E:
+                try consumeLiteral("null")
+            case 0x2D, 0x30...0x39:
+                _ = try parseNumber()
+            default:
+                throw Failure.invalid
+            }
+        }
+
+        private mutating func skipObject(depth: Int) throws {
+            try require(0x7B)
+            skipWhitespace()
+            if consume(0x7D) { return }
+            while true {
+                _ = try parseString()
+                skipWhitespace()
+                try require(0x3A)
+                skipWhitespace()
+                try skipValue(depth: depth + 1)
+                skipWhitespace()
+                if consume(0x2C) {
+                    skipWhitespace()
+                    continue
+                }
+                try require(0x7D)
+                return
+            }
+        }
+
+        private mutating func skipArray(depth: Int) throws {
+            try require(0x5B)
+            skipWhitespace()
+            if consume(0x5D) { return }
+            while true {
+                try skipValue(depth: depth + 1)
+                skipWhitespace()
+                if consume(0x2C) {
+                    skipWhitespace()
+                    continue
+                }
+                try require(0x5D)
+                return
+            }
+        }
+
+        private mutating func consumeLiteral(_ literal: String) throws {
+            for expected in literal.utf8 {
+                guard peek == expected else { throw Failure.invalid }
+                index += 1
+            }
+        }
+
+        private mutating func parseNumber() throws -> Range<Data.Index> {
+            let start = index
+            _ = consume(0x2D)
+            guard let byte = peek else { throw Failure.invalid }
+            if byte == 0x30 {
+                index += 1
+            } else if (0x31...0x39).contains(byte) {
+                index += 1
+                while let next = peek, (0x30...0x39).contains(next) { index += 1 }
+            } else {
+                throw Failure.invalid
+            }
+            if consume(0x2E) {
+                guard let next = peek, (0x30...0x39).contains(next) else { throw Failure.invalid }
+                index += 1
+                while let next = peek, (0x30...0x39).contains(next) { index += 1 }
+            }
+            if let next = peek, next == 0x65 || next == 0x45 {
+                index += 1
+                if let sign = peek, sign == 0x2B || sign == 0x2D { index += 1 }
+                guard let digit = peek, (0x30...0x39).contains(digit) else { throw Failure.invalid }
+                index += 1
+                while let digit = peek, (0x30...0x39).contains(digit) { index += 1 }
+            }
+            return start..<index
+        }
+
+        private mutating func parseString() throws -> StringToken {
+            let start = index
+            try require(0x22)
+            var hasEscapes = false
+            while let byte = peek {
+                switch byte {
+                case 0x22:
+                    index += 1
+                    return StringToken(range: start..<index, hasEscapes: hasEscapes)
+                case 0x5C:
+                    hasEscapes = true
+                    index += 1
+                    guard let escaped = peek else { throw Failure.invalid }
+                    switch escaped {
+                    case 0x22, 0x5C, 0x2F, 0x62, 0x66, 0x6E, 0x72, 0x74:
+                        index += 1
+                    case 0x75:
+                        index += 1
+                        let first = try readHexQuad()
+                        if (0xD800...0xDBFF).contains(first) {
+                            try require(0x5C)
+                            try require(0x75)
+                            let second = try readHexQuad()
+                            guard (0xDC00...0xDFFF).contains(second) else { throw Failure.invalid }
+                        } else {
+                            guard !(0xDC00...0xDFFF).contains(first) else { throw Failure.invalid }
+                        }
+                    default:
+                        throw Failure.invalid
+                    }
+                case 0x00...0x1F:
+                    throw Failure.invalid
+                case 0x20...0x7F:
+                    index += 1
+                default:
+                    try consumeUTF8()
+                }
+            }
+            throw Failure.invalid
+        }
+
+        private mutating func readHexQuad() throws -> UInt16 {
+            var value: UInt16 = 0
+            for _ in 0..<4 {
+                guard let byte = peek, let digit = hexValue(byte) else { throw Failure.invalid }
+                value = (value << 4) | UInt16(digit)
+                index += 1
+            }
+            return value
+        }
+
+        private func hexValue(_ byte: UInt8) -> UInt8? {
+            switch byte {
+            case 0x30...0x39: return byte - 0x30
+            case 0x41...0x46: return byte - 0x41 + 10
+            case 0x61...0x66: return byte - 0x61 + 10
+            default: return nil
+            }
+        }
+
+        private mutating func consumeUTF8() throws {
+            guard let first = peek else { throw Failure.invalid }
+            let length: Int
+            let secondRange: ClosedRange<UInt8>
+            switch first {
+            case 0xC2...0xDF: length = 2; secondRange = 0x80...0xBF
+            case 0xE0: length = 3; secondRange = 0xA0...0xBF
+            case 0xE1...0xEC: length = 3; secondRange = 0x80...0xBF
+            case 0xED: length = 3; secondRange = 0x80...0x9F
+            case 0xEE...0xEF: length = 3; secondRange = 0x80...0xBF
+            case 0xF0: length = 4; secondRange = 0x90...0xBF
+            case 0xF1...0xF3: length = 4; secondRange = 0x80...0xBF
+            case 0xF4: length = 4; secondRange = 0x80...0x8F
+            default: throw Failure.invalid
+            }
+            guard index + length <= bytes.endIndex, secondRange.contains(bytes[index + 1]) else {
+                throw Failure.invalid
+            }
+            for offset in 2..<length {
+                guard (0x80...0xBF).contains(bytes[index + offset]) else { throw Failure.invalid }
+            }
+            index += length
+        }
+    }
+
     private struct Totals {
         let sourceID: String
         let deviceID: String
@@ -310,7 +651,6 @@ struct PiFormatScan: Sendable {
             line rawLine: Data,
             state: inout FileState,
             fallbackDate: Date,
-            decoder: JSONDecoder,
             fractional: ISO8601DateFormatter,
             plain: ISO8601DateFormatter
         ) {
@@ -328,7 +668,14 @@ struct PiFormatScan: Sendable {
             }
             guard PiFormatScan.decodeMarkers.contains(where: { trimmed.range(of: $0) != nil }) else { return }
 
-            guard let object = try? decoder.decode(ScanRecord.self, from: trimmed),
+            let decodeLine: Data
+            if trimmed.count > (64 << 10) {
+                var projector = LargeLineProjector(bytes: trimmed)
+                decodeLine = projector.project() ?? trimmed
+            } else {
+                decodeLine = trimmed
+            }
+            guard let object = try? JSONDecoder().decode(ScanRecord.self, from: decodeLine),
                   let type = object.type else {
                 skippedRecords += 1
                 return
@@ -524,7 +871,9 @@ struct PiFormatScan: Sendable {
         private static func text(_ value: String?) -> String? {
             guard let value else { return nil }
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            return trimmed.isEmpty ? nil : trimmed
+            guard !trimmed.isEmpty else { return nil }
+            // Keep session state and returned model names independent of the decoder's line storage.
+            return String(decoding: trimmed.utf8, as: UTF8.self)
         }
 
         /// Stable content fingerprint for a record that carries no entry id.
@@ -566,12 +915,12 @@ struct PiFormatScan: Sendable {
                     }
                 }
                 discardingOverlongLine = false
-                pending.removeAll(keepingCapacity: true)
+                pending.removeAll(keepingCapacity: pending.count <= (64 << 10))
                 rest = rest[rest.index(after: index)...]
             }
             guard !discardingOverlongLine else { continue }
             if pending.count + rest.count > maximumLineBytes {
-                pending.removeAll(keepingCapacity: true)
+                pending.removeAll(keepingCapacity: false)
                 discardingOverlongLine = true
                 onOverlongLine()
             } else {

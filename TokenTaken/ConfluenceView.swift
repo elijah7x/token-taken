@@ -8,6 +8,8 @@ struct ConfluenceView: View {
     let summary: UsageSummary
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // Closed or background windows keep their views alive; animate only while the window is active.
+    @Environment(\.appearsActive) private var appearsActive
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
     @State private var hover: ConfluenceHover?
@@ -22,7 +24,7 @@ struct ConfluenceView: View {
             let activeTarget = hover?.target ?? focused
 
             ZStack(alignment: .topLeading) {
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { timeline in
+                TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !appearsActive)) { timeline in
                     ConfluenceScene(
                         layout: layout,
                         values: layout.animationValues,

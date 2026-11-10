@@ -19,17 +19,17 @@ public struct SyncBackend: Sendable {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    public func read(_ path: String) throws -> Data {
+    public func read(_ path: String, requestDownloads: Bool = true) throws -> Data {
         let url = try resolve(path)
         let manager = FileManager.default
         let placeholder = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
         if !manager.fileExists(atPath: url.path), manager.fileExists(atPath: placeholder.path) {
-            try? manager.startDownloadingUbiquitousItem(at: url)
+            if requestDownloads { try? manager.startDownloadingUbiquitousItem(at: url) }
             throw SyncError.unavailable
         }
         let values = try url.resourceValues(forKeys: [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey, .isRegularFileKey])
         if values.isUbiquitousItem == true, values.ubiquitousItemDownloadingStatus != .current {
-            try? manager.startDownloadingUbiquitousItem(at: url)
+            if requestDownloads { try? manager.startDownloadingUbiquitousItem(at: url) }
             throw SyncError.unavailable
         }
         guard values.isRegularFile == true, manager.isReadableFile(atPath: url.path) else { throw SyncError.unavailable }
@@ -126,11 +126,20 @@ public enum ICloudSync {
         try backend.write(SyncSnapshot.encode(metadata), to: metadataPath)
     }
 
-    public static func readRemote(root: URL, excludingDeviceID: String) -> [RemoteDeviceSnapshot] {
-        readRemote(root: root, excludingDeviceID: excludingDeviceID, now: .now)
+    public static func readRemote(
+        root: URL,
+        excludingDeviceID: String,
+        requestDownloads: Bool = true
+    ) -> [RemoteDeviceSnapshot] {
+        readRemote(root: root, excludingDeviceID: excludingDeviceID, now: .now, requestDownloads: requestDownloads)
     }
 
-    public static func readRemote(root: URL, excludingDeviceID: String, now: Date) -> [RemoteDeviceSnapshot] {
+    public static func readRemote(
+        root: URL,
+        excludingDeviceID: String,
+        now: Date,
+        requestDownloads: Bool = true
+    ) -> [RemoteDeviceSnapshot] {
         let backend = SyncBackend(root: root)
         guard let folders = try? backend.list("v1/devices") else { return [] }
         return folders.compactMap { folder in
@@ -140,7 +149,7 @@ public enum ICloudSync {
             let path = "v1/devices/\(id)"
             let metadata: DeviceSyncSnapshot
             do {
-                let data = try backend.read(path + "/device.json")
+                let data = try backend.read(path + "/device.json", requestDownloads: requestDownloads)
                 guard try schemaVersion(data) == 1 else { return nil }
                 metadata = try SyncSnapshot.decode(DeviceSyncSnapshot.self, from: data)
                 guard metadata.deviceId == id else { throw SyncError.invalidSnapshot }
@@ -159,7 +168,7 @@ public enum ICloudSync {
                     return unavailable(device: device, lastWrite: metadata.lastWriteUTC)
                 }
                 do {
-                    let data = try backend.read(path + "/" + name)
+                    let data = try backend.read(path + "/" + name, requestDownloads: requestDownloads)
                     guard try schemaVersion(data) == 1 else { unsupported = true; continue }
                     guard digest(data) == hash else { throw SyncError.invalidSnapshot }
                     if name == "hourly.json" {
@@ -189,7 +198,8 @@ public enum ICloudSync {
             if !dailyAvailable { daily = [] }
             let stale = now.timeIntervalSince(metadata.lastWriteUTC) > 86_400
             let sourcePartial = metadata.sources.contains {
-                $0.state != .ok || $0.skippedRecords > 0 || ($0.lastSuccess.map { now.timeIntervalSince($0) > 86_400 } ?? true)
+                $0.state != .notInstalled
+                    && ($0.state != .ok || $0.skippedRecords > 0 || ($0.lastSuccess.map { now.timeIntervalSince($0) > 86_400 } ?? true))
             }
             let state: RemoteDeviceStatus.State
             if !dailyAvailable && !hourlyAvailable { state = .unavailable }

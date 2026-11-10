@@ -60,7 +60,7 @@ Aggregates usage for the effective range: total counts by category, breakdowns b
 
 Lists local source health: ID, state, last success, daily record count, skipped records, and the last error.
 
-- `state` is one of `ok`, `unavailable`, `failed`, or `stale`; the CLI applies the default 24-hour staleness rule.
+- `state` is one of `ok`, `unavailable`, `notInstalled`, `failed`, or `stale`; table output renders `notInstalled` as `not installed`. The CLI applies the default 24-hour staleness rule.
 - `--source` limits the listed sources. Range options and `--model`/`--device` are accepted for compatibility but do not scope health metadata, so `range` is always `{from: null, to: null}`.
 - Synced-device health is not part of this list; device-level conditions appear as warnings instead.
 - With no health rows the table prints `No source health recorded` and JSON returns an empty array.
@@ -147,7 +147,7 @@ All JSON output, including `export --format json`, uses one envelope:
 
 ## CSV export
 
-RFC 4180 CSV with a header row. The line terminator is CRLF, the field separator is a comma, and a field is quoted only when it contains a comma, quote, CR, or LF; embedded quotes are doubled.
+RFC 4180 CSV with a header row. The line terminator is CRLF, the field separator is a comma, and a field is quoted only when it contains a comma, quote, CR, or LF; embedded quotes are doubled. Text fields beginning with `=`, `+`, `-`, `@`, tab, or CR are prefixed with one apostrophe before escaping; numeric fields are unchanged.
 
 ```text
 day,timeZoneID,deviceID,sourceID,modelID,rawModelID,input,cacheRead,cacheWrite,output,reasoning,uncategorized,total,eventCount

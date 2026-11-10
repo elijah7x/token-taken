@@ -263,4 +263,36 @@ final class ZcodeCollectorTests: XCTestCase {
         } catch {
         }
     }
+
+    func testInvalidNativeTimestampsDoNotBoundLegacyHistory() async throws {
+        let url = try makeDatabase()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, """
+            INSERT INTO model_usage VALUES (
+                'completed', 0, 'glm-zero', 'zai', 10, 5, 0, 0, 0
+            );
+            INSERT INTO model_usage VALUES (
+                'completed', -1, 'glm-negative', 'zai', 10, 5, 0, 0, 0
+            );
+            INSERT INTO model_usage VALUES (
+                'completed', 'invalid', 'glm-invalid', 'zai', 10, 5, 0, 0, 0
+            );
+            """)
+        sqlite3_close(db)
+
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        let batch = try await collector.collect()
+        XCTAssertEqual(batch.daily.count, 3)
+        XCTAssertNotNil(batch.daily.first { $0.modelID == "glm-legacy" })
+        XCTAssertNotNil(batch.daily.first { $0.modelID == "glm-copy" })
+        XCTAssertNotNil(batch.daily.first { $0.modelID == "glm-native" })
+        XCTAssertNil(batch.daily.first { $0.modelID == "glm-after" })
+        XCTAssertEqual(batch.skippedRecords, 3)
+    }
 }
