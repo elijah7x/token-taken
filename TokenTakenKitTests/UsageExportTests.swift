@@ -188,10 +188,15 @@ final class UsageExportTests: XCTestCase {
         let zone = shanghai()
         let now = SyntheticUsageStore.defaultToday
         XCTAssertEqual(UsageExport.dayLabels(for: .day, timeZone: zone, now: now).since, "2026-11-09")
+        XCTAssertEqual(UsageExport.dayLabels(for: .week, timeZone: zone, now: now).since, "2026-11-09")
         XCTAssertEqual(UsageExport.dayLabels(for: .month, timeZone: zone, now: now).since, "2026-11-01")
         XCTAssertEqual(UsageExport.dayLabels(for: .year, timeZone: zone, now: now).since, "2026-01-01")
         XCTAssertEqual(UsageExport.dayLabels(for: .all, timeZone: zone, now: now).until, "2026-11-09")
         XCTAssertNil(UsageExport.dayLabels(for: .all, timeZone: zone, now: now).since)
+
+        let sunday = UsageDay.date(from: "2026-11-08", in: zone)!.addingTimeInterval(12 * 3_600)
+        XCTAssertEqual(UsageExport.dayLabels(for: .week, timeZone: zone, now: sunday).since, "2026-11-02")
+        XCTAssertEqual(UsageExport.dayLabels(for: .week, timeZone: zone, now: sunday).until, "2026-11-08")
     }
 
     func testNamedPeriodStillUsesAggregatorBoundaries() throws {

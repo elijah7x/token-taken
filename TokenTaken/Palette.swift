@@ -201,6 +201,7 @@ extension Period {
     var title: LocalizedStringKey {
         switch self {
         case .day: "Day"
+        case .week: "Week"
         case .month: "Month"
         case .year: "Year"
         case .all: "All"

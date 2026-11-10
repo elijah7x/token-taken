@@ -47,9 +47,76 @@ final class UsageAggregatorTests: XCTestCase {
     func testSeriesShapes() throws {
         let aggregator = aggregator("UTC")
         XCTAssertEqual(try aggregator.summary(for: .day).series.count, 24)
+        XCTAssertEqual(try aggregator.summary(for: .week).series.count, 7)
         XCTAssertEqual(try aggregator.summary(for: .month).series.count, 30)
         XCTAssertEqual(try aggregator.summary(for: .year).series.map(\.label), (1...12).map(String.init))
         XCTAssertEqual(try aggregator.dailyTotals(lastDays: 7).count, 7)
+    }
+
+    func testWeekStartsOnMondayAndBuildsSevenDailyBuckets() throws {
+        var viewer = calendar("Asia/Shanghai")
+        viewer.locale = Locale(identifier: "en_US_POSIX")
+        viewer.firstWeekday = 1 // Sunday-first calendar must still use Monday week start.
+
+        let store = GranularityStore(daily: [
+            UsageRecord(day: "2026-11-01", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 5)),
+            UsageRecord(day: "2026-11-02", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 10)),
+            UsageRecord(day: "2026-11-08", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 20)),
+            UsageRecord(day: "2026-11-09", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 30)),
+            UsageRecord(day: "2026-11-11", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 40)),
+        ])
+
+        // Monday 2026-11-09: week starts that day; Tue..Sun are future.
+        let mondayNow = UsageDay.date(from: "2026-11-09", in: viewer.timeZone)!.addingTimeInterval(12 * 3_600)
+        let onMonday = try UsageAggregator(store: store, calendar: viewer, now: mondayNow).summary(for: .week)
+        XCTAssertEqual(UsageDay.string(from: onMonday.start, in: viewer.timeZone), "2026-11-09")
+        XCTAssertEqual(UsageDay.string(from: onMonday.end, in: viewer.timeZone), "2026-11-10")
+        XCTAssertEqual(onMonday.total.total, 30)
+        XCTAssertEqual(onMonday.series.map(\.label), ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+        XCTAssertEqual(onMonday.series.map(\.isFuture), [false, true, true, true, true, true, true])
+        XCTAssertEqual(onMonday.series.map(\.total), [30, 0, 0, 0, 0, 0, 0])
+
+        // Sunday 2026-11-08: week starts on the previous Monday (6 days earlier, 2026-11-02).
+        let sundayNow = UsageDay.date(from: "2026-11-08", in: viewer.timeZone)!.addingTimeInterval(18 * 3_600)
+        let onSunday = try UsageAggregator(store: store, calendar: viewer, now: sundayNow).summary(for: .week)
+        XCTAssertEqual(UsageDay.string(from: onSunday.start, in: viewer.timeZone), "2026-11-02")
+        XCTAssertEqual(UsageDay.string(from: onSunday.end, in: viewer.timeZone), "2026-11-09")
+        XCTAssertEqual(viewer.dateComponents([.day], from: onSunday.start, to: viewer.startOfDay(for: sundayNow)).day, 6)
+        XCTAssertEqual(onSunday.total.total, 30)
+        XCTAssertEqual(onSunday.series.map(\.isFuture), [false, false, false, false, false, false, false])
+        XCTAssertEqual(onSunday.series.map(\.total), [10, 0, 0, 0, 0, 0, 20])
+    }
+
+    func testWeekAcrossMonthBoundary() throws {
+        var viewer = calendar("Asia/Shanghai")
+        viewer.locale = Locale(identifier: "en_US_POSIX")
+        viewer.firstWeekday = 1
+
+        let store = GranularityStore(daily: [
+            UsageRecord(day: "2026-11-29", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 7)),
+            UsageRecord(day: "2026-11-30", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 100)),
+            UsageRecord(day: "2026-12-01", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 200)),
+            UsageRecord(day: "2026-12-02", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 300)),
+        ])
+
+        // Wednesday 2026-12-02: week starts on Monday 2026-11-30 across the Nov/Dec boundary.
+        let wednesdayNow = UsageDay.date(from: "2026-12-02", in: viewer.timeZone)!.addingTimeInterval(10 * 3_600)
+        let summary = try UsageAggregator(store: store, calendar: viewer, now: wednesdayNow).summary(for: .week)
+        XCTAssertEqual(UsageDay.string(from: summary.start, in: viewer.timeZone), "2026-11-30")
+        XCTAssertEqual(UsageDay.string(from: summary.end, in: viewer.timeZone), "2026-12-03")
+        XCTAssertEqual(summary.total.total, 600)
+        XCTAssertEqual(summary.series.map(\.label), ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])
+        XCTAssertEqual(summary.series.map(\.total), [100, 200, 300, 0, 0, 0, 0])
+        XCTAssertEqual(summary.series.map(\.isFuture), [false, false, false, true, true, true, true])
     }
 
     func testBreakdownsAreSortedDescending() throws {

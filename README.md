@@ -8,7 +8,7 @@ A small, beautiful token-usage dashboard for macOS with native Liquid Glass.
 
 ## Planned v1 features
 
-- Day, month, year, and all-time totals, with per-model and per-source breakdowns.
+- Day, week, month, year, and all-time totals, with per-model and per-source breakdowns.
 - One combined total across several Macs, with per-device breakdowns when iCloud sync is on.
 - A minimal menu bar extra showing today's token total.
 - A native Liquid Glass theme, with a theme system designed for later Geek and Sketchbook themes.

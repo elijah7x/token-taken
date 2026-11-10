@@ -137,7 +137,7 @@ public struct Device: Hashable, Codable, Sendable, Identifiable {
 }
 
 public enum Period: String, CaseIterable, Codable, Sendable, Identifiable {
-    case day, month, year, all
+    case day, week, month, year, all
 
     public var id: String { rawValue }
 }

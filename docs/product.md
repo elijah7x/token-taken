@@ -28,7 +28,7 @@ Developers and other tools can use the planned `token-taken` CLI for the same to
 
 - The main window and menu bar extra use native Liquid Glass through SwiftUI or AppKit APIs. Web or CSS imitations do not satisfy this criterion.
 - The v1 `liquid-glass` theme passes the owner's design review at supported window sizes. Primary actions are keyboard accessible and meaningful controls have accessibility labels.
-- The main window supports day, month, year, and all-time views, per-model and per-source breakdowns, and per-device breakdowns when sync is on. The menu bar extra shows today's token total and a quick glance.
+- The main window supports day, week (Monday start), month, year, and all-time views, per-model and per-source breakdowns, and per-device breakdowns when sync is on. The menu bar extra shows today's token total and a quick glance.
 - English and Simplified Chinese interfaces ship through a String Catalog.
 - Idle CPU stays near 0% when collection and sync are inactive (target, to confirm by measurement).
 - Memory use after launch with cached data stays at or below 150 MB (target, to confirm by measurement).

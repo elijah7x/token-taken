@@ -170,6 +170,10 @@ public enum UsageExport {
         let start: Date?
         switch period {
         case .day: start = today
+        case .week:
+            var weekCalendar = calendar
+            weekCalendar.firstWeekday = 2
+            start = weekCalendar.dateInterval(of: .weekOfYear, for: now)?.start
         case .month: start = calendar.dateInterval(of: .month, for: now)?.start
         case .year: start = calendar.dateInterval(of: .year, for: now)?.start
         case .all: start = nil

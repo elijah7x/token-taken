@@ -197,6 +197,9 @@ private struct PeriodBar: View {
         switch model.period {
         case .day:
             return "Today · \(start.formatted(.dateTime.month(.abbreviated).day()))"
+        case .week:
+            let today = Calendar.current.date(byAdding: .day, value: -1, to: model.summary.end) ?? start
+            return "This week · \(start.formatted(.dateTime.month(.abbreviated).day()))–\(today.formatted(.dateTime.month(.abbreviated).day()))"
         case .month:
             return "This month · \(start.formatted(.dateTime.year().month(.wide)))"
         case .year:

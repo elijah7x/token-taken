@@ -20,6 +20,7 @@ public struct UsageAggregator: Sendable {
         let end = addDays(1, to: today)
         let start: Date = switch period {
         case .day: today
+        case .week: weekCalendar.dateInterval(of: .weekOfYear, for: now)!.start
         case .month: calendar.dateInterval(of: .month, for: now)!.start
         case .year: calendar.dateInterval(of: .year, for: now)!.start
         case .all: entries.map(\.day).min() ?? today
@@ -80,6 +81,16 @@ public struct UsageAggregator: Sendable {
         switch period {
         case .day:
             return try hourlySeries(dayStart: start, entries: entries)
+        case .week:
+            let starts = (0..<7).map { addDays($0, to: start) }
+            let symbols = calendar.shortWeekdaySymbols
+            return points(
+                starts: starts,
+                entries: entries,
+                index: { calendar.dateComponents([.day], from: start, to: $0).day ?? -1 },
+                label: { symbols[calendar.component(.weekday, from: $0) - 1] },
+                isFuture: { $0 > today }
+            )
         case .month:
             let monthEnd = calendar.dateInterval(of: .month, for: start)!.end
             var starts: [Date] = []
@@ -184,6 +195,12 @@ public struct UsageAggregator: Sendable {
             cache[record.day] = day
             return Entry(day: day, record: record)
         }
+    }
+
+    private var weekCalendar: Calendar {
+        var weekCalendar = calendar
+        weekCalendar.firstWeekday = 2
+        return weekCalendar
     }
 
     private func addDays(_ days: Int, to date: Date) -> Date {

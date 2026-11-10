@@ -27,7 +27,7 @@ Every command accepts the same range and filter options. `--format` and `--outpu
 
 | Option | Meaning |
 | --- | --- |
-| `--period day\|month\|year\|all` | Named range ending today. Default: `month`. `day` and `today` are accepted aliases. |
+| `--period day\|week\|month\|year\|all` | Named range ending today (`week` starts on Monday). Default: `month`. `day`/`today` and `week`/`this-week` are accepted aliases. |
 | `--since YYYY-MM-DD` | Inclusive local start date. Overrides `--period`. |
 | `--until YYYY-MM-DD` | Inclusive local end date. Overrides `--period`. May be combined with `--since`. |
 | `--tz <IANA id>` | Viewer time zone. Default: the system zone. An invalid identifier is a usage error. |
@@ -45,7 +45,7 @@ Every command accepts the same range and filter options. `--format` and `--outpu
 - `--since`/`--until` and `--tz` bound the range in the viewer's calendar and zone. A daily record is selected by its own `YYYY-MM-DD` label, not by converting it to a UTC instant; this is exact only when the collecting and viewing zones match.
 - `--period` and `--since`/`--until` are never an error together: the custom range wins.
 - The default period is `month` for every command that selects daily records: `summary`, `models`, `devices`, and `export`.
-- Named periods run from the period start through the end of today. A custom range is unbounded at an omitted end. `source`, `model`, and `device` names in table output are display labels; scripts MUST use `--json`.
+- Named periods run from the period start through the end of today (`week` starts at Monday `00:00` in the viewer's time zone). A custom range is unbounded at an omitted end. `source`, `model`, and `device` names in table output are display labels; scripts MUST use `--json`.
 
 ### `summary`
 

@@ -17,7 +17,7 @@ enum CLI {
           token-taken --schema
 
         Options:
-          --period day|month|year|all  Named range ending today (default: month)
+          --period day|week|month|year|all  Named range ending today (default: month)
           --since YYYY-MM-DD          Inclusive local start date; overrides --period
           --until YYYY-MM-DD          Inclusive local end date; overrides --period
           --tz <IANA id>              Viewer time zone (default: system)
@@ -71,6 +71,7 @@ struct Options {
 func parsePeriod(_ value: String) -> Period {
     switch value {
     case "day", "today": .day
+    case "week", "this-week": .week
     case "month": .month
     case "year": .year
     case "all": .all
