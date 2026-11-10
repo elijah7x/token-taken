@@ -14,6 +14,8 @@ struct ConfluenceView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
     @State private var hover: ConfluenceHover?
+    /// Particles follow the final geometry, so they are hidden while the ribbons spring to new values.
+    @State private var particlesSettled = true
     @FocusState private var focused: ConfluenceTarget?
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -43,8 +45,15 @@ struct ConfluenceView: View {
 
                 if !reduceMotion {
                     ConfluenceParticleLayer(tracks: particleTracks, isActive: appearsActive)
+                        .opacity(particlesSettled ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.2), value: particlesSettled)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+                        .task(id: layout.animationValues) {
+                            particlesSettled = false
+                            try? await Task.sleep(for: .milliseconds(650))
+                            particlesSettled = true
+                        }
                 }
 
                 if let hover, let stream = layout.stream(for: hover.target) {
