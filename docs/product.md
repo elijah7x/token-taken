@@ -73,7 +73,7 @@ token-taken summary --period month --by model --json
 
 - Ship the `liquid-glass` theme only, while keeping `geek` and `sketchbook` as theme IDs in the theme system.
 - Provide the main window, per-model/source/device breakdowns described above, and a minimal menu bar extra.
-- Distribute a non-sandboxed macOS app outside the Mac App Store with Developer ID. Signing and notarization details remain open.
+- Distribute a non-sandboxed macOS app outside the Mac App Store with Developer ID. Signing, notarization, and DMG packaging follow [ADR-0004](decisions/0004-distribution.md).
 - Keep local data under `~/Library/Application Support/Token Taken/`.
 
 ### Synchronization and interfaces
@@ -108,4 +108,3 @@ These items follow v1 and are not release commitments:
 - Engine choice, final agent coverage, timestamp granularity, and runtime packaging: [ADR-0003](decisions/0003-usage-engine.md) and `docs/contracts/upstream.md`.
 - Statistics identity, deduplication keys, time-zone behavior, and price-table semantics: `docs/contracts/statistics.md`.
 - Account-scoped cross-device deduplication within aggregate-only sync: ADR-0003 and `docs/contracts/sync.md`.
-- Developer ID signing and notarization: a future distribution ADR before release.

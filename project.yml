@@ -46,16 +46,30 @@ targets:
           mkdir -p "$helpers" "$resources" "${DERIVED_FILE_DIR}"
           # Hardened runtime enables library validation, which rejects ad-hoc frameworks; use it only with a real identity.
           identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
-          options=""; if [[ "$identity" != "-" ]]; then options="runtime"; fi
-          # Incremental builds may skip re-sealing the app, so touch a helper only when its source changed.
+          identity_key="$(printf '%s' "$identity" | shasum -a 256 | awk '{print $1}')"
+          # The current-identity key ensures switching back to a previous configuration also re-signs.
           bundle_tool() {
-            local source="$1" target="$helpers/$2" stamp="${DERIVED_FILE_DIR}/helper-$2.source"
-            if [[ -f "$target" && -f "$stamp" ]] && cmp -s "$source" "$stamp"; then return; fi
+            local source="$1" name="$2" entitlements="${3:-}"
+            local target="$helpers/$name" stamp="${DERIVED_FILE_DIR}/helper-$name.source"
+            local key="${DERIVED_FILE_DIR}/helper-$name.key" signed_key=""
+            if [[ -f "$key" ]]; then signed_key="$(cat "$key")"; fi
+            if [[ -f "$target" && -f "$stamp" && "$signed_key" == "$identity_key" ]] && cmp -s "$source" "$stamp"; then return; fi
             cp "$source" "$target"; chmod 755 "$target"
-            codesign --force ${options:+--options "$options"} --timestamp=none --sign "$identity" "$target"
+            if [[ "$identity" == "-" ]]; then
+              if [[ -n "$entitlements" ]]; then
+                codesign --force --timestamp=none --entitlements "$entitlements" --sign "$identity" "$target"
+              else
+                codesign --force --timestamp=none --sign "$identity" "$target"
+              fi
+            elif [[ -n "$entitlements" ]]; then
+              codesign --force --options runtime --timestamp --entitlements "$entitlements" --sign "$identity" "$target"
+            else
+              codesign --force --options runtime --timestamp --sign "$identity" "$target"
+            fi
             cp "$source" "$stamp"
+            printf '%s\n' "$identity_key" > "$key"
           }
-          bundle_tool "${BUILT_PRODUCTS_DIR}/token-taken" token-taken
+          bundle_tool "${BUILT_PRODUCTS_DIR}/token-taken" token-taken "${SRCROOT}/TokenTakenCLI/TokenTakenCLI.entitlements"
           if [[ -f "${SRCROOT}/Vendor/engine/tokscale" ]]; then bundle_tool "${SRCROOT}/Vendor/engine/tokscale" tokscale; fi
           cmp -s "${SRCROOT}/engine/engine.lock.json" "$resources/engine.lock.json" || cp "${SRCROOT}/engine/engine.lock.json" "$resources/engine.lock.json"
     settings:
@@ -66,6 +80,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Token Taken
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         ENABLE_APP_SANDBOX: "NO"
+        CODE_SIGN_ENTITLEMENTS: TokenTaken/TokenTaken.entitlements
         SWIFT_EMIT_LOC_STRINGS: "YES"
         LOCALIZATION_PREFERS_STRING_CATALOGS: "YES"
   TokenTakenCLI:
@@ -78,6 +93,7 @@ targets:
       base:
         PRODUCT_NAME: token-taken
         PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTaken.CLI
+        CODE_SIGN_ENTITLEMENTS: TokenTakenCLI/TokenTakenCLI.entitlements
         # A command-line tool cannot embed the framework; find it beside the tool or in an app bundle.
         LD_RUNPATH_SEARCH_PATHS: "@executable_path @executable_path/../Frameworks @loader_path/../Frameworks"
   TokenTakenKitTests:

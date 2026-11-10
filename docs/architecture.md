@@ -7,10 +7,12 @@ Status: pre-alpha. No application or CLI target exists yet.
 - Native macOS app written in SwiftUI, with AppKit APIs where SwiftUI does not expose the required native behavior.
 - Minimum macOS 26.0. Native Liquid Glass uses SwiftUI `glassEffect` or `NSGlassEffectView`; web and CSS imitations are out of scope.
 - XcodeGen generates the Xcode project from `project.yml`.
-- The app is non-sandboxed and distributed outside the Mac App Store with Developer ID so it can read agent logs in the user's home folder and write to iCloud Drive without CloudKit entitlements. Signing and notarization details remain open.
+- The app is non-sandboxed and distributed outside the Mac App Store with Developer ID so it can read agent logs in the user's home folder and write to iCloud Drive without CloudKit entitlements.
+- Release artifacts use hardened-runtime signatures and secure timestamps on the framework, helpers, and app, signed inside out. Debug helpers remain ad-hoc without a secure timestamp.
+- Distribution is a notarized, stapled DMG. Updates are manual in v0.1, without Sparkle; notarization credentials come only from a keychain profile.
 - A String Catalog provides English and Simplified Chinese from v1.
 
-See [ADR-0001](decisions/0001-native-macos-app.md).
+See [ADR-0001](decisions/0001-native-macos-app.md) and [ADR-0004](decisions/0004-distribution.md).
 
 ## Targets and layering
 
@@ -121,4 +123,5 @@ The exact account-scoped deduplication key and its representation in aggregate-o
 | Which local database, migration policy, and app/CLI write coordination should the Store use? | A future local-store ADR before implementation |
 | What periodic interval, power policy, and incremental fallback should refresh use? | A future refresh-policy ADR after ADR-0003 |
 | What price-table sources, update cadence, and model aliases should Pricing use? | `docs/contracts/statistics.md` and `docs/contracts/upstream.md` |
-| Which Developer ID signing, notarization, and release process should distribution use? | A future distribution ADR before release |
+
+Developer ID signing, notarization, and release mechanics are resolved by [ADR-0004](decisions/0004-distribution.md).

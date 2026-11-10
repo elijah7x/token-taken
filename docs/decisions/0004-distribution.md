@@ -1,0 +1,64 @@
+# ADR-0004: Developer ID distribution
+
+## Status
+
+Accepted
+
+## Date
+
+2026-11-10
+
+## Context
+
+- Token Taken ships outside the Mac App Store, so Gatekeeper needs Developer ID-signed and notarized distribution artifacts.
+- The app contains `TokenTakenKit.framework`, the `token-taken` CLI, and the pinned tokscale executable. Every nested executable must have the hardened runtime and a secure timestamp before the app is sealed.
+- Debug builds must remain usable without Developer ID credentials or access to Apple's timestamp service.
+- The first notarization of a new app can take much longer than later submissions. The owner's previous first submission took nearly two days.
+- Release outputs and notarization evidence must remain outside the public source tree.
+
+## Decision
+
+### Artifact and updates
+
+- Distribute a notarized, stapled DMG containing `Token Taken.app` and an `/Applications` symlink. `scripts/release.sh` builds universal arm64 and x86_64 binaries, verifies the locked engine archives, signs inside out, creates the DMG, and submits it with `notarytool`.
+- Use manual downloads and updates for v0.1. Do not add Sparkle or another automatic updater in v0.1; revisit update delivery after the first release.
+- Keep DerivedData, DMG staging, and release DMGs under the artifact root's `local-packages/` directory, never in the repository.
+- Submit an initial Developer ID build for notarization as early as possible, even with a placeholder icon. Do not postpone the first submission for final artwork. Rebuild, notarize, and staple the final DMG before publication.
+
+### Signing
+
+- Use a Developer ID Application identity from the signing keychain, with `TOKEN_TAKEN_TEAM_ID` selecting the team. `TOKEN_TAKEN_SIGNING_IDENTITY` may override the default `Developer ID Application` name when a more specific identity or certificate hash is needed.
+- Enable the hardened runtime for release code. Sign nested frameworks and helper executables before signing the app, following Apple's [nested-code guidance](https://developer.apple.com/library/archive/technotes/tn2206/_index.html#//apple_ref/doc/uid/DTS40007919-CH1-TNTAG13). The release script re-signs the framework, CLI, tokscale, and app in that order with `--options runtime --timestamp` and the applicable entitlements.
+- In the `Bundle helper tools` build phase, a real signing identity uses `--options runtime --timestamp`. Ad-hoc signing (`-`) keeps `--timestamp=none` and omits the runtime option. Stamps in `DERIVED_FILE_DIR` record both the source and the identity used for the current helper so switching either direction between Debug and Release re-signs it.
+- Give the app and CLI separate minimal entitlements files. Neither contains `com.apple.security.app-sandbox`; both entitlement dictionaries are empty.
+- The CLI keeps `@executable_path/../Frameworks` in `LD_RUNPATH_SEARCH_PATHS`. From `Contents/Helpers/token-taken`, this resolves to `Contents/Frameworks/TokenTakenKit.framework`, so no external framework path or library-validation exception is required.
+
+### Notarization and credentials
+
+- Authenticate `notarytool` only with `NOTARY_PROFILE` and `--keychain-profile`. Apple IDs, app-specific passwords, API keys, and signing private keys must not appear in the script, environment files, or Git. Create the keychain profile interactively before running a release.
+- Use `scripts/release.sh all --no-wait` for the early submission. A run with `--wait` staples the DMG after acceptance; a no-wait run prints the `xcrun stapler staple` command to use after acceptance.
+- A successful submission is not a successful notarization. Publish only the final accepted and stapled DMG.
+
+### Tokscale runtime evidence
+
+The lock file pins tokscale 4.21.0 from `@tokscale/cli-darwin-arm64` and `@tokscale/cli-darwin-x64`.
+
+- The upstream [root package at v4.21.0](https://github.com/junhoyeo/tokscale/blob/v4.21.0/package.json) builds `tokscale-cli` with Cargo. Bun builds the JavaScript package launcher; that launcher is not the vendored executable.
+- The Darwin package metadata points directly to `bin/tokscale`. Inspection of the locally installed arm64 4.21.0 artifact found a Mach-O executable, only system libraries in its load commands, and no existing entitlements. It is not a Bun or Node single-file executable.
+- Therefore tokscale receives the normal hardened runtime and secure timestamp without `com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`, or `com.apple.security.cs.disable-library-validation`. No tokscale-specific entitlements file is generated.
+- The x64 artifact and final universal binary were not inspected during this decision. The release check must confirm that tokscale still launches and notarizes without runtime exceptions when the engine version or packaging changes. The npm package's optional `libFoundationModels.dylib` is not currently vendored; if it is bundled later, it must also be signed before the app and reassessed.
+
+## Consequences
+
+- Releases require XcodeGen, a valid Developer ID identity, a notarytool keychain profile, network access for secure timestamps and notarization, and a final stapling step after acceptance.
+- Debug builds remain ad-hoc and do not need Apple's timestamp service.
+- Manual v0.1 updates avoid updater signing, feed hosting, and update-security work, but users must check for and install new releases themselves.
+- Changing an engine, adding nested code, or adding a runtime entitlement requires another signing and notarization review.
+
+## Alternatives
+
+- **Mac App Store and sandboxing:** rejected because the app needs the non-sandboxed home-folder access established in ADR-0001.
+- **Ad-hoc or unsigned release artifacts:** rejected because they do not provide the required Developer ID and Gatekeeper distribution path.
+- **Sparkle in v0.1:** deferred to keep the first release pipeline small; this is not a permanent rejection.
+- **ZIP as the primary artifact:** rejected in favor of one DMG that can be notarized and stapled for an approachable drag-to-Applications install.
+- **Blanket JIT and library-validation exceptions:** rejected because the pinned native tokscale evidence does not justify weakening the hardened runtime.

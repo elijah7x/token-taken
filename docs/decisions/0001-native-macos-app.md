@@ -29,7 +29,7 @@ Accepted
 - V1 requires macOS 26.0 or later and does not support Windows or Linux.
 - The app can read supported home-folder logs read-only and write to iCloud Drive without CloudKit entitlements.
 - Native Liquid Glass is available without a compatibility material for older macOS releases.
-- Developer ID signing, notarization, and release mechanics remain open and require a future distribution ADR before release.
+- Developer ID signing, notarization, DMG packaging, and manual v0.1 updates follow [ADR-0004](0004-distribution.md).
 
 ## Alternatives
 
