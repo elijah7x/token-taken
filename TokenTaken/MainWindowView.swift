@@ -31,6 +31,7 @@ struct MainWindowView: View {
                     .transition(.opacity)
             case .settings:
                 SettingsView()
+                    .padding(.top, 56)
                     .transition(.opacity)
             }
         }
