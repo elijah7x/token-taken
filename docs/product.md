@@ -67,7 +67,7 @@ token-taken models --period month --json
 - Target agents: Claude Code, Codex, Cursor, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Qoder, Factory Droid, and Grok CLI. Shipping coverage must be explicit and depends on the spike.
 - Support device-local sources parsed from logs on the current Mac and account-scoped sources fetched from a provider account and visible from multiple Macs.
 - Report uncached input as `input`, plus `cacheRead`, `cacheWrite`, `output`, and `reasoning` categories.
-- Refresh on launch, periodically, and on demand, using incremental collection where the engine supports it.
+- Refresh on launch, on demand, and with a fixed 4-hour fallback while running, with no user-configurable interval, to keep background cost minimal (owner decision 2026-11-10); use incremental collection where the engine supports it.
 
 ### Presentation and distribution
 

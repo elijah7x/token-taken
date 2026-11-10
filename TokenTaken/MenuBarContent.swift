@@ -51,27 +51,34 @@ struct MenuBarContent: View {
 
             Divider()
 
-            if let note = model.statusIssueNote {
-                Button {
-                    router.route = .settings
-                    openWindow(id: MainWindowView.windowID)
-                    NSApplication.shared.activate()
-                } label: {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(AppModel.statusIssueDotColor)
-                            .frame(width: 6, height: 6)
-                            .accessibilityHidden(true)
-                        Text(note)
-                            .font(.system(size: 11))
-                            .foregroundStyle(AppModel.statusIssueTextColor)
-                            .lineLimit(1)
+            TimelineView(.everyMinute) { _ in
+                let hasIssue = model.hasStatusIssue
+                let tooltip = model.statusTooltip(refreshCoordinator: refreshCoordinator)
+                HStack(spacing: 8) {
+                    Button {
+                        router.route = .settings
+                        openWindow(id: MainWindowView.windowID)
+                        NSApplication.shared.activate()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(hasIssue ? AppModel.statusIssueDotColor : Palette.liveDot)
+                                .frame(width: 6, height: 6)
+                                .accessibilityHidden(true)
+                            statusLabel
+                                .font(.system(size: 11))
+                                .foregroundStyle(hasIssue ? AppModel.statusIssueTextColor : Palette.muted)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help(tooltip)
+
+                    RefreshNowButton(refreshCoordinator: refreshCoordinator)
+                        .keyboardShortcut("r", modifiers: .command)
                 }
-                .buttonStyle(.plain)
-                .help(model.statusTooltip(refreshCoordinator: refreshCoordinator))
             }
 
             HStack(alignment: .center) {
@@ -109,6 +116,16 @@ struct MenuBarContent: View {
         .padding(14)
         .frame(width: 280)
         .onAppear { model.refresh() }
+    }
+
+    private var statusLabel: Text {
+        if refreshCoordinator?.isRefreshing == true {
+            return Text("Updating…")
+        }
+        if let note = model.statusIssueNote {
+            return Text(model.statusText) + Text(verbatim: " · ") + Text(note)
+        }
+        return Text(model.statusText)
     }
 }
 

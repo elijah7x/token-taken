@@ -150,27 +150,32 @@ private struct PeriodBar: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
             Spacer(minLength: 12)
-            // Relative time ("5 min ago") and staleness must re-render as the clock advances.
-            TimelineView(.everyMinute) { _ in
-                let hasIssue = model.hasStatusIssue
-                let tooltip = model.statusTooltip(refreshCoordinator: refreshCoordinator)
-                Button {
-                    router.route = .settings
-                } label: {
-                    HStack(spacing: 7) {
-                        Circle()
-                            .fill(hasIssue ? AppModel.statusIssueDotColor : Palette.liveDot)
-                            .frame(width: 6, height: 6)
-                            .accessibilityHidden(true)
-                        statusLabel
-                            .font(.system(size: 12))
-                            .foregroundStyle(hasIssue ? AppModel.statusIssueTextColor : Palette.muted)
-                            .lineLimit(1)
+            HStack(spacing: 8) {
+                // Relative time ("5 min ago") and staleness must re-render as the clock advances.
+                TimelineView(.everyMinute) { _ in
+                    let hasIssue = model.hasStatusIssue
+                    let tooltip = model.statusTooltip(refreshCoordinator: refreshCoordinator)
+                    Button {
+                        router.route = .settings
+                    } label: {
+                        HStack(spacing: 7) {
+                            Circle()
+                                .fill(hasIssue ? AppModel.statusIssueDotColor : Palette.liveDot)
+                                .frame(width: 6, height: 6)
+                                .accessibilityHidden(true)
+                            statusLabel
+                                .font(.system(size: 12))
+                                .foregroundStyle(hasIssue ? AppModel.statusIssueTextColor : Palette.muted)
+                                .lineLimit(1)
+                        }
+                        .contentShape(Rectangle())
                     }
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .help(tooltip)
                 }
-                .buttonStyle(.plain)
-                .help(tooltip)
+
+                RefreshNowButton(refreshCoordinator: refreshCoordinator)
+                    .keyboardShortcut("r", modifiers: .command)
             }
         }
         .padding(.horizontal, 22)
@@ -178,6 +183,9 @@ private struct PeriodBar: View {
     }
 
     private var statusLabel: Text {
+        if refreshCoordinator?.isRefreshing == true {
+            return Text("Updating…")
+        }
         if let note = model.statusIssueNote {
             return Text(model.statusText) + Text(verbatim: " · ") + Text(note)
         }
@@ -195,6 +203,51 @@ private struct PeriodBar: View {
             return "This year · \(start.formatted(.dateTime.year()))"
         case .all:
             return "All time · since \(start.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)))"
+        }
+    }
+}
+
+struct RefreshNowButton: View {
+    let refreshCoordinator: RefreshCoordinator?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isSpinning = false
+
+    private var isRefreshing: Bool {
+        refreshCoordinator?.isRefreshing == true
+    }
+
+    var body: some View {
+        Button {
+            Task { await refreshCoordinator?.refresh() }
+        } label: {
+            Group {
+                if isRefreshing && reduceMotion {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Palette.muted)
+                        .rotationEffect(.degrees(isSpinning ? 360 : 0))
+                        .animation(
+                            isSpinning ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default,
+                            value: isSpinning
+                        )
+                }
+            }
+            .frame(width: 18, height: 18)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .disabled(refreshCoordinator == nil || isRefreshing)
+        .help(Text("Refresh now"))
+        .accessibilityLabel(Text("Refresh now"))
+        .onChange(of: isRefreshing, initial: true) { _, refreshing in
+            isSpinning = refreshing && !reduceMotion
+        }
+        .onChange(of: reduceMotion) { _, reduced in
+            isSpinning = isRefreshing && !reduced
         }
     }
 }

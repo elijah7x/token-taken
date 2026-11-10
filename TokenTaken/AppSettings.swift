@@ -15,7 +15,6 @@ final class AppSettings {
         case condensation
     }
 
-    static let refreshIntervalOptions = [0, 5, 15, 30, 60]
     static let defaultInterfaceTransparency = 0.5
 
     var theme: AppTheme {
@@ -29,14 +28,6 @@ final class AppSettings {
         didSet {
             guard interfaceTransparency != oldValue else { return }
             defaults.set(interfaceTransparency, forKey: Keys.interfaceTransparency)
-        }
-    }
-
-    var refreshIntervalMinutes: Int {
-        didSet {
-            guard refreshIntervalMinutes != oldValue else { return }
-            defaults.set(refreshIntervalMinutes, forKey: Keys.refreshIntervalMinutes)
-            onRefreshIntervalChange?()
         }
     }
 
@@ -90,23 +81,20 @@ final class AppSettings {
 
     private var launchAtLoginStatus: SMAppService.Status
     @ObservationIgnored private let defaults: UserDefaults
-    @ObservationIgnored var onRefreshIntervalChange: (() -> Void)?
     @ObservationIgnored var onSyncEnabledChange: (() -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        defaults.removeObject(forKey: Keys.refreshIntervalMinutes)
         defaults.register(defaults: [
             Keys.theme: AppTheme.liquidGlass.rawValue,
             Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
-            Keys.refreshIntervalMinutes: 15,
             Keys.syncEnabled: false,
             Keys.heroStyle: HeroStyle.confluence.rawValue,
         ])
 
         theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
-        let storedInterval = defaults.integer(forKey: Keys.refreshIntervalMinutes)
-        refreshIntervalMinutes = Self.refreshIntervalOptions.contains(storedInterval) ? storedInterval : 15
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
         heroStyle = HeroStyle(rawValue: defaults.string(forKey: Keys.heroStyle) ?? "") ?? .confluence

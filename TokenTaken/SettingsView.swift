@@ -237,29 +237,34 @@ private struct GeneralSettingsTab: View {
                         Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                     }
                 }
-                Picker("Refresh every", selection: $settings.refreshIntervalMinutes) {
-                    ForEach(AppSettings.refreshIntervalOptions, id: \.self) { minutes in
-                        if minutes == 0 {
-                            Text("Manual").tag(minutes)
-                        } else {
-                            Text("\(minutes) minutes").tag(minutes)
+                LabeledContent("Last updated") {
+                    TimelineView(.everyMinute) { _ in
+                        HStack(spacing: 10) {
+                            Group {
+                                if refreshCoordinator?.isRefreshing == true {
+                                    Text("Updating…")
+                                } else if let lastRefresh = refreshCoordinator?.lastRefresh {
+                                    if Date.now.timeIntervalSince(lastRefresh) < 60 {
+                                        Text("Updated · just now")
+                                    } else {
+                                        Text(verbatim: Self.relativeFormatter.localizedString(for: lastRefresh, relativeTo: .now))
+                                    }
+                                } else {
+                                    Text("Not updated yet")
+                                }
+                            }
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+
+                            Button("Refresh now") {
+                                Task { await refreshCoordinator?.refresh() }
+                            }
+                            .disabled(refreshCoordinator == nil || refreshCoordinator?.isRefreshing == true)
+
+                            if refreshCoordinator?.isRefreshing == true {
+                                ProgressView().controlSize(.small)
+                            }
                         }
-                    }
-                }
-                HStack {
-                    Button("Refresh now") {
-                        Task { await refreshCoordinator?.refresh() }
-                    }
-                    .disabled(refreshCoordinator == nil || refreshCoordinator?.isRefreshing == true)
-                    if refreshCoordinator?.isRefreshing == true {
-                        ProgressView().controlSize(.small)
-                    }
-                }
-                LabeledContent("Last refresh") {
-                    if let lastRefresh = refreshCoordinator?.lastRefresh {
-                        Text(lastRefresh, style: .relative)
-                    } else {
-                        Text("Never")
                     }
                 }
                 if let error = model.storageError {
@@ -271,6 +276,12 @@ private struct GeneralSettingsTab: View {
         .formStyle(.grouped)
         .onAppear { settings.refreshLaunchAtLoginStatus() }
     }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
 }
 
 private struct PreviewSelectionTile<Preview: View>: View {

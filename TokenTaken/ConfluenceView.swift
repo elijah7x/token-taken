@@ -22,22 +22,32 @@ struct ConfluenceView: View {
         GeometryReader { proxy in
             let layout = ConfluenceLayout(summary: summary, size: proxy.size)
             let activeTarget = hover?.target ?? focused
+            let particleTracks = layout.particleTracks(
+                activeTarget: activeTarget,
+                reduceTransparency: reduceTransparency
+            )
 
             ZStack(alignment: .topLeading) {
-                TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !appearsActive)) { timeline in
-                    ConfluenceScene(
-                        layout: layout,
-                        values: layout.animationValues,
-                        time: reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch),
-                        activeTarget: activeTarget,
-                        isDark: scheme == .dark,
-                        reduceTransparency: reduceTransparency,
-                        focused: $focused
-                    )
-                    .animation(
-                        reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.8),
-                        value: layout.animationValues
-                    )
+                ConfluenceScene(
+                    layout: layout,
+                    values: layout.animationValues,
+                    activeTarget: activeTarget,
+                    isDark: scheme == .dark,
+                    reduceTransparency: reduceTransparency,
+                    focused: $focused
+                )
+                .animation(
+                    reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.8),
+                    value: layout.animationValues
+                )
+
+                if !reduceMotion {
+                    TimelineView(.animation(minimumInterval: 1 / 30, paused: !appearsActive)) { timeline in
+                        ConfluenceParticleLayer(
+                            tracks: particleTracks,
+                            time: timeline.date.timeIntervalSince(epoch)
+                        )
+                    }
                 }
 
                 if let hover, let stream = layout.stream(for: hover.target) {
@@ -117,12 +127,11 @@ private enum ConfluenceTarget: Hashable {
     }
 }
 
-// MARK: - Animated scene
+// MARK: - Static scene
 
 private struct ConfluenceScene: View, @MainActor Animatable {
     let layout: ConfluenceLayout
     var values: ConfluenceValues
-    let time: Double
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
     let reduceTransparency: Bool
@@ -140,7 +149,6 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             Canvas { context, _ in
                 ConfluenceRenderer(
                     layout: current,
-                    time: time,
                     activeTarget: activeTarget,
                     isDark: isDark,
                     reduceTransparency: reduceTransparency
@@ -179,6 +187,78 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
         }
         .animation(.easeOut(duration: 0.16), value: activeTarget)
+    }
+}
+
+// MARK: - Animated particles
+
+private struct ConfluenceParticleSample: Equatable {
+    let point: CGPoint
+    let distance: CGFloat
+}
+
+private struct ConfluenceParticleTrack: Equatable {
+    let samples: [ConfluenceParticleSample]
+    let length: CGFloat
+    let speed: Double
+    let radius: CGFloat
+    let color: Color
+    let isDimmed: Bool
+
+    func point(at distance: CGFloat) -> CGPoint {
+        guard samples.count > 1 else { return samples.first?.point ?? .zero }
+        var lowerBound = 0
+        var upperBound = samples.count - 1
+        while lowerBound < upperBound {
+            let middle = (lowerBound + upperBound) / 2
+            if samples[middle].distance < distance {
+                lowerBound = middle + 1
+            } else {
+                upperBound = middle
+            }
+        }
+        let upperIndex = max(1, lowerBound)
+        let lower = samples[upperIndex - 1]
+        let upper = samples[upperIndex]
+        let span = upper.distance - lower.distance
+        let amount = span > 0 ? (distance - lower.distance) / span : 0
+        return CGPoint(
+            x: lower.point.x + (upper.point.x - lower.point.x) * amount,
+            y: lower.point.y + (upper.point.y - lower.point.y) * amount
+        )
+    }
+}
+
+private struct ConfluenceParticleLayer: View {
+    let tracks: [ConfluenceParticleTrack]
+    let time: Double
+
+    var body: some View {
+        Canvas { context, _ in
+            let spacing: CGFloat = 30
+            for track in tracks where !track.isDimmed {
+                guard track.length > 0 else { continue }
+                let travelled = CGFloat(time * track.speed)
+                let offset = (1 + travelled).truncatingRemainder(dividingBy: spacing)
+                let diameter = track.radius * 2
+                var distance = offset
+                while distance <= track.length {
+                    let point = track.point(at: distance)
+                    context.fill(
+                        Path(ellipseIn: CGRect(
+                            x: point.x - track.radius,
+                            y: point.y - track.radius,
+                            width: diameter,
+                            height: diameter
+                        )),
+                        with: .color(track.color)
+                    )
+                    distance += spacing
+                }
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -359,7 +439,7 @@ private struct ConfluenceLayout {
         let innerTop: CGFloat
         let innerHeight: CGFloat
         let ribbon: Path
-        let centerLine: Path
+        let centerSamples: [ConfluenceParticleSample]
         var labelFrame: CGRect = .zero
         var leader: Path?
 
@@ -574,6 +654,24 @@ private struct ConfluenceLayout {
         (sources + categories).first { $0.target == target }
     }
 
+    func particleTracks(
+        activeTarget: ConfluenceTarget?,
+        reduceTransparency: Bool
+    ) -> [ConfluenceParticleTrack] {
+        (sources + categories).compactMap { stream in
+            guard stream.value > 0 else { return nil }
+            let highlighted = activeTarget == stream.target
+            return ConfluenceParticleTrack(
+                samples: stream.centerSamples,
+                length: stream.centerSamples.last?.distance ?? 0,
+                speed: 36 * stream.value / flowBasis,
+                radius: max(0.65, min(4, stream.innerHeight * 0.16)) * 0.5,
+                color: reduceTransparency ? .white : .white.opacity(highlighted ? 0.82 : 0.48),
+                isDimmed: activeTarget != nil && !highlighted
+            )
+        }
+    }
+
     func hitTest(_ point: CGPoint) -> ConfluenceTarget? {
         for stream in sources + categories {
             if stream.labelFrame.insetBy(dx: -3, dy: -2).contains(point) {
@@ -651,7 +749,7 @@ private struct ConfluenceLayout {
                 endTop: endY,
                 endBottom: endY + height
             )
-            let centerLine = centerPath(
+            let centerSamples = makeCenterSamples(
                 startX: startX,
                 startY: startY + height / 2,
                 endX: endX,
@@ -670,7 +768,7 @@ private struct ConfluenceLayout {
                 innerTop: innerY,
                 innerHeight: height,
                 ribbon: ribbon,
-                centerLine: centerLine
+                centerSamples: centerSamples
             ))
             innerY += height
             outerY += height + gap
@@ -754,16 +852,41 @@ private struct ConfluenceLayout {
         return path
     }
 
-    private static func centerPath(startX: CGFloat, startY: CGFloat, endX: CGFloat, endY: CGFloat) -> Path {
+    private static func makeCenterSamples(
+        startX: CGFloat,
+        startY: CGFloat,
+        endX: CGFloat,
+        endY: CGFloat
+    ) -> [ConfluenceParticleSample] {
+        let sampleCount = 40
         let middleX = (startX + endX) / 2
-        var path = Path()
-        path.move(to: CGPoint(x: startX, y: startY))
-        path.addCurve(
-            to: CGPoint(x: endX, y: endY),
-            control1: CGPoint(x: middleX, y: startY),
-            control2: CGPoint(x: middleX, y: endY)
-        )
-        return path
+        var samples: [ConfluenceParticleSample] = []
+        samples.reserveCapacity(sampleCount + 1)
+        var previous = CGPoint(x: startX, y: startY)
+        var distance: CGFloat = 0
+
+        for index in 0...sampleCount {
+            let t = CGFloat(index) / CGFloat(sampleCount)
+            let inverse = 1 - t
+            let point = CGPoint(
+                x: inverse * inverse * inverse * startX
+                    + 3 * inverse * inverse * t * middleX
+                    + 3 * inverse * t * t * middleX
+                    + t * t * t * endX,
+                y: inverse * inverse * inverse * startY
+                    + 3 * inverse * inverse * t * startY
+                    + 3 * inverse * t * t * endY
+                    + t * t * t * endY
+            )
+            if index > 0 {
+                let dx = point.x - previous.x
+                let dy = point.y - previous.y
+                distance += (dx * dx + dy * dy).squareRoot()
+            }
+            samples.append(ConfluenceParticleSample(point: point, distance: distance))
+            previous = point
+        }
+        return samples
     }
 }
 
@@ -813,7 +936,6 @@ private struct ConfluenceValues: VectorArithmetic, Sendable {
 
 private struct ConfluenceRenderer {
     let layout: ConfluenceLayout
-    let time: Double
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
     let reduceTransparency: Bool
@@ -896,22 +1018,5 @@ private struct ConfluenceRenderer {
         if highlighted && !reduceTransparency {
             context.stroke(stream.ribbon, with: .color(.white.opacity(0.5)), lineWidth: 0.8)
         }
-
-        guard !dimmed, stream.value > 0 else { return }
-        let lineWidth = max(0.65, min(4, stream.innerHeight * 0.16))
-        let phase = CGFloat(-time * 36 * stream.value / layout.flowBasis)
-        let flowColor = reduceTransparency
-            ? Color.white
-            : Color.white.opacity(highlighted ? 0.82 : 0.48)
-        context.stroke(
-            stream.centerLine,
-            with: .color(flowColor),
-            style: StrokeStyle(
-                lineWidth: lineWidth,
-                lineCap: .round,
-                dash: [2, 28],
-                dashPhase: phase
-            )
-        )
     }
 }

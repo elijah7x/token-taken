@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 import Observation
@@ -12,6 +13,11 @@ enum EngineStatus: Equatable {
 @Observable
 @MainActor
 final class RefreshCoordinator {
+    /// Refresh is manual-first to keep background cost near zero (owner decision 2026-11-10);
+    /// a 4-hour fallback only keeps long-running sessions from going stale.
+    static let fallbackRefreshInterval: TimeInterval = 4 * 60 * 60
+    static let fallbackRefreshTolerance: TimeInterval = 15 * 60
+
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
     private(set) var health: [SourceHealth]
@@ -29,6 +35,8 @@ final class RefreshCoordinator {
     @ObservationIgnored private let device: Device
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var syncTask: Task<Void, Never>?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private var lastAttempt: Date?
     @ObservationIgnored private let syncWorker = SyncWorker()
 
     init(settings: AppSettings) throws {
@@ -38,9 +46,6 @@ final class RefreshCoordinator {
         health = try store.health().map { $0.markingStale() }
         lastRefresh = health.compactMap(\.lastSuccess).max()
         updateEngineStatus()
-        settings.onRefreshIntervalChange = { [weak self] in
-            self?.restart()
-        }
         settings.onSyncEnabledChange = { [weak self] in
             guard let self else { return }
             self.syncTask?.cancel()
@@ -56,12 +61,8 @@ final class RefreshCoordinator {
 
     func start() {
         guard refreshTask == nil else { return }
+        observeWakeIfNeeded()
         scheduleLoop(refreshImmediately: true)
-    }
-
-    func restart() {
-        guard refreshTask != nil else { return }
-        scheduleLoop(refreshImmediately: false)
     }
 
     func updateEngineStatus() {
@@ -96,6 +97,7 @@ final class RefreshCoordinator {
         let store = store
         let device = device
         let attemptedAt = Date.now
+        lastAttempt = attemptedAt
         let runner = CollectionRunner(store: store, device: device, collectors: collectors)
         let results = await Task.detached(priority: .utility) {
             await runner.runAll(now: attemptedAt)
@@ -202,23 +204,56 @@ final class RefreshCoordinator {
         func collect() async throws -> CollectionBatch { throw CollectorError.sourceUnavailable }
     }
 
+    private func observeWakeIfNeeded() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleWake()
+            }
+        }
+    }
+
+    private func handleWake() {
+        guard !isRefreshing else { return }
+        if let reference = lastRefresh ?? lastAttempt,
+           Date.now.timeIntervalSince(reference) > Self.fallbackRefreshInterval {
+            scheduleLoop(refreshImmediately: true)
+        }
+    }
+
     private func scheduleLoop(refreshImmediately: Bool) {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             guard let self else { return }
-            if refreshImmediately {
+            if refreshImmediately, !self.isRefreshing {
                 await self.refresh()
             }
             while !Task.isCancelled {
-                let interval = self.settings.refreshIntervalMinutes
-                guard interval > 0 else { break }
+                let delay: TimeInterval
+                if let lastRefresh = self.lastRefresh {
+                    let remaining = Self.fallbackRefreshInterval - Date.now.timeIntervalSince(lastRefresh)
+                    delay = remaining > 0 ? remaining : Self.fallbackRefreshInterval
+                } else {
+                    delay = Self.fallbackRefreshInterval
+                }
                 do {
-                    try await Task.sleep(for: .seconds(interval * 60))
+                    try await Task.sleep(
+                        for: .seconds(delay),
+                        tolerance: .seconds(Self.fallbackRefreshTolerance)
+                    )
                 } catch {
                     break
                 }
                 guard !Task.isCancelled else { break }
-                guard interval == self.settings.refreshIntervalMinutes else { continue }
+                guard !self.isRefreshing else { continue }
+                if let lastRefresh = self.lastRefresh,
+                   Date.now.timeIntervalSince(lastRefresh) < Self.fallbackRefreshInterval {
+                    continue
+                }
                 await self.refresh()
             }
         }

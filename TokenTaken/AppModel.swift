@@ -65,10 +65,10 @@ final class AppModel {
             return "Storage unavailable"
         }
         guard let refreshCoordinator else {
-            return "Not collected yet"
+            return "Not updated yet"
         }
         if refreshCoordinator.isRefreshing {
-            return "Collecting…"
+            return "Updating…"
         }
         switch refreshCoordinator.engineStatus {
         case .found:
@@ -80,11 +80,11 @@ final class AppModel {
         }
         if let lastRefresh = refreshCoordinator.lastRefresh {
             // Collection finishes a moment after the view samples `.now`; never phrase it as future time.
-            if Date.now.timeIntervalSince(lastRefresh) < 60 { return "Collected · just now" }
+            if Date.now.timeIntervalSince(lastRefresh) < 60 { return "Updated · just now" }
             let relative = Self.relativeFormatter.localizedString(for: lastRefresh, relativeTo: .now)
-            return "Collected · \(relative)"
+            return "Updated · \(relative)"
         }
-        return isEmpty ? "No collected data yet" : "Not collected yet"
+        return "Not updated yet"
     }
 
     private var selectedPeriod: Period
