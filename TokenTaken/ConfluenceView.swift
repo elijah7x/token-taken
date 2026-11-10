@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import SwiftUI
 import TokenTakenKit
 
@@ -13,7 +14,6 @@ struct ConfluenceView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
     @State private var hover: ConfluenceHover?
-    @State private var epoch = Date.now
     @FocusState private var focused: ConfluenceTarget?
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -42,12 +42,9 @@ struct ConfluenceView: View {
                 )
 
                 if !reduceMotion {
-                    TimelineView(.animation(minimumInterval: 1 / 30, paused: !appearsActive)) { timeline in
-                        ConfluenceParticleLayer(
-                            tracks: particleTracks,
-                            time: timeline.date.timeIntervalSince(epoch)
-                        )
-                    }
+                    ConfluenceParticleLayer(tracks: particleTracks, isActive: appearsActive)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
 
                 if let hover, let stream = layout.stream(for: hover.target) {
@@ -198,67 +195,199 @@ private struct ConfluenceParticleSample: Equatable {
 }
 
 private struct ConfluenceParticleTrack: Equatable {
+    let id: String
     let samples: [ConfluenceParticleSample]
     let length: CGFloat
     let speed: Double
     let radius: CGFloat
     let color: Color
     let isDimmed: Bool
+}
 
-    func point(at distance: CGFloat) -> CGPoint {
-        guard samples.count > 1 else { return samples.first?.point ?? .zero }
-        var lowerBound = 0
-        var upperBound = samples.count - 1
-        while lowerBound < upperBound {
-            let middle = (lowerBound + upperBound) / 2
-            if samples[middle].distance < distance {
-                lowerBound = middle + 1
-            } else {
-                upperBound = middle
-            }
+private struct ConfluenceParticleLayer: NSViewRepresentable {
+    let tracks: [ConfluenceParticleTrack]
+    let isActive: Bool
+
+    func makeNSView(context: Context) -> ConfluenceParticleView {
+        let view = ConfluenceParticleView(frame: .zero)
+        view.updateTracks(tracks)
+        view.isActive = isActive
+        return view
+    }
+
+    func updateNSView(_ view: ConfluenceParticleView, context: Context) {
+        if view.tracks != tracks {
+            view.updateTracks(tracks)
         }
-        let upperIndex = max(1, lowerBound)
-        let lower = samples[upperIndex - 1]
-        let upper = samples[upperIndex]
-        let span = upper.distance - lower.distance
-        let amount = span > 0 ? (distance - lower.distance) / span : 0
-        return CGPoint(
-            x: lower.point.x + (upper.point.x - lower.point.x) * amount,
-            y: lower.point.y + (upper.point.y - lower.point.y) * amount
-        )
+        view.isActive = isActive
     }
 }
 
-private struct ConfluenceParticleLayer: View {
-    let tracks: [ConfluenceParticleTrack]
-    let time: Double
+private final class ConfluenceParticleView: NSView {
+    private(set) var tracks: [ConfluenceParticleTrack] = []
+    var isActive = true {
+        didSet {
+            if oldValue != isActive { updatePlayback() }
+        }
+    }
 
-    var body: some View {
-        Canvas { context, _ in
-            let spacing: CGFloat = 30
-            for track in tracks where !track.isDimmed {
-                guard track.length > 0 else { continue }
-                let travelled = CGFloat(time * track.speed)
-                let offset = (1 + travelled).truncatingRemainder(dividingBy: spacing)
-                let diameter = track.radius * 2
-                var distance = offset
-                while distance <= track.length {
-                    let point = track.point(at: distance)
-                    context.fill(
-                        Path(ellipseIn: CGRect(
-                            x: point.x - track.radius,
-                            y: point.y - track.radius,
-                            width: diameter,
-                            height: diameter
-                        )),
-                        with: .color(track.color)
-                    )
-                    distance += spacing
-                }
+    private let particleSpacing: CGFloat = 30
+    private var trackLayers: [String: CALayer] = [:]
+    private var paused = false
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.isGeometryFlipped = true
+        layer?.masksToBounds = true
+        updateContentsScale()
+        updatePlayback()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("Unsupported initializer")
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSWindow.didChangeOcclusionStateNotification,
+            object: nil
+        )
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowOcclusionDidChange(_:)),
+                name: NSWindow.didChangeOcclusionStateNotification,
+                object: window
+            )
+        }
+        updateContentsScale()
+        updatePlayback()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        updateContentsScale()
+    }
+
+    @objc private func windowOcclusionDidChange(_ notification: Notification) {
+        updatePlayback()
+    }
+
+    func updateTracks(_ tracks: [ConfluenceParticleTrack]) {
+        let previous = Dictionary(uniqueKeysWithValues: self.tracks.map { ($0.id, $0) })
+        let identifiers = Set(tracks.map(\.id))
+        let staleIdentifiers = trackLayers.keys.filter { !identifiers.contains($0) }
+        for identifier in staleIdentifiers {
+            trackLayers[identifier]?.removeFromSuperlayer()
+            trackLayers.removeValue(forKey: identifier)
+        }
+
+        for track in tracks {
+            if let existing = trackLayers[track.id], let old = previous[track.id],
+               old.samples == track.samples, old.speed == track.speed, old.radius == track.radius {
+                applyAppearance(track, to: existing, animated: true)
+                continue
+            }
+            trackLayers[track.id]?.removeFromSuperlayer()
+            guard let trackLayer = makeTrackLayer(for: track) else { continue }
+            trackLayers[track.id] = trackLayer
+            applyAppearance(track, to: trackLayer, animated: false)
+        }
+        self.tracks = tracks
+    }
+
+    private func makeTrackLayer(for track: ConfluenceParticleTrack) -> CALayer? {
+        guard let root = layer, let first = track.samples.first, track.length > 0, track.speed > 0 else {
+            return nil
+        }
+        let path = CGMutablePath()
+        path.move(to: first.point)
+        for sample in track.samples.dropFirst() {
+            path.addLine(to: sample.point)
+        }
+
+        let trackLayer = CALayer()
+        trackLayer.frame = root.bounds
+        trackLayer.contentsScale = backingScale
+        root.addSublayer(trackLayer)
+
+        let count = max(1, Int((track.length / particleSpacing).rounded()))
+        let spacing = track.length / CGFloat(count)
+        let duration = Double(track.length) / track.speed
+        let diameter = track.radius * 2
+
+        for index in 0..<count {
+            let particle = CALayer()
+            particle.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            particle.position = first.point
+            particle.cornerRadius = track.radius
+            particle.contentsScale = backingScale
+
+            let animation = CAKeyframeAnimation(keyPath: "position")
+            animation.path = path
+            animation.calculationMode = .paced
+            animation.repeatCount = .infinity
+            animation.duration = duration
+            animation.timeOffset = Double(index) * Double(spacing) / track.speed
+            particle.add(animation, forKey: "confluence.flow")
+            trackLayer.addSublayer(particle)
+        }
+        return trackLayer
+    }
+
+    private func applyAppearance(_ track: ConfluenceParticleTrack, to trackLayer: CALayer, animated: Bool) {
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.16)
+        CATransaction.setDisableActions(!animated)
+        trackLayer.opacity = track.isDimmed ? 0 : 1
+        let color = NSColor(track.color).cgColor
+        for particle in trackLayer.sublayers ?? [] {
+            particle.backgroundColor = color
+        }
+        CATransaction.commit()
+    }
+
+    private var backingScale: CGFloat {
+        window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    }
+
+    private func updateContentsScale() {
+        let scale = backingScale
+        layer?.contentsScale = scale
+        for trackLayer in trackLayers.values {
+            trackLayer.contentsScale = scale
+            for particle in trackLayer.sublayers ?? [] {
+                particle.contentsScale = scale
             }
         }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+    }
+
+    private func updatePlayback() {
+        let windowVisible = window?.occlusionState.contains(.visible) == true
+        let shouldPause = !isActive || !windowVisible
+        guard shouldPause != paused, let layer else { return }
+        paused = shouldPause
+
+        if shouldPause {
+            let pausedTime = layer.convertTime(CACurrentMediaTime(), from: nil)
+            layer.speed = 0
+            layer.timeOffset = pausedTime
+        } else {
+            let pausedTime = layer.timeOffset
+            layer.speed = 1
+            layer.timeOffset = 0
+            layer.beginTime = 0
+            layer.beginTime = layer.convertTime(CACurrentMediaTime(), from: nil) - pausedTime
+        }
     }
 }
 
@@ -662,6 +791,7 @@ private struct ConfluenceLayout {
             guard stream.value > 0 else { return nil }
             let highlighted = activeTarget == stream.target
             return ConfluenceParticleTrack(
+                id: stream.target.id,
                 samples: stream.centerSamples,
                 length: stream.centerSamples.last?.distance ?? 0,
                 speed: 36 * stream.value / flowBasis,
