@@ -68,6 +68,11 @@ struct CondensationView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Source mist and daily usage rain trails"))
+        .accessibilityValue(
+            summary.series.contains { !$0.isFuture && !$0.isKnown }
+                ? Text("data may be incomplete")
+                : Text(verbatim: "")
+        )
     }
 
     @ViewBuilder private var surface: some View {
@@ -194,6 +199,7 @@ private struct FieldAccessibility: View {
     }
 
     private func trailValue(_ trail: CondensationLayout.Trail) -> Text {
+        guard trail.point.isKnown else { return Text("Unavailable") }
         let value = Text("\(TokenFormat.short(trail.point.total)) tokens")
         guard let top = trail.point.bySource.max(by: { $0.value < $1.value }), top.value > 0 else {
             return value
@@ -277,9 +283,13 @@ private struct FieldTooltip: View {
         case .trail(let id):
             if let trail = layout.trails.first(where: { $0.id == id }) {
                 title(trail.point.label, color: nil)
-                Text("\(TokenFormat.short(trail.point.total)) tokens").fontWeight(.medium)
-                if let top = trail.point.bySource.max(by: { $0.value < $1.value }), top.value > 0 {
-                    Text("Top: \(SourceCatalog.info(for: top.key).name)").foregroundStyle(Palette.muted)
+                if trail.point.isKnown {
+                    Text("\(TokenFormat.short(trail.point.total)) tokens").fontWeight(.medium)
+                    if let top = trail.point.bySource.max(by: { $0.value < $1.value }), top.value > 0 {
+                        Text("Top: \(SourceCatalog.info(for: top.key).name)").foregroundStyle(Palette.muted)
+                    }
+                } else {
+                    Text("Unavailable").foregroundStyle(Palette.muted)
                 }
             }
         }
@@ -303,7 +313,8 @@ private struct FieldTooltip: View {
 ///   (rx ∝ √(value / largest source)), **opacity rises with √share**; x = rank, left to right,
 ///   y staggers over three rows so neighbours don't merge. Blur expresses condensation only.
 /// - Rain trail (one per series point, x = time): **length ∝ point total**;
-///   future points draw nothing. Ripple radius = 2 + 16 · √(total / max).
+///   unknown non-future points draw a static dotted baseline stub; zero and future points draw nothing.
+///   Ripple radius = 2 + 16 · √(total / max).
 ///   `SeriesPoint` has no per-point category split, so the ripple scales with the point total
 ///   times the period's output share (a constant), i.e. it is proportional to total, not to
 ///   measured daily output. Switch to real daily output once the Kit exposes it.
@@ -386,16 +397,21 @@ struct CondensationLayout {
         let series = summary.series
         let top = max(h * 0.375, dropY + maxRadius + 36)
         let available = max(20, min(h * 0.48, h - top - 52))
-        let peak = Double(series.filter { !$0.isFuture }.map(\.total).max() ?? 0)
+        let peak = Double(series.filter { !$0.isFuture && $0.isKnown }.map(\.total).max() ?? 0)
         let step = series.count > 1 ? (w - 56) / CGFloat(series.count - 1) : 0
         trailStep = step
         let lastActual = series.lastIndex { !$0.isFuture } ?? -1
         trails = series.enumerated().compactMap { i, point in
-            guard !point.isFuture, point.total > 0, peak > 0 else { return nil }
+            guard !point.isFuture else { return nil }
+            let x = series.count == 1 ? w / 2 : 28 + step * CGFloat(i)
+            guard point.isKnown else {
+                return Trail(id: i, point: point, x: x, top: top, length: 9.5, ripple: 0, head: nil)
+            }
+            guard point.total > 0, peak > 0 else { return nil }
             let ratio = Double(point.total) / peak
             let moving = i > lastActual - 28
             return Trail(id: i, point: point,
-                         x: series.count == 1 ? w / 2 : 28 + step * CGFloat(i),
+                         x: x,
                          top: top, length: 12 + available * ratio,
                          ripple: 2 + 16 * sqrt(ratio),
                          head: moving ? (0.07 + 0.22 * ratio, (Double(i) * 0.173).truncatingRemainder(dividingBy: 1)) : nil)
@@ -475,6 +491,17 @@ private struct CondensationRenderer {
         let highlighted = hover == .trail(t.id)
         let water = highlighted ? Palette.accent : Palette.rain
         let bottom = t.top + t.length
+        guard t.point.isKnown else {
+            var stub = Path()
+            stub.move(to: CGPoint(x: t.x, y: t.top))
+            stub.addLine(to: CGPoint(x: t.x, y: bottom))
+            context.stroke(
+                stub,
+                with: .color((highlighted ? Palette.accent : Palette.muted).opacity(highlighted ? 0.65 : 0.32)),
+                style: StrokeStyle(lineWidth: layout.trailWidth * (highlighted ? 1.6 : 1), lineCap: .round, dash: [1.5, 2.5])
+            )
+            return
+        }
         var path = Path()
         path.move(to: CGPoint(x: t.x, y: t.top))
         path.addQuadCurve(to: CGPoint(x: t.x, y: bottom), control: CGPoint(x: t.x + 2, y: t.top + t.length * 0.55))
