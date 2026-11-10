@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 import TokenTakenKit
 
@@ -30,6 +31,14 @@ private struct GeneralSettingsTab: View {
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
                 if let error = settings.launchAtLoginError {
                     Text(error).foregroundStyle(.red)
+                }
+                if settings.launchAtLoginNeedsApproval {
+                    HStack {
+                        Text("Allow Token Taken in System Settings › Login Items to finish.")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                    }
                 }
                 Picker("Refresh every", selection: $settings.refreshIntervalMinutes) {
                     ForEach(AppSettings.refreshIntervalOptions, id: \.self) { minutes in
@@ -73,6 +82,7 @@ private struct GeneralSettingsTab: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { settings.refreshLaunchAtLoginStatus() }
     }
 }
 

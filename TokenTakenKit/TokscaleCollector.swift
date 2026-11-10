@@ -54,7 +54,11 @@ public struct TokscaleCollector: UsageCollector {
                 ))
             }
         }
-        for candidate in [override].compactMap({ $0 }) + candidates {
+        // An explicit override is authoritative: never silently run a different engine.
+        if let override {
+            return FileManager.default.isExecutableFile(atPath: override.path) ? override : nil
+        }
+        for candidate in candidates {
             if FileManager.default.isExecutableFile(atPath: candidate.path) {
                 return candidate
             }

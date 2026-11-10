@@ -181,7 +181,13 @@ func runSummary(_ arguments: [String]) -> Never {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = .current
     let aggregator = UsageAggregator(store: selection.store, calendar: calendar, now: selection.now)
-    let summary = aggregator.summary(for: period)
+    let summary: UsageSummary
+    do {
+        summary = try aggregator.summary(for: period)
+    } catch {
+        writeError("token-taken: could not read usage store")
+        exit(1)
+    }
 
     let dayFormatter = DateFormatter()
     dayFormatter.locale = Locale(identifier: "en_US_POSIX")

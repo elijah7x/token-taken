@@ -71,17 +71,22 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         }
     }
 
-    public func records() -> [UsageRecord] {
-        queue.sync {
-            guard let statement = try? prepare("""
+    public func records() throws -> [UsageRecord] {
+        try queue.sync {
+            let statement = try prepare("""
                 SELECT day, device_id, source_id, model_id, input, cache_read, cache_write, output, reasoning
                 FROM usage ORDER BY day, device_id, source_id, model_id;
-                """) else { return [] }
+                """)
             defer { sqlite3_finalize(statement) }
 
             var result: [UsageRecord] = []
-            while sqlite3_step(statement) == SQLITE_ROW {
-                guard let day = UsageDay.date(from: text(statement, 0)) else { continue }
+            while true {
+                let code = sqlite3_step(statement)
+                if code == SQLITE_DONE { break }
+                guard code == SQLITE_ROW else { throw StoreError.sql(String(cString: sqlite3_errmsg(db))) }
+                guard let day = UsageDay.date(from: text(statement, 0)) else {
+                    throw StoreError.sql("invalid usage day '\(text(statement, 0))'")
+                }
                 result.append(UsageRecord(
                     day: day,
                     deviceID: text(statement, 1),
@@ -208,9 +213,9 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
 
     public var isEmpty: Bool {
         queue.sync {
-            guard let statement = try? prepare("SELECT NOT EXISTS(SELECT 1 FROM usage);"),
-                  sqlite3_step(statement) == SQLITE_ROW else { return true }
+            guard let statement = try? prepare("SELECT NOT EXISTS(SELECT 1 FROM usage);") else { return true }
             defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return true }
             return sqlite3_column_int(statement, 0) == 1
         }
     }

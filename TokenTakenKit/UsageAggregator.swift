@@ -13,8 +13,8 @@ public struct UsageAggregator: Sendable {
     }
 
     /// Ranges run from the period start through the end of today in `calendar`'s time zone.
-    public func summary(for period: Period) -> UsageSummary {
-        let entries = localizedEntries()
+    public func summary(for period: Period) throws -> UsageSummary {
+        let entries = try localizedEntries()
         let today = calendar.startOfDay(for: now)
         let end = addDays(1, to: today)
         let start: Date = switch period {
@@ -61,14 +61,14 @@ public struct UsageAggregator: Sendable {
     }
 
     /// One point per day for the last `lastDays` days, ending today.
-    public func dailyTotals(lastDays: Int) -> [SeriesPoint] {
+    public func dailyTotals(lastDays: Int) throws -> [SeriesPoint] {
         guard lastDays > 0 else { return [] }
         let today = calendar.startOfDay(for: now)
         let starts = (0..<lastDays).map { addDays($0 - lastDays + 1, to: today) }
         let first = starts[0]
         return points(
             starts: starts,
-            entries: localizedEntries().filter { $0.day >= first && $0.day <= today },
+            entries: try localizedEntries().filter { $0.day >= first && $0.day <= today },
             index: { calendar.dateComponents([.day], from: first, to: $0).day ?? -1 },
             label: { String(calendar.component(.day, from: $0)) },
             isFuture: { _ in false }
@@ -194,9 +194,9 @@ public struct UsageAggregator: Sendable {
 
     /// Records carry UTC days. Each is placed on the viewer's calendar day with the same date, a deliberate
     /// simplification until hourly UTC buckets exist (see the sync contract).
-    private func localizedEntries() -> [Entry] {
+    private func localizedEntries() throws -> [Entry] {
         var cache: [Date: Date] = [:]
-        return store.records().map { record in
+        return try store.records().map { record in
             if let day = cache[record.day] { return Entry(day: day, record: record) }
             let date = Calendar.utcGregorian.dateComponents([.year, .month, .day], from: record.day)
             let day = calendar.date(from: date).map { calendar.startOfDay(for: $0) } ?? record.day

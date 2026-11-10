@@ -121,6 +121,16 @@
         }
       }
     },
+    "Allow Token Taken in System Settings › Login Items to finish." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“系统设置 › 登录项”中允许 Token Taken 以完成设置。"
+          }
+        }
+      }
+    },
     "Available" : {
       "localizations" : {
         "zh-Hans" : {
@@ -591,6 +601,16 @@
         }
       }
     },
+    "Open Login Items" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开登录项"
+          }
+        }
+      }
+    },
     "Open Settings…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -777,16 +797,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "合成数据"
-          }
-        }
-      }
-    },
-    "Synthetic data · Not connected to collection yet" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "合成数据 · 尚未接入采集"
           }
         }
       }

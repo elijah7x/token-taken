@@ -47,28 +47,33 @@ final class AppSettings {
         }
     }
 
+    /// Mirrors the system login item, which the user can change in System Settings at any time.
     var launchAtLogin: Bool {
-        get { launchAtLoginValue }
+        get { launchAtLoginStatus == .enabled || launchAtLoginStatus == .requiresApproval }
         set {
-            guard newValue != launchAtLoginValue else { return }
             do {
                 if newValue {
                     try SMAppService.mainApp.register()
                 } else {
                     try SMAppService.mainApp.unregister()
                 }
-                launchAtLoginValue = newValue
-                defaults.set(newValue, forKey: Keys.launchAtLogin)
                 launchAtLoginError = nil
             } catch {
                 launchAtLoginError = error.localizedDescription
             }
+            refreshLaunchAtLoginStatus()
         }
+    }
+
+    var launchAtLoginNeedsApproval: Bool { launchAtLoginStatus == .requiresApproval }
+
+    func refreshLaunchAtLoginStatus() {
+        launchAtLoginStatus = SMAppService.mainApp.status
     }
 
     private(set) var launchAtLoginError: String?
 
-    private var launchAtLoginValue: Bool
+    private var launchAtLoginStatus: SMAppService.Status
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored var onRefreshIntervalChange: (() -> Void)?
 
@@ -85,7 +90,6 @@ final class AppSettings {
             Keys.refreshIntervalMinutes: 15,
             Keys.useSyntheticData: false,
             Keys.syncEnabled: false,
-            Keys.launchAtLogin: false,
         ])
 
         enabledSources = Set(defaults.stringArray(forKey: Keys.enabledSources) ?? Self.defaultEnabledSources.sorted())
@@ -94,7 +98,7 @@ final class AppSettings {
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         useSyntheticData = defaults.bool(forKey: Keys.useSyntheticData)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
-        launchAtLoginValue = defaults.bool(forKey: Keys.launchAtLogin)
+        launchAtLoginStatus = SMAppService.mainApp.status
     }
 
     private enum Keys {
@@ -103,6 +107,5 @@ final class AppSettings {
         static let tokscalePathOverride = "tokscalePathOverride"
         static let useSyntheticData = "useSyntheticData"
         static let syncEnabled = "syncEnabled"
-        static let launchAtLogin = "launchAtLogin"
     }
 }

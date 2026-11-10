@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import TokenTakenKit
 
@@ -46,7 +47,7 @@ final class SQLiteUsageStoreTests: XCTestCase {
 
         let store = try SQLiteUsageStore(url: databaseURL, readOnly: true)
         XCTAssertFalse(store.isEmpty)
-        XCTAssertEqual(store.records(), [expected])
+        XCTAssertEqual(try store.records(), [expected])
         XCTAssertEqual(store.devices, [device])
     }
 
@@ -59,14 +60,14 @@ final class SQLiteUsageStoreTests: XCTestCase {
         try store.replace(records: [codexA], sourceID: "codex", deviceID: "device-a")
         try store.replace(records: [claudeB], sourceID: "claude", deviceID: "device-b")
         try store.replace(records: [claudeA], sourceID: "claude", deviceID: "device-a")
-        XCTAssertEqual(Set(store.records()), Set([claudeA, codexA, claudeB]))
+        XCTAssertEqual(Set(try store.records()), Set([claudeA, codexA, claudeB]))
 
         let replacement = record(model: "model-c", input: 400)
         try store.replace(records: [replacement], sourceID: "claude", deviceID: "device-a")
-        XCTAssertEqual(Set(store.records()), Set([replacement, codexA, claudeB]))
+        XCTAssertEqual(Set(try store.records()), Set([replacement, codexA, claudeB]))
 
         try store.replace(records: [], sourceID: "claude", deviceID: "device-a")
-        XCTAssertEqual(Set(store.records()), Set([codexA, claudeB]))
+        XCTAssertEqual(Set(try store.records()), Set([codexA, claudeB]))
     }
 
     func testHealthRoundTrip() throws {
@@ -100,5 +101,19 @@ final class SQLiteUsageStoreTests: XCTestCase {
                 return XCTFail("Expected StoreError.open, got \(error)")
             }
         }
+    }
+
+    func testCorruptRowFailsInsteadOfBeingSkipped() throws {
+        do {
+            let store = try SQLiteUsageStore(url: databaseURL)
+            try store.replace(records: [record()], sourceID: "claude", deviceID: "device-a")
+        }
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(handle, "UPDATE usage SET day = 'not-a-day';", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+
+        let store = try SQLiteUsageStore(url: databaseURL, readOnly: true)
+        XCTAssertThrowsError(try store.records())
     }
 }

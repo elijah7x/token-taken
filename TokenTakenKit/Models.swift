@@ -172,7 +172,8 @@ public struct UsageSummary: Sendable {
 }
 
 public protocol UsageStore: Sendable {
-    func records() -> [UsageRecord]
+    /// Throws rather than returning partial data, so callers never report incomplete totals as complete.
+    func records() throws -> [UsageRecord]
     var devices: [Device] { get }
 }
 

@@ -18,10 +18,10 @@ final class UsageAggregatorTests: XCTestCase {
         groups.reduce(.zero) { $0 + $1.counts }
     }
 
-    func testBreakdownsSumToTotalForEveryPeriod() {
+    func testBreakdownsSumToTotalForEveryPeriod() throws {
         for zone in ["UTC", "Asia/Shanghai", "America/Los_Angeles"] {
             for period in Period.allCases {
-                let summary = aggregator(zone).summary(for: period)
+                let summary = try aggregator(zone).summary(for: period)
                 XCTAssertGreaterThan(summary.total.total, 0, "\(zone) \(period)")
                 XCTAssertEqual(sum(summary.bySource), summary.total, "\(zone) \(period) bySource")
                 XCTAssertEqual(sum(summary.byModel), summary.total, "\(zone) \(period) byModel")
@@ -30,10 +30,10 @@ final class UsageAggregatorTests: XCTestCase {
         }
     }
 
-    func testSeriesSumsToPeriodTotal() {
+    func testSeriesSumsToPeriodTotal() throws {
         for zone in ["UTC", "Asia/Shanghai"] {
             for period in Period.allCases {
-                let summary = aggregator(zone).summary(for: period)
+                let summary = try aggregator(zone).summary(for: period)
                 let seriesTotal = summary.series.reduce(Int64(0)) { $0 + $1.total }
                 XCTAssertEqual(seriesTotal, summary.total.total, "\(zone) \(period)")
                 for point in summary.series {
@@ -44,22 +44,22 @@ final class UsageAggregatorTests: XCTestCase {
         }
     }
 
-    func testSeriesShapes() {
+    func testSeriesShapes() throws {
         let aggregator = aggregator("UTC")
-        XCTAssertEqual(aggregator.summary(for: .day).series.count, 24)
-        XCTAssertEqual(aggregator.summary(for: .month).series.count, 30)
-        XCTAssertEqual(aggregator.summary(for: .year).series.map(\.label), (1...12).map(String.init))
-        XCTAssertEqual(aggregator.dailyTotals(lastDays: 7).count, 7)
+        XCTAssertEqual(try aggregator.summary(for: .day).series.count, 24)
+        XCTAssertEqual(try aggregator.summary(for: .month).series.count, 30)
+        XCTAssertEqual(try aggregator.summary(for: .year).series.map(\.label), (1...12).map(String.init))
+        XCTAssertEqual(try aggregator.dailyTotals(lastDays: 7).count, 7)
     }
 
-    func testBreakdownsAreSortedDescending() {
-        let summary = aggregator("UTC").summary(for: .all)
+    func testBreakdownsAreSortedDescending() throws {
+        let summary = try aggregator("UTC").summary(for: .all)
         for groups in [summary.bySource, summary.byModel, summary.byDevice] {
             XCTAssertEqual(groups.map(\.counts.total), groups.map(\.counts.total).sorted(by: >))
         }
     }
 
-    func testTotalIsCategorySum() {
+    func testTotalIsCategorySum() throws {
         let counts = TokenCounts(input: 1, cacheRead: 20, cacheWrite: 300, output: 4_000, reasoning: 50_000)
         XCTAssertEqual(counts.total, TokenCategory.allCases.reduce(Int64(0)) { $0 + counts[$1] })
         XCTAssertEqual(counts.total, 54_321)
@@ -68,14 +68,14 @@ final class UsageAggregatorTests: XCTestCase {
         }
     }
 
-    func testSameSeedGivesIdenticalData() {
+    func testSameSeedGivesIdenticalData() throws {
         XCTAssertEqual(SyntheticUsageStore(seed: 7).records(), SyntheticUsageStore(seed: 7).records())
         XCTAssertEqual(SyntheticUsageStore().records(), store.records())
         XCTAssertNotEqual(SyntheticUsageStore(seed: 7).records(), SyntheticUsageStore(seed: 8).records())
     }
 
-    func testKimiTokensAreUnpriced() {
-        let summary = aggregator("UTC").summary(for: .all)
+    func testKimiTokensAreUnpriced() throws {
+        let summary = try aggregator("UTC").summary(for: .all)
         let kimi = summary.byModel.first { $0.id == "kimi-k3.1-pro" }
         XCTAssertNotNil(kimi)
         XCTAssertGreaterThan(summary.cost.unpricedTokens, 0)
@@ -84,7 +84,7 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertEqual(summary.cost.priceTableVersion, "synthetic-2026-11")
     }
 
-    func testTokenFormat() {
+    func testTokenFormat() throws {
         XCTAssertEqual(TokenFormat.short(1_240_000_000), "1.24B")
         XCTAssertEqual(TokenFormat.short(58_300_000), "58.3M")
         XCTAssertEqual(TokenFormat.short(412_500), "412.5K")
