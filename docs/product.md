@@ -4,15 +4,15 @@ Status: pre-alpha. This document defines the v1 acceptance target. The contracts
 
 ## Problem
 
-AI coding agents record token usage in different formats and locations. Using several agents or Macs makes a complete total difficult to obtain, and repeated account-scoped data can inflate that total. Existing workflows also lack a common, machine-readable view that another tool can query.
+AI coding agents record token usage in different formats and locations. Using several agents or Macs makes a complete total difficult to obtain, and repeated records within an agent log can inflate that total. Existing workflows also lack a common, machine-readable view that another tool can query.
 
-Token Taken will present a lightweight native dashboard, reconcile usage across devices, and expose the same statistics through a CLI. Cost will remain an estimate based on a versioned price table, never a bill.
+Token Taken will present a lightweight native dashboard, combine device-local usage across Macs, and expose the same statistics through a CLI. Cost will remain an estimate based on a versioned price table, never a bill.
 
 ## Target users
 
 Token Taken is for anyone who uses one or more AI coding agents on a Mac, including people who do not use a terminal. A first-time user with supported local logs should be able to open the app and read a daily total without editing configuration files.
 
-Developers and other tools can use the planned `token-taken` CLI for the same totals and data export.
+Developers and other tools can use the `token-taken` CLI for the same totals and data export.
 
 ## Acceptance criteria
 
@@ -20,9 +20,9 @@ Developers and other tools can use the planned `token-taken` CLI for the same to
 
 - Two or more Macs using the same Apple ID can each opt in to iCloud Drive sync. Sync is off by default.
 - With sync on, the main window shows a combined total and a per-device breakdown. The attribution rules in `docs/contracts/statistics.md` must make the breakdown sum to the combined total.
-- On the vetted multi-device fixture, the combined total equals all device-local usage plus account-scoped usage after cross-device deduplication. Every input event must be counted once, identified as a duplicate, or reported as rejected with a reason.
-- Device-local usage remains attributed to its originating device. Account-scoped usage is deduplicated across devices under `docs/contracts/sync.md`.
-- A removed device leaves a tombstone and does not reappear unless the user re-enables it.
+- On the vetted multi-device fixture, the combined total equals the sum of device-local usage across synced devices. Every input event within a source must be counted once, identified as a within-source duplicate, or reported as rejected with a reason.
+- All v1 sources are device-local and remain attributed to their originating device without cross-device deduplication under `docs/contracts/sync.md`. Account-scoped cross-device deduplication is deferred ([ADR-0005](decisions/0005-collection-granularity.md)).
+- Readers and writers honor a device manifest with `tombstone: true` by excluding that device and refusing further writes to its identity (`docs/contracts/sync.md`); v1 has no UI to remove, adopt, or re-enable a device.
 
 ### P2: The app is beautiful and lightweight
 
@@ -40,8 +40,8 @@ The release check must record the reference hardware, dataset size, build config
 ### P3: Numbers are accurate and reconcilable
 
 - Before engine selection, ADR-0003's spike compares candidates against the same sanitized local samples and a manually vetted expected event ledger. Raw samples remain outside the repository.
-- The fixture set covers every agent claimed for v1, Cursor usage observed from multiple Macs, and old Zcode data. Final agent coverage depends on ADR-0003.
-- For those fixtures, `input`, `cacheRead`, `cacheWrite`, `output`, and `reasoning` token counts match the expected ledger exactly by source, model, hour, and device. Event counts also match after documented deduplication.
+- The fixture set covers every device-local agent shipped in v1, including old and native Zcode data. Cursor and Qoder are deferred ([ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md)).
+- For those fixtures, daily `input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, and `uncategorized` token counts and event counts match the expected ledger by source, model, local day, and device after documented deduplication, and 48-hour hourly activity rows match by source, hour, and device ([ADR-0005](decisions/0005-collection-granularity.md)).
 - Every total equals the sum of its displayed components. Time-period totals use the viewer's time zone and the rules in `docs/contracts/statistics.md`.
 - Collection reports malformed or unsupported records instead of silently treating them as zero. A failed refresh leaves cached data identifiable as stale.
 - Cost is calculated at read time from a versioned price table and labeled as an estimate. The same usage and price-table version must reproduce the same estimate.
@@ -53,7 +53,7 @@ The release check must record the reference hardware, dataset size, build config
 - JSON output follows `docs/contracts/cli.md`, is machine-parseable, and has a documented schema version. JSON and CSV export cover v1 data export.
 - Errors use documented exit codes and do not present partial output as a complete result.
 
-Planned example:
+Example:
 
 ```sh
 token-taken models --period month --json
@@ -63,10 +63,10 @@ token-taken models --period month --json
 
 ### Collection and statistics
 
-- Reuse a pinned open-source usage engine through a thin adapter. The candidates and spike are defined in [ADR-0003](decisions/0003-usage-engine.md).
-- Target agents: Claude Code, Codex, Cursor, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Qoder, Factory Droid, and Grok CLI. Shipping coverage must be explicit and depends on the spike.
-- Support device-local sources parsed from logs on the current Mac and account-scoped sources fetched from a provider account and visible from multiple Macs.
-- Report uncached input as `input`, plus `cacheRead`, `cacheWrite`, `output`, and `reasoning` categories.
+- Reuse the pinned `tokscale` 4.21.0 usage engine through a thin adapter, combined with native Swift collectors where required by [ADR-0003](decisions/0003-usage-engine.md) and [ADR-0005](decisions/0005-collection-granularity.md).
+- Target agents: Claude Code, Codex, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Factory Droid, and Grok CLI; Cursor (account credentials, network access, and cross-device deduplication) and Qoder (credits only, no token counts) are deferred ([ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md)).
+- All v1 sources are device-local and parsed from logs or databases on the current Mac. Account-scoped sources fetched from a provider account and deduplicated across Macs are deferred.
+- Report uncached input as `input`, plus `cacheRead`, `cacheWrite`, `output`, and `reasoning` categories, with `uncategorized` for known totals whose category split is unavailable ([ADR-0005](decisions/0005-collection-granularity.md)).
 - Refresh on launch, on demand, and with a fixed 4-hour fallback while running, with no user-configurable interval, to keep background cost minimal (owner decision 2026-11-10); use incremental collection where the engine supports it.
 
 ### Presentation and distribution
@@ -79,7 +79,7 @@ token-taken models --period month --json
 ### Synchronization and interfaces
 
 - Ship iCloud Drive sync for Macs on the same Apple ID. The toggle is opt-in and off by default.
-- Sync UTC hourly aggregate usage metadata only. Never sync prompts, responses, file paths, project or repository names, credentials, or cost.
+- Sync aggregate usage metadata only: monthly files of daily records per collecting-device local calendar day, time zone, source, and model, plus a rolling snapshot of the last 48 hours of per-source hourly rows and sanitized device/source health metadata (`docs/contracts/sync.md`). Never sync prompts, responses, file paths, project or repository names, credentials, diagnostic error messages, or cost.
 - Provide the `token-taken` CLI with JSON output and JSON/CSV export.
 - Localize the app in English and Simplified Chinese from v1.
 
@@ -105,6 +105,6 @@ These items follow v1 and are not release commitments:
 
 ## Open decisions
 
-- Engine choice, final agent coverage, timestamp granularity, and runtime packaging: [ADR-0003](decisions/0003-usage-engine.md) and `docs/contracts/upstream.md`.
-- Statistics identity, deduplication keys, time-zone behavior, and price-table semantics: `docs/contracts/statistics.md`.
-- Account-scoped cross-device deduplication within aggregate-only sync: ADR-0003 and `docs/contracts/sync.md`.
+- Engine upgrade verification and recovery of legacy total-only Codex records: [ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/upstream.md`.
+- Price-table update delivery and versioned alias-table expansion: `docs/contracts/statistics.md`.
+- Privacy-preserving account-scoped cross-device deduplication, device removal/adoption UI, and real multi-Mac iCloud Drive acceptance: [ADR-0005](decisions/0005-collection-granularity.md) and `docs/contracts/sync.md`.

@@ -1,4 +1,4 @@
-Status: Implemented v1 (2026-11-10); build, automated tests, and real multi-Mac iCloud acceptance remain pending.
+Status: Implemented v1 (2026-11-10); real multi-Mac iCloud acceptance remains pending.
 
 # Sync contract
 

@@ -4,19 +4,19 @@
 
 A small, beautiful token-usage dashboard for macOS with native Liquid Glass.
 
-**Status: Pre-alpha: specification phase, nothing to install yet.**
+**Status: Pre-alpha (v0.1.0 in development).**
 
-## Planned v1 features
+## v1 features
 
-- Day, week, month, year, and all-time totals, with per-model and per-source breakdowns.
-- One combined total across several Macs, with per-device breakdowns when iCloud sync is on.
-- A minimal menu bar extra showing today's token total.
+- Day, week (Monday start), month, year, and all-time totals, with per-model and per-source breakdowns.
+- One combined total across several Macs, with per-device breakdowns when iCloud Drive sync is on.
+- A minimal menu bar extra showing today's token total and a quick glance.
 - A native Liquid Glass theme, with a theme system designed for later Geek and Sketchbook themes.
 - A `token-taken` CLI with JSON output and JSON/CSV data export.
 - English and Simplified Chinese app interfaces through a String Catalog.
-- Cost estimates from a versioned price table. Estimates are not bills.
+- Cost estimates from a versioned price table (`tokscale-4.21.0-2026-11-10`). Estimates are not bills.
 
-Agent coverage remains open until the engine spike in [ADR-0003](docs/decisions/0003-usage-engine.md).
+Supported device-local sources in v1: Claude Code, Codex, Zcode, oh-my-pi, pi, Kimi Code, Grok, OpenCode, Gemini CLI, and Factory Droid. Cursor and Qoder are deferred; see [ADR-0003](docs/decisions/0003-usage-engine.md) and [ADR-0005](docs/decisions/0005-collection-granularity.md).
 
 ## Privacy
 
@@ -33,21 +33,23 @@ See the [privacy contract](docs/contracts/privacy.md) and [sync contract](docs/c
 
 - macOS 26.0 or later
 
-## Planned CLI preview
+## CLI
 
-The CLI does not exist yet. The planned interface includes commands such as:
+`token-taken` queries the same local store and optional iCloud Drive device snapshots as the app:
 
 ```sh
+token-taken summary --period week
 token-taken models --period month --json
+token-taken export --format csv --period all
 ```
 
-The [CLI contract](docs/contracts/cli.md) defines the planned output and error behavior.
+The [CLI contract](docs/contracts/cli.md) defines the output schema, filters, warnings, and exit codes.
 
 ## Documentation
 
 - [Product specification](docs/product.md)
 - [Architecture](docs/architecture.md)
-- Decisions: [native macOS app](docs/decisions/0001-native-macos-app.md), [iCloud Drive sync](docs/decisions/0002-icloud-drive-sync.md), [usage engine](docs/decisions/0003-usage-engine.md)
+- Decisions: [native macOS app](docs/decisions/0001-native-macos-app.md), [iCloud Drive sync](docs/decisions/0002-icloud-drive-sync.md), [usage engine](docs/decisions/0003-usage-engine.md), [Developer ID distribution](docs/decisions/0004-distribution.md), [collection granularity](docs/decisions/0005-collection-granularity.md)
 - [Contracts index](docs/contracts/README.md)
 - Contract details: [statistics](docs/contracts/statistics.md), [CLI](docs/contracts/cli.md), [sync](docs/contracts/sync.md), [privacy](docs/contracts/privacy.md), [upstream reuse](docs/contracts/upstream.md), [themes](docs/contracts/themes.md)
 - [Changelog](CHANGELOG.md)
@@ -60,7 +62,7 @@ Token Taken uses these MIT-licensed projects as references:
 - [TokenTracker](https://github.com/xiufengsun/TokenTracker): Node collectors and local API design.
 - [Token Monitor](https://github.com/Javis603/token-monitor): synchronization and history design.
 
-No upstream code or binaries are bundled yet. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), including the separate license for TokenTracker's React Bits assets.
+Token Taken bundles the pinned `tokscale` 4.21.0 binary and a `tokscale`-derived price snapshot (`tokscale-4.21.0-2026-11-10`). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license notices, including the separate license exclusion for TokenTracker's React Bits assets.
 
 ## License
 
