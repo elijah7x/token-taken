@@ -3,40 +3,182 @@ import SwiftUI
 import TokenTakenKit
 
 struct SettingsView: View {
-    @Environment(MainWindowRouter.self) private var router
+    @State private var selection: SettingsSection = .general
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Button {
-                    router.route = .dashboard
-                } label: {
-                    Label("Back", systemImage: "chevron.left")
-                }
-                .buttonStyle(.glass)
-                .keyboardShortcut(.escape, modifiers: [])
-                Text("Settings")
-                    .font(.title2.weight(.semibold))
-                Spacer()
-            }
-            .padding(.leading, 84)
-            .padding(.trailing, 22)
-            .frame(height: 52)
-            .padding(.top, 2)
+        HStack(spacing: 20) {
+            SettingsSidebar(selection: $selection)
+                .padding(.leading, 14)
+                .padding(.vertical, 14)
 
-            TabView {
-                GeneralSettingsTab()
-                    .tabItem { Label("General", systemImage: "gear") }
-                SourcesSettingsTab()
-                    .tabItem { Label("Sources", systemImage: "dot.radiowaves.left.and.right") }
-                SyncSettingsTab()
-                    .tabItem { Label("Sync", systemImage: "icloud") }
-                AboutSettingsTab()
-                    .tabItem { Label("About", systemImage: "info.circle") }
+            // One readable column, so the heading lines up with the grouped form's left edge.
+            VStack(alignment: .leading, spacing: 4) {
+                Text(selection.title)
+                    .font(.title2.weight(.semibold))
+                    .padding(.leading, 20)
+
+                sectionContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 22)
+            .padding(.trailing, 22)
+            .padding(.bottom, 16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var sectionContent: some View {
+        switch selection {
+        case .general:
+            GeneralSettingsTab()
+        case .sources:
+            SourcesSettingsTab()
+        case .sync:
+            SyncSettingsTab()
+        case .about:
+            AboutSettingsTab()
+        }
+    }
+}
+
+private enum SettingsSection: CaseIterable, Hashable, Identifiable {
+    case general
+    case sources
+    case sync
+    case about
+
+    var id: Self { self }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .general: "General"
+        case .sources: "Sources"
+        case .sync: "Sync"
+        case .about: "About"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .general: "gearshape"
+        case .sources: "tray.full"
+        case .sync: "icloud"
+        case .about: "info.circle"
+        }
+    }
+}
+
+private struct SettingsSidebar: View {
+    @Binding var selection: SettingsSection
+    @FocusState private var focusedSection: SettingsSection?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Color.clear
+                .frame(height: 30)
+                .allowsHitTesting(false)
+
+            SettingsBackButton()
+                .padding(.leading, 2)
+
+            VStack(spacing: 4) {
+                ForEach(SettingsSection.allCases) { section in
+                    Button {
+                        selection = section
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: section.symbol)
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(width: 18)
+                            Text(section.title)
+                            Spacer()
+                        }
+                        .font(.system(size: 13, weight: selection == section ? .medium : .regular))
+                        .foregroundStyle(selection == section ? .primary : .secondary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
+                        .background {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(selection == section ? Color.primary.opacity(0.08) : Color.clear)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focused($focusedSection, equals: section)
+                    .onKeyPress(.upArrow) {
+                        moveSelection(by: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        moveSelection(by: 1)
+                        return .handled
+                    }
+                    .accessibilityLabel(Text(section.title))
+                    .accessibilityAddTraits(selection == section ? .isSelected : [])
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 12)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: 200)
+        .background { SettingsTrayBackground() }
+        .onAppear { focusedSection = selection }
+    }
+
+    private func moveSelection(by offset: Int) {
+        let sections = SettingsSection.allCases
+        guard let index = sections.firstIndex(of: selection) else { return }
+        let newIndex = min(max(index + offset, 0), sections.count - 1)
+        selection = sections[newIndex]
+        focusedSection = selection
+    }
+}
+
+private struct SettingsBackButton: View {
+    @Environment(MainWindowRouter.self) private var router
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            router.route = .dashboard
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 12, weight: .semibold))
+                Text("Back")
+                    .font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(isHovered ? .primary : .secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.escape, modifiers: [])
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(Text("Back"))
+    }
+}
+
+private struct SettingsTrayBackground: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    private let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+
+    var body: some View {
+        Group {
+            if reduceTransparency {
+                shape.fill(Palette.solid)
+            } else {
+                shape.fill(.regularMaterial)
+            }
+        }
+        .overlay { shape.strokeBorder(Palette.hairline) }
     }
 }
 
@@ -49,13 +191,10 @@ private struct GeneralSettingsTab: View {
         @Bindable var settings = settings
         Form {
             Section("Appearance") {
-                LabeledContent("Theme") {
-                    PreviewSelectionTile(title: "Liquid Glass", isSelected: settings.theme == .liquidGlass) {
-                        settings.theme = .liquidGlass
-                    } preview: {
-                        LiquidGlassThumbnail()
-                    }
+                Picker("Theme", selection: $settings.theme) {
+                    Text("Liquid Glass").tag(AppTheme.liquidGlass)
                 }
+                .pickerStyle(.menu)
 
                 LabeledContent("Main view") {
                     HStack(spacing: 14) {
@@ -163,37 +302,6 @@ private struct PreviewSelectionTile<Preview: View>: View {
     }
 }
 
-private struct LiquidGlassThumbnail: View {
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        ZStack {
-            MeshGradient(
-                width: 3,
-                height: 3,
-                points: [
-                    [0, 0], [0.55, 0], [1, 0],
-                    [0, 0.5], [0.45, 0.55], [1, 0.45],
-                    [0, 1], [0.5, 1], [1, 1],
-                ],
-                colors: Palette.meshColors(scheme)
-            )
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.white.opacity(scheme == .dark ? 0.09 : 0.28))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(.white.opacity(scheme == .dark ? 0.16 : 0.55))
-                }
-                .frame(width: 82, height: 46)
-            VStack(alignment: .leading, spacing: 5) {
-                Capsule().fill(Palette.accent).frame(width: 25, height: 4)
-                Capsule().fill(Palette.muted.opacity(0.35)).frame(width: 48, height: 3)
-                Capsule().fill(Palette.muted.opacity(0.25)).frame(width: 35, height: 3)
-            }
-            .frame(width: 66, alignment: .leading)
-        }
-    }
-}
 
 private struct HeroStyleThumbnail: View {
     let style: AppSettings.HeroStyle

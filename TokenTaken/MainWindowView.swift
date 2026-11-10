@@ -56,9 +56,10 @@ struct MainWindowView: View {
                     .frame(maxHeight: .infinity)
 
                     RailSettingsButton()
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.leading, 22)
                         .padding(.top, 6)
-                        .padding(.bottom, 18)
+                        .padding(.bottom, 14)
                 }
                 .frame(width: 284)
 
@@ -113,16 +114,12 @@ private struct RailSettingsButton: View {
         Button {
             router.route = .settings
         } label: {
-            Image(systemName: "gearshape")
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(isHovered ? Color.primary : Palette.muted)
+            SettingsGlyph(size: 18, isHovered: isHovered)
                 .frame(width: 30, height: 30)
-                .scaleEffect(!reduceMotion && isHovered ? 1.06 : 1)
                 .contentShape(Rectangle())
         }
         .buttonStyle(RailSettingsButtonStyle(reduceMotion: reduceMotion))
         .onHover { isHovered = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHovered)
         .help(Text("Settings"))
         .accessibilityLabel(Text("Settings"))
     }
@@ -133,8 +130,8 @@ private struct RailSettingsButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .opacity(configuration.isPressed ? 0.65 : 1)
-            .scaleEffect(!reduceMotion && configuration.isPressed ? 0.92 : 1)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.1), value: configuration.isPressed)
     }
 }
