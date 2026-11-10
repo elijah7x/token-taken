@@ -36,10 +36,9 @@ public actor CollectionRunner {
             for sourceID in collector.sourceIDs {
                 let existing = previous[sourceID]
                 let cachedCount = cachedRecordCounts[sourceID, default: 0]
-                let hasHistory = existing?.lastSuccess != nil
-                    || (existing?.recordCount ?? 0) > 0
-                    || cachedCount > 0
-                    || cachedHourlySources.contains(sourceID)
+                // "Unavailable" protects cached data; a missing source with nothing cached is simply not installed,
+                // even if an older build recorded a successful empty collection for it.
+                let hasHistory = cachedCount > 0 || cachedHourlySources.contains(sourceID)
                 var health: SourceHealth
                 if let batch = outcome.batch {
                     if batch.unavailableSourceIDs.contains(sourceID) {
