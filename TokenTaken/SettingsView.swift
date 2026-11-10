@@ -992,7 +992,9 @@ private struct SyncSettingsTab: View {
                 }
             }
             Spacer(minLength: 12)
-            RemoteStatusLabel(state: device.state)
+            // Same 24 h rule as source health: an `.ok` snapshot that has not been rewritten since reads as stale.
+            RemoteStatusLabel(state: device.state == .ok && device.lastWrite.map { Date.now.timeIntervalSince($0) > 86_400 } == true
+                ? .stale : device.state)
         }
         .padding(.horizontal, 16)
         .frame(minHeight: 52)
