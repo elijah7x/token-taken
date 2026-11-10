@@ -310,13 +310,23 @@ func sourceWarnings(_ health: [SourceHealth]) -> [Warning] {
             warnings.append(Warning(code: "source-unavailable", message: "\(entry.sourceID): source unavailable\(error)"))
         case .stale:
             warnings.append(Warning(code: "source-stale", message: "\(entry.sourceID): no successful collection since \(entry.lastSuccess.map(rfc3339) ?? "never")"))
-        case .ok:
+        case .ok, .notInstalled:
             break
         }
         if entry.skippedRecords > 0 {
             warnings.append(Warning(code: "partial-data", message: "\(entry.sourceID): \(entry.skippedRecords) skipped records"))
         }
         return warnings
+    }
+}
+
+func sourceTableState(_ state: SourceHealth.State) -> String {
+    switch state {
+    case .ok: "ok"
+    case .unavailable: "unavailable"
+    case .notInstalled: "not installed"
+    case .failed: "failed"
+    case .stale: "stale"
     }
 }
 
@@ -547,19 +557,19 @@ func runSummary(_ arguments: [String]) -> Never {
 func runSources(_ arguments: [String]) -> Never {
     let options = parseOptions(arguments, command: .sources)
     let selection = selectStore(options)
-    let statuses = selection.health
+    let filteredHealth = selection.health
         .filter { options.sources.isEmpty || options.sources.contains($0.sourceID) }
         .sorted { $0.sourceID < $1.sourceID }
-        .map { health in
-            SourceStatus(
-                id: health.sourceID,
-                lastSuccess: health.lastSuccess.map(rfc3339),
-                records: health.recordCount,
-                skippedRecords: health.skippedRecords,
-                state: health.state.rawValue,
-                error: health.errorMessage
-            )
-        }
+    let statuses = filteredHealth.map { health in
+        SourceStatus(
+            id: health.sourceID,
+            lastSuccess: health.lastSuccess.map(rfc3339),
+            records: health.recordCount,
+            skippedRecords: health.skippedRecords,
+            state: health.state.rawValue,
+            error: health.errorMessage
+        )
+    }
 
     if options.json {
         printJSON(Envelope(
@@ -572,11 +582,18 @@ func runSources(_ arguments: [String]) -> Never {
         exit(0)
     }
 
-    if statuses.isEmpty {
+    if filteredHealth.isEmpty {
         write("No source health recorded\n", to: nil)
     } else {
-        let rows = statuses.map {
-            [$0.id, $0.state, $0.lastSuccess ?? "never", String($0.records), String($0.skippedRecords), $0.error ?? "none"]
+        let rows = filteredHealth.map {
+            [
+                $0.sourceID,
+                sourceTableState($0.state),
+                $0.lastSuccess.map(rfc3339) ?? "never",
+                String($0.recordCount),
+                String($0.skippedRecords),
+                $0.errorMessage ?? "none",
+            ]
         }
         let lines = table(["source", "state", "last success", "records", "skipped", "error"], rows)
         write(lines.joined(separator: "\n") + "\n", to: nil)

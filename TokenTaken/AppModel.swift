@@ -38,11 +38,19 @@ final class AppModel {
 
     var dataIssues: DataIssues {
         let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
-        let failed = health.filter { $0.state == .failed }.count
-        let unavailable = health.filter { $0.state == .unavailable }.count
-            + remoteDevices.filter { $0.state == .unavailable || $0.state == .partial }.count
-        let stale = health.filter { $0.state == .stale }.count
-            + remoteDevices.filter { $0.state == .stale }.count
+        var failed = 0
+        var unavailable = 0
+        var stale = 0
+        for entry in health {
+            switch entry.state {
+            case .failed: failed += 1
+            case .unavailable: unavailable += 1
+            case .stale: stale += 1
+            case .ok, .notInstalled: break
+            }
+        }
+        unavailable += remoteDevices.filter { $0.state == .unavailable || $0.state == .partial }.count
+        stale += remoteDevices.filter { $0.state == .stale }.count
         let skipped = health.reduce(0) { $0 + $1.skippedRecords }
         return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped,
             isPartial: failed + unavailable + stale > 0 || skipped > 0 || storageError != nil || readError != nil

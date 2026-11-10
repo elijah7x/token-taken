@@ -13,12 +13,21 @@ public actor CollectionRunner {
 
     public func runAll(now: Date = .now) async -> [SourceHealth] {
         let previous: [String: SourceHealth]
+        let cachedRecordCounts: [String: Int]
+        let cachedHourlySources: Set<String>
         do {
             try store.upsert(device: device)
             previous = Dictionary(try store.health().map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
+            var counts: [String: Int] = [:]
+            for record in try store.records() where record.deviceID == device.id {
+                counts[record.sourceID, default: 0] += 1
+            }
+            cachedRecordCounts = counts
+            cachedHourlySources = Set(try store.hourly().filter { $0.deviceID == device.id }.map(\.sourceID))
         } catch {
+            let message = Self.sanitizeErrorMessage(Self.message(for: error))
             return collectors.flatMap(\.sourceIDs).map {
-                SourceHealth(sourceID: $0, lastAttempt: now, errorMessage: Self.message(for: error), state: .failed)
+                SourceHealth(sourceID: $0, lastAttempt: now, errorMessage: message, state: .failed)
             }
         }
         let outcomes = await collectAll()
@@ -26,26 +35,50 @@ public actor CollectionRunner {
         for (collector, outcome) in zip(collectors, outcomes) {
             for sourceID in collector.sourceIDs {
                 let existing = previous[sourceID]
+                let cachedCount = cachedRecordCounts[sourceID, default: 0]
+                let hasHistory = existing?.lastSuccess != nil
+                    || (existing?.recordCount ?? 0) > 0
+                    || cachedCount > 0
+                    || cachedHourlySources.contains(sourceID)
                 var health: SourceHealth
                 if let batch = outcome.batch {
-                    do {
-                        let scoped = sourceBatch(batch, sourceID: sourceID, now: now)
-                        try store.replace(batch: scoped, sourceID: sourceID, deviceID: device.id)
-                        health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
-                            recordCount: scoped.daily.count, skippedRecords: batch.skippedRecords)
-                    } catch {
-                        health = failedHealth(sourceID: sourceID, existing: existing, now: now,
-                            message: Self.message(for: error), state: .failed)
+                    if batch.unavailableSourceIDs.contains(sourceID) {
+                        health = unavailableHealth(
+                            sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                            hasHistory: hasHistory, now: now,
+                            message: CollectorError.sourceUnavailable.errorDescription ?? "Source data is unavailable"
+                        )
+                    } else {
+                        do {
+                            let scoped = sourceBatch(batch, sourceID: sourceID, now: now)
+                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: device.id)
+                            health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
+                                recordCount: scoped.daily.count, skippedRecords: batch.skippedRecords)
+                        } catch {
+                            health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                                now: now, message: Self.message(for: error), state: .failed)
+                        }
                     }
+                } else if outcome.unavailable {
+                    health = unavailableHealth(
+                        sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                        hasHistory: hasHistory, now: now,
+                        message: outcome.errorMessage ?? "Source data is unavailable"
+                    )
                 } else {
-                    health = failedHealth(sourceID: sourceID, existing: existing, now: now,
-                        message: outcome.errorMessage ?? "Collection failed", state: outcome.unavailable ? .unavailable : .failed)
+                    health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                        now: now, message: outcome.errorMessage ?? "Collection failed", state: .failed)
+                }
+                if let errorMessage = health.errorMessage {
+                    health.errorMessage = Self.sanitizeErrorMessage(errorMessage)
                 }
                 do {
                     try store.record(health: health)
                 } catch {
                     let prior = health.errorMessage.map { $0 + "; " } ?? ""
-                    health.errorMessage = prior + "Could not persist source health: " + Self.message(for: error)
+                    health.errorMessage = Self.sanitizeErrorMessage(
+                        prior + "Could not persist source health: " + Self.message(for: error)
+                    )
                     health.state = .failed
                 }
                 results.append(health)
@@ -104,10 +137,62 @@ public actor CollectionRunner {
         }
     }
 
-    private func failedHealth(sourceID: String, existing: SourceHealth?, now: Date, message: String, state: SourceHealth.State) -> SourceHealth {
+    private func unavailableHealth(
+        sourceID: String,
+        existing: SourceHealth?,
+        cachedRecordCount: Int,
+        hasHistory: Bool,
+        now: Date,
+        message: String
+    ) -> SourceHealth {
+        guard hasHistory else {
+            return SourceHealth(sourceID: sourceID, lastAttempt: now, state: .notInstalled)
+        }
+        return failedHealth(
+            sourceID: sourceID, existing: existing, cachedRecordCount: cachedRecordCount,
+            now: now, message: message, state: .unavailable
+        )
+    }
+
+    private func failedHealth(
+        sourceID: String,
+        existing: SourceHealth?,
+        cachedRecordCount: Int,
+        now: Date,
+        message: String,
+        state: SourceHealth.State
+    ) -> SourceHealth {
         SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: existing?.lastSuccess,
-            recordCount: existing?.recordCount ?? 0, errorMessage: message,
+            recordCount: existing?.recordCount ?? cachedRecordCount, errorMessage: Self.sanitizeErrorMessage(message),
             skippedRecords: existing?.skippedRecords ?? 0, state: state)
+    }
+
+    public static func sanitizeErrorMessage(_ message: String) -> String {
+        let trimSet = CharacterSet(charactersIn: "\"'“”‘’()[]{},;:")
+        var kept: [String] = []
+        var inPath = false
+        for rawToken in message.split(whereSeparator: \.isWhitespace) {
+            let token = String(rawToken)
+            let core = token.trimmingCharacters(in: trimSet)
+            let isPath = core.contains("/Users/")
+                || core.hasPrefix("/")
+                || core.hasPrefix("~")
+                || core.hasPrefix("file://")
+                || (inPath && core.contains("/"))
+            if isPath {
+                inPath = true
+            } else {
+                inPath = false
+                kept.append(token)
+            }
+        }
+        var sanitized = kept.joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ":-;")))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while sanitized.contains("  ") {
+            sanitized = sanitized.replacingOccurrences(of: "  ", with: " ")
+        }
+        return sanitized.isEmpty ? "Collection failed" : sanitized
     }
 
     private static func message(for error: Error) -> String {

@@ -68,4 +68,82 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("pi"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("omp"))
     }
+
+    func testSubprocessErrorsDoNotIncludeStderrOrPaths() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("mock-tokscale.sh")
+        let script = """
+            #!/bin/sh
+            echo "fatal error in /Users/secret/project/session.jsonl: private prompt text" >&2
+            exit 7
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude"],
+            deviceID: "device-a",
+            isClientAvailable: { _ in true }
+        )
+        do {
+            _ = try await collector.collect()
+            XCTFail("Expected process failure")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "tokscale exited with status 7")
+            XCTAssertFalse(error.localizedDescription.contains("/Users/"))
+            XCTAssertFalse(error.localizedDescription.contains("private"))
+        }
+    }
+
+    func testSingleCollectorRunsOneGraphAndReportsUnavailableClients() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let invocationsURL = dir.appendingPathComponent("invocations.log")
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-multi.sh")
+        let script = """
+            #!/bin/sh
+            echo "$*" >> "\(invocationsURL.path)"
+            if [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then
+                  shift
+                  out="$1"
+                fi
+                shift
+              done
+              printf '%s' '{"contributions":[{"date":"2026-11-09","clients":[{"client":"claude","modelId":"claude-sonnet-4-5","messages":2,"tokens":{"input":10,"output":5,"cacheRead":0,"cacheWrite":0,"reasoning":0}}]}]}' > "$out"
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude", "codex", "kimi"],
+            deviceID: "device-a",
+            isClientAvailable: { $0 == "claude" || $0 == "codex" }
+        )
+        let batch = try await collector.collect()
+        XCTAssertEqual(batch.unavailableSourceIDs, ["kimi"])
+        XCTAssertEqual(batch.daily.map(\.sourceID), ["claude"])
+
+        let log = try String(contentsOf: invocationsURL, encoding: .utf8)
+        let lines = log.split(separator: "\n").map(String.init)
+        let graphLines = lines.filter { $0.hasPrefix("graph ") }
+        let hourlyLines = lines.filter { $0.hasPrefix("hourly ") }
+        XCTAssertEqual(graphLines.count, 1)
+        XCTAssertTrue(graphLines.first?.contains("-c claude,codex") == true)
+        XCTAssertEqual(hourlyLines.count, 2)
+    }
 }

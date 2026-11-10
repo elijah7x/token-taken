@@ -190,4 +190,77 @@ final class ZcodeCollectorTests: XCTestCase {
         } catch CollectorError.sourceUnavailable {
         }
     }
+
+    func testInvalidReasoningSplitAndNegativeCounters() async throws {
+        let url = try makeDatabase()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        let tsSplit = milliseconds("2026-01-03T01:00:00Z")
+        let tsNegative = milliseconds("2026-01-03T01:10:00Z")
+        try execute(db, """
+            INSERT INTO model_usage VALUES (
+                'completed', \(tsSplit), 'glm-split', 'zai', 100, 30, 80, 0, 0
+            );
+            INSERT INTO model_usage VALUES (
+                'completed', \(tsNegative), 'glm-neg', 'zai', -10, 30, 5, 0, 0
+            );
+            """)
+        sqlite3_close(db)
+
+        let now = ISO8601DateFormatter().date(from: "2026-01-03T02:00:00Z")!
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!,
+            now: now
+        )
+        let batch = try await collector.collect()
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertNil(batch.daily.first { $0.modelID == "glm-neg" })
+
+        let splitRecord = try XCTUnwrap(batch.daily.first { $0.modelID == "glm-split" })
+        XCTAssertEqual(splitRecord.counts, TokenCounts(input: 100, output: 30, reasoning: 0))
+
+        let splitHour = ISO8601DateFormatter().date(from: "2026-01-03T01:00:00Z")!
+        let hourlyBucket = try XCTUnwrap(batch.hourly.first { $0.hourStart == splitHour })
+        XCTAssertEqual(hourlyBucket.counts, TokenCounts(input: 100, output: 30, reasoning: 0))
+        XCTAssertFalse(hourlyBucket.reasoningKnown)
+    }
+
+    func testOnlineBackupReadsLiveWALAndThrowsWhenLiveOpenFails() async throws {
+        let url = try makeDatabase()
+        var writer: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &writer), SQLITE_OK)
+        let liveDB = try XCTUnwrap(writer)
+        try execute(liveDB, "PRAGMA journal_mode=WAL;")
+        let walTimestamp = milliseconds("2026-01-03T02:00:00Z")
+        try execute(liveDB, """
+            INSERT INTO model_usage VALUES (
+                'completed', \(walTimestamp), 'glm-wal', 'zai', 50, 20, 5, 0, 0
+            );
+            """)
+        // Keep the writer connection open while collecting so the snapshot comes from SQLite online backup.
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        let batch = try await collector.collect()
+        sqlite3_close(liveDB)
+        XCTAssertNotNil(batch.daily.first { $0.modelID == "glm-wal" })
+
+        let corruptURL = directory.appendingPathComponent("corrupt.sqlite")
+        try Data("not a sqlite database".utf8).write(to: corruptURL)
+        let failingCollector = ZcodeCollector(
+            databaseURL: corruptURL,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        do {
+            _ = try await failingCollector.collect()
+            XCTFail("Expected corrupt database backup/open to throw")
+        } catch {
+        }
+    }
 }

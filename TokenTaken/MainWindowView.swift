@@ -245,6 +245,8 @@ extension AppModel {
                 String(localized: "Failed")
             case .stale:
                 String(localized: "Stale")
+            case .notInstalled:
+                nil
             }
             if let state {
                 let name = SourceCatalog.info(for: entry.sourceID).name

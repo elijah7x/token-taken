@@ -38,14 +38,9 @@ public struct UsageAggregator: Sendable {
             sources[record.sourceID, default: .zero] += record.counts
             models[record.modelID, default: .zero] += record.counts
             deviceTotals[record.deviceID, default: .zero] += record.counts
-            var categorized = record.counts
-            categorized.uncategorized = 0
-            if let cost = priceTable.cost(model: record.modelID, counts: categorized) {
-                usd += cost
-                unpriced += record.counts.uncategorized
-            } else {
-                unpriced += record.counts.total
-            }
+            let estimate = priceTable.estimate(model: record.modelID, counts: record.counts)
+            usd += estimate.usd
+            unpriced += estimate.unpricedTokens
         }
 
         let devices = store.devices

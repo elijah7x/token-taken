@@ -2,7 +2,7 @@ import Foundation
 
 public struct SourceHealth: Codable, Sendable, Hashable, Identifiable {
     public enum State: String, Codable, Sendable {
-        case ok, unavailable, failed, stale
+        case ok, unavailable, notInstalled, failed, stale
     }
 
     public let sourceID: String

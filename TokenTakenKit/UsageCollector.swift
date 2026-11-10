@@ -4,11 +4,18 @@ public struct CollectionBatch: Sendable {
     public var daily: [UsageRecord]
     public var hourly: [HourlyUsage]
     public var skippedRecords: Int
+    public var unavailableSourceIDs: Set<String>
 
-    public init(daily: [UsageRecord] = [], hourly: [HourlyUsage] = [], skippedRecords: Int = 0) {
+    public init(
+        daily: [UsageRecord] = [],
+        hourly: [HourlyUsage] = [],
+        skippedRecords: Int = 0,
+        unavailableSourceIDs: Set<String> = []
+    ) {
         self.daily = daily
         self.hourly = hourly
         self.skippedRecords = skippedRecords
+        self.unavailableSourceIDs = unavailableSourceIDs
     }
 }
 
@@ -27,7 +34,8 @@ public enum CollectorError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .sourceUnavailable: "Source data is unavailable"
-        case .process(let message), .invalidOutput(let message), .open(let message), .sql(let message): message
+        case .process(let message), .invalidOutput(let message), .open(let message), .sql(let message):
+            CollectionRunner.sanitizeErrorMessage(message)
         }
     }
 }

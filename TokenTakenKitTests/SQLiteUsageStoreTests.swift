@@ -177,14 +177,80 @@ final class SQLiteUsageStoreTests: XCTestCase {
         let store = try SQLiteUsageStore(url: databaseURL, readOnly: true)
         XCTAssertThrowsError(try store.records())
     }
+
+    func testNeverSeenUnavailableSourceIsNotInstalledWhileCachedSourceBecomesUnavailable() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let device = Device(id: "device-a", name: "Test Mac")
+        let cachedRecord = record("codex", model: "gpt-5", input: 50)
+        try store.replace(batch: CollectionBatch(daily: [cachedRecord]), sourceID: "codex", deviceID: device.id)
+
+        let multiCollector = MultiSourceCollector(
+            sourceIDs: ["claude", "codex", "kimi"],
+            batch: CollectionBatch(
+                daily: [record("claude")],
+                unavailableSourceIDs: ["codex", "kimi"]
+            )
+        )
+        let runner = CollectionRunner(store: store, device: device, collectors: [
+            multiCollector,
+            FailingCollector(sourceIDs: ["grok"], unavailable: true),
+        ])
+        let results = await runner.runAll(now: now)
+        let bySource = Dictionary(uniqueKeysWithValues: results.map { ($0.sourceID, $0) })
+
+        XCTAssertEqual(bySource["claude"]?.state, .ok)
+        XCTAssertEqual(bySource["codex"]?.state, .unavailable)
+        XCTAssertEqual(bySource["kimi"]?.state, .notInstalled)
+        XCTAssertNil(bySource["kimi"]?.errorMessage)
+        XCTAssertEqual(bySource["grok"]?.state, .notInstalled)
+        XCTAssertEqual(bySource["grok"]?.markingStale(now: now.addingTimeInterval(100_000)).state, .notInstalled)
+
+        let persisted = Dictionary(uniqueKeysWithValues: try store.health().map { ($0.sourceID, $0) })
+        XCTAssertEqual(persisted["kimi"]?.state, .notInstalled)
+        XCTAssertEqual(persisted["grok"]?.state, .notInstalled)
+        XCTAssertEqual(persisted["codex"]?.state, .unavailable)
+        XCTAssertTrue(try store.records().contains(cachedRecord))
+    }
+
+    func testRunnerSanitizesPathsFromHealthErrorMessages() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let runner = CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [PathLeakingCollector()]
+        )
+        let results = await runner.runAll(now: now)
+        let message = try XCTUnwrap(results.first?.errorMessage)
+        XCTAssertFalse(message.contains("/Users/"))
+        XCTAssertFalse(message.contains("/tmp/"))
+        XCTAssertFalse(message.contains("~"))
+        XCTAssertEqual(try store.health().first?.errorMessage, message)
+    }
 }
 
 private struct FailingCollector: UsageCollector {
-    let sourceIDs = ["claude"]
+    var sourceIDs = ["claude"]
     let unavailable: Bool
     func collect() async throws -> CollectionBatch {
         if unavailable { throw CollectorError.sourceUnavailable }
         throw CollectorError.invalidOutput("synthetic failure")
+    }
+}
+
+private struct MultiSourceCollector: UsageCollector {
+    let sourceIDs: [String]
+    let batch: CollectionBatch
+    func collect() async throws -> CollectionBatch { batch }
+}
+
+private struct PathLeakingCollector: UsageCollector {
+    let sourceIDs = ["claude"]
+    func collect() async throws -> CollectionBatch {
+        throw NSError(
+            domain: "TestDomain",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Failed reading /Users/alice/.claude/projects and ~/secret or /tmp/cache"]
+        )
     }
 }
 

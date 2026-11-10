@@ -115,16 +115,27 @@ struct PiFormatScan: Sendable {
             throw CollectorError.sourceUnavailable
         }
         guard isDirectory.boolValue else {
-            throw CollectorError.invalidOutput("\(sourceID) session root is not a directory: \(root.path)")
+            throw CollectorError.invalidOutput("\(sourceID) session root is not a directory")
         }
-        guard let enumerator = manager.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) else {
-            return []
+        var enumerationError: Error?
+        guard let enumerator = manager.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            errorHandler: { _, error in
+                enumerationError = error
+                return false
+            }
+        ) else {
+            throw CollectorError.open("Could not enumerate \(sourceID) sessions")
         }
         var files: [URL] = []
         for case let url as URL in enumerator {
             guard url.pathExtension == "jsonl" else { continue }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             files.append(url)
+        }
+        if let enumerationError {
+            throw enumerationError
         }
         return files.sorted { $0.path < $1.path }
     }
@@ -156,6 +167,32 @@ struct PiFormatScan: Sendable {
         var reasoningKnown = true
     }
 
+    private struct DedupKey: Hashable {
+        var a: UInt64 = 0xcbf2_9ce4_8422_2325
+        var b: UInt64 = 0x8422_2325_cbf2_9ce4
+
+        mutating func combine(_ string: String) {
+            for byte in string.utf8 {
+                a = (a ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+                b = (b &* 0x0000_0100_0000_01b3) ^ UInt64(byte)
+            }
+            a = (a ^ 0x7c) &* 0x0000_0100_0000_01b3
+            b = (b &* 0x0000_0100_0000_01b3) ^ 0x7c
+        }
+
+        mutating func combine(_ value: Int64) {
+            var bits = UInt64(bitPattern: value)
+            for _ in 0..<8 {
+                let byte = UInt8(truncatingIfNeeded: bits)
+                a = (a ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+                b = (b &* 0x0000_0100_0000_01b3) ^ UInt64(byte)
+                bits >>= 8
+            }
+            a = (a ^ 0x7c) &* 0x0000_0100_0000_01b3
+            b = (b &* 0x0000_0100_0000_01b3) ^ 0x7c
+        }
+    }
+
     private struct Totals {
         let sourceID: String
         let deviceID: String
@@ -165,7 +202,7 @@ struct PiFormatScan: Sendable {
         var daily: [DailyKey: DailyTotals] = [:]
         var hourly: [Date: HourlyTotals] = [:]
         var skippedRecords = 0
-        var seen: Set<String> = []
+        var seen: Set<DedupKey> = []
 
         mutating func scan(
             line rawLine: Data,
@@ -242,31 +279,43 @@ struct PiFormatScan: Sendable {
             fractional: ISO8601DateFormatter,
             plain: ISO8601DateFormatter
         ) {
-            let (counts, reasoningReported) = Self.tokenCounts(from: usage)
+            guard let (counts, reasoningKnown) = Self.tokenCounts(from: usage) else {
+                skippedRecords += 1
+                return
+            }
             guard counts.total > 0 else { return }
-            let date = Self.eventDate(
+            let sourceDate = Self.sourceEventDate(
                 messageTimestamp: messageTimestamp,
                 recorded: object["timestamp"],
-                fallback: fallbackDate,
                 fractional: fractional,
                 plain: plain
             )
+            let date = sourceDate ?? fallbackDate
 
             let rawModelID = model ?? "unknown"
             let modelID = rawModelID.lowercased()
 
-            // Identity is session-independent and never the response id: fork/branch copies repeat
+            // Identity is session-independent and never the response id alone: fork/branch copies repeat
             // the entry id and the usage in a new file and must collapse, while two calls that share
             // a short response id differ in entry id, timestamp, or counts and must both count.
             let identifier = Self.text(object["id"]).map { "\(type):\($0)" }
                 ?? "\(type):line:\(Self.fingerprint(line))"
-            let key = [
-                identifier,
-                String(Int64((date.timeIntervalSince1970 * 1_000).rounded())),
-                rawModelID,
-                String(counts.input), String(counts.cacheRead), String(counts.cacheWrite),
-                String(counts.output), String(counts.reasoning),
-            ].joined(separator: "|")
+            let timestampIdentity = sourceDate.map {
+                String(Int64(($0.timeIntervalSince1970 * 1_000).rounded()))
+            } ?? "missing"
+            var key = DedupKey()
+            key.combine(identifier)
+            key.combine(timestampIdentity)
+            key.combine(rawModelID)
+            key.combine(counts.input)
+            key.combine(counts.cacheRead)
+            key.combine(counts.cacheWrite)
+            key.combine(counts.output)
+            key.combine(counts.reasoning)
+            if let responseID = Self.text((object["message"] as? [String: Any])?["responseId"])
+                ?? Self.text(object["responseId"]) {
+                key.combine(responseID)
+            }
             guard seen.insert(key).inserted else { return }
 
             let day = UsageDay.string(from: date, in: timeZone)
@@ -281,8 +330,8 @@ struct PiFormatScan: Sendable {
             var hourlyTotals = hourly[hourStart] ?? HourlyTotals()
             hourlyTotals.counts += counts
             hourlyTotals.eventCount += 1
-            // A bucket is reasoning-known only when every event in it reported reasoning.
-            hourlyTotals.reasoningKnown = hourlyTotals.reasoningKnown && reasoningReported
+            // A bucket is reasoning-known only when every event in it reported a valid reasoning split.
+            hourlyTotals.reasoningKnown = hourlyTotals.reasoningKnown && reasoningKnown
             hourly[hourStart] = hourlyTotals
         }
 
@@ -317,27 +366,40 @@ struct PiFormatScan: Sendable {
 
         /// Splits reasoning out of output. pi and oh-my-pi both report reasoning as a breakdown of
         /// `output` and print a `totalTokens` that excludes it, so adding it again would double count.
-        static func tokenCounts(from usage: [String: Any]) -> (TokenCounts, Bool) {
-            let rawOutput = max(0, integer(usage["output"]) ?? 0)
+        static func tokenCounts(from usage: [String: Any]) -> (TokenCounts, Bool)? {
+            let input = integer(usage["input"]) ?? 0
+            let cacheRead = integer(usage["cacheRead"]) ?? 0
+            let cacheWrite = integer(usage["cacheWrite"]) ?? 0
+            let rawOutput = integer(usage["output"]) ?? 0
             let reportedReasoning = integer(usage["reasoningTokens"]) ?? integer(usage["reasoning"])
-            let reasoning = min(rawOutput, max(0, reportedReasoning ?? 0))
+            guard input >= 0, cacheRead >= 0, cacheWrite >= 0, rawOutput >= 0, (reportedReasoning ?? 0) >= 0 else {
+                return nil
+            }
+            let reasoning: Int64
+            let reasoningKnown: Bool
+            if let reportedReasoning, reportedReasoning <= rawOutput {
+                reasoning = reportedReasoning
+                reasoningKnown = true
+            } else {
+                reasoning = 0
+                reasoningKnown = false
+            }
             let counts = TokenCounts(
-                input: max(0, integer(usage["input"]) ?? 0),
-                cacheRead: max(0, integer(usage["cacheRead"]) ?? 0),
-                cacheWrite: max(0, integer(usage["cacheWrite"]) ?? 0),
+                input: input,
+                cacheRead: cacheRead,
+                cacheWrite: cacheWrite,
                 output: rawOutput - reasoning,
                 reasoning: reasoning
             )
-            return (counts, reportedReasoning != nil)
+            return (counts, reasoningKnown)
         }
 
-        static func eventDate(
+        static func sourceEventDate(
             messageTimestamp: Any?,
             recorded: Any?,
-            fallback: Date,
             fractional: ISO8601DateFormatter,
             plain: ISO8601DateFormatter
-        ) -> Date {
+        ) -> Date? {
             // An assistant message's own timestamp is the request start; the entry timestamp is
             // when the record was persisted, so the message timestamp wins when it is usable.
             if let milliseconds = integer(messageTimestamp), milliseconds > 0 {
@@ -349,9 +411,7 @@ struct PiFormatScan: Sendable {
                date >= PiFormatScan.minimumTimestamp {
                 return date
             }
-            // A record without a usable timestamp still bills tokens; the file's modification time
-            // is the best available placement.
-            return fallback
+            return nil
         }
 
         private static func text(_ value: Any?) -> String? {

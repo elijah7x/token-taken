@@ -171,14 +171,12 @@ final class RefreshCoordinator {
     private func makeCollectors() -> [any UsageCollector] {
         var collectors: [any UsageCollector] = []
         if case .found(let path) = engineStatus {
-            for client in TokscaleCollector.defaultClients {
-                collectors.append(TokscaleCollector(
-                    executableURL: URL(fileURLWithPath: path),
-                    configDirectory: AppPaths.tokscaleConfigDirectory,
-                    clients: [client],
-                    deviceID: device.id
-                ))
-            }
+            collectors.append(TokscaleCollector(
+                executableURL: URL(fileURLWithPath: path),
+                configDirectory: AppPaths.tokscaleConfigDirectory,
+                clients: TokscaleCollector.defaultClients,
+                deviceID: device.id
+            ))
         } else {
             collectors.append(UnavailableEngineCollector())
         }

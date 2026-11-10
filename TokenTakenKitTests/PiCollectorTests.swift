@@ -178,4 +178,108 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertTrue(batch.hourly.isEmpty)
         XCTAssertEqual(batch.skippedRecords, 0)
     }
+
+    func testUnreadableRootThrowsAndRunnerKeepsCachedRows() async throws {
+        let root = directory.appendingPathComponent("unreadable", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path) }
+
+        do {
+            _ = try await collector(root: root).collect()
+            XCTFail("Unreadable session root must throw instead of returning an empty batch")
+        } catch CollectorError.sourceUnavailable {
+            XCTFail("Existing unreadable directory must not report sourceUnavailable")
+        } catch {
+        }
+
+        let storeURL = directory.appendingPathComponent("usage.sqlite")
+        let store = try SQLiteUsageStore(url: storeURL)
+        let cachedDaily = UsageRecord(
+            day: "2026-11-10", timeZoneID: utc.identifier, deviceID: "device-a",
+            sourceID: "pi", modelID: "claude-sonnet-4-5",
+            counts: TokenCounts(input: 100, output: 50), eventCount: 1
+        )
+        let cachedHourly = HourlyUsage(
+            hourStart: PiCollectorTests.now.addingTimeInterval(-3_600), deviceID: "device-a",
+            sourceID: "pi", counts: TokenCounts(input: 100, output: 50), eventCount: 1, reasoningKnown: true
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [cachedDaily], hourly: [cachedHourly]),
+            sourceID: "pi", deviceID: "device-a"
+        )
+        try store.record(health: SourceHealth(
+            sourceID: "pi", lastSuccess: PiCollectorTests.now.addingTimeInterval(-600), recordCount: 1
+        ))
+
+        let runner = CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [collector(root: root)]
+        )
+        let results = await runner.runAll(now: PiCollectorTests.now)
+        XCTAssertEqual(results.first?.state, .failed)
+        XCTAssertEqual(try store.records(), [cachedDaily])
+        XCTAssertEqual(try store.hourly(), [cachedHourly])
+    }
+
+    func testTimestamplessForkCopyAcrossFilesCountsOnce() async throws {
+        let root = directory.appendingPathComponent("timeless", isDirectory: true)
+        let dirA = root.appendingPathComponent("cwd-a", isDirectory: true)
+        let dirB = root.appendingPathComponent("cwd-b", isDirectory: true)
+        try FileManager.default.createDirectory(at: dirA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirB, withIntermediateDirectories: true)
+
+        let entry = #"{"type":"message","id":"no-ts-1","message":{"role":"assistant","model":"claude-sonnet-4-5","responseId":"resp-same","usage":{"input":40,"output":15,"reasoning":5}}}"# + "\n"
+        let fileA = dirA.appendingPathComponent("a.jsonl")
+        let fileB = dirB.appendingPathComponent("b.jsonl")
+        try Data(entry.utf8).write(to: fileA)
+        try Data(entry.utf8).write(to: fileB)
+        try FileManager.default.setAttributes(
+            [.modificationDate: ISO8601DateFormatter().date(from: "2026-11-10T08:00:00Z")!],
+            ofItemAtPath: fileA.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: ISO8601DateFormatter().date(from: "2026-11-10T12:00:00Z")!],
+            ofItemAtPath: fileB.path
+        )
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.day, "2026-11-10")
+        XCTAssertEqual(batch.daily.first?.eventCount, 1)
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 40, output: 10, reasoning: 5))
+    }
+
+    func testInvalidReasoningSplitAndNegativeCounters() async throws {
+        let root = directory.appendingPathComponent("splits", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"message","id":"bad-split","timestamp":"2026-11-10T10:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":100,"output":20,"reasoning":50}}}"#,
+            #"{"type":"message","id":"neg-counter","timestamp":"2026-11-10T10:05:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":-5,"output":20,"reasoning":5}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 100, output: 20, reasoning: 0))
+        XCTAssertEqual(batch.daily.first?.eventCount, 1)
+        XCTAssertEqual(batch.hourly.count, 1)
+        XCTAssertEqual(batch.hourly.first?.counts, TokenCounts(input: 100, output: 20, reasoning: 0))
+        XCTAssertEqual(batch.hourly.first?.reasoningKnown, false)
+    }
+
+    func testNonDirectoryRootErrorDoesNotExposePath() async throws {
+        let fileRoot = directory.appendingPathComponent("not-a-dir.jsonl")
+        try Data().write(to: fileRoot)
+        do {
+            _ = try await collector(root: fileRoot).collect()
+            XCTFail("Expected invalidOutput")
+        } catch {
+            let message = error.localizedDescription
+            XCTAssertFalse(message.contains(fileRoot.path))
+            XCTAssertFalse(message.contains("/"))
+        }
+    }
 }

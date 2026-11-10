@@ -150,6 +150,17 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertEqual(summary.cost.unpricedTokens, 42)
     }
 
+    func testPartialCategoryPricingPreservesPricedEstimate() throws {
+        let counts = TokenCounts(input: 1_000_000, cacheWrite: 500, output: 2_000_000)
+        let daily = UsageRecord(day: "2026-11-09", timeZoneID: "UTC", deviceID: "test", sourceID: "gemini",
+            modelID: "gemini-3.7-flash", counts: counts)
+        let summary = try UsageAggregator(store: GranularityStore(daily: [daily]), calendar: calendar("UTC"),
+            now: SyntheticUsageStore.defaultToday, priceTable: .bundled).summary(for: .day)
+        XCTAssertEqual(summary.cost.estimatedUSD, 0.75 + 2 * 3.75, accuracy: 1e-9)
+        XCTAssertEqual(summary.cost.unpricedTokens, 500)
+        XCTAssertEqual(summary.cost.priceTableVersion, "tokscale-4.21.0-2026-11-10")
+    }
+
     func testTokenFormat() throws {
         XCTAssertEqual(TokenFormat.short(1_240_000_000), "1.24B")
         XCTAssertEqual(TokenFormat.short(58_300_000), "58.3M")

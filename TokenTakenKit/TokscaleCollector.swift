@@ -17,12 +17,34 @@ public struct TokscaleCollector: UsageCollector {
     private let configDirectory: URL
     private let clients: [String]
     private let deviceID: String
+    private let timeoutSeconds: TimeInterval
+    private let isClientAvailable: @Sendable (String) -> Bool
 
     public init(executableURL: URL, configDirectory: URL, clients: [String], deviceID: String) {
+        self.init(
+            executableURL: executableURL,
+            configDirectory: configDirectory,
+            clients: clients,
+            deviceID: deviceID,
+            timeoutSeconds: 300,
+            isClientAvailable: { Self.sourceAvailable(client: $0) }
+        )
+    }
+
+    init(
+        executableURL: URL,
+        configDirectory: URL,
+        clients: [String],
+        deviceID: String,
+        timeoutSeconds: TimeInterval = 300,
+        isClientAvailable: @escaping @Sendable (String) -> Bool = { Self.sourceAvailable(client: $0) }
+    ) {
         self.executableURL = executableURL
         self.configDirectory = configDirectory
         self.clients = clients
         self.deviceID = deviceID
+        self.timeoutSeconds = timeoutSeconds
+        self.isClientAvailable = isClientAvailable
     }
 
     public var sourceIDs: [String] {
@@ -66,48 +88,80 @@ public struct TokscaleCollector: UsageCollector {
     public func collect() async throws -> CollectionBatch {
         let zone = TimeZone.current
         let now = Date.now
-        guard clients.allSatisfy({ Self.sourceAvailable(client: $0) }) else {
+        let mappedClients = clients.filter { Self.sourceMap[$0] != nil }
+        let availableClients = mappedClients.filter { isClientAvailable($0) }
+        var unavailableSourceIDs = Set(
+            mappedClients.filter { !isClientAvailable($0) }.compactMap { Self.sourceMap[$0] }
+        )
+        guard !availableClients.isEmpty else {
             throw CollectorError.sourceUnavailable
         }
         try ensureSettings(timeZone: zone)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
         let since = UsageDay.string(from: calendar.date(byAdding: .day, value: -2, to: now)!, in: zone)
-        async let graphData = run(arguments: ["graph", "-c", clients.joined(separator: ",")], timeZone: zone, graph: true)
+        async let graphData = run(arguments: ["graph", "-c", availableClients.joined(separator: ",")], timeZone: zone, graph: true)
+        let maxConcurrent = 3
         let hourly = try await withThrowingTaskGroup(of: [HourlyUsage].self) { group in
-            for client in clients {
-                group.addTask {
-                    let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: zone)
-                    return try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: zone, now: now)
+            var iterator = availableClients.makeIterator()
+            for _ in 0..<min(maxConcurrent, availableClients.count) {
+                if let client = iterator.next() {
+                    group.addTask {
+                        let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: zone)
+                        return try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: zone, now: now)
+                    }
                 }
             }
             var rows: [HourlyUsage] = []
-            for try await result in group { rows += result }
+            while let result = try await group.next() {
+                rows += result
+                if let client = iterator.next() {
+                    group.addTask {
+                        let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: zone)
+                        return try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: zone, now: now)
+                    }
+                }
+            }
             return rows
         }
         // Recheck after the subprocesses: a vanished source must not erase its cache.
-        guard clients.allSatisfy({ Self.sourceAvailable(client: $0) }) else { throw CollectorError.sourceUnavailable }
-        let daily = try await Self.parse(data: graphData, clients: clients, deviceID: deviceID, timeZone: zone)
-        return CollectionBatch(daily: daily, hourly: hourly)
+        var stillAvailableClients: [String] = []
+        for client in availableClients {
+            if isClientAvailable(client) {
+                stillAvailableClients.append(client)
+            } else if let sourceID = Self.sourceMap[client] {
+                unavailableSourceIDs.insert(sourceID)
+            }
+        }
+        guard !stillAvailableClients.isEmpty else { throw CollectorError.sourceUnavailable }
+        let stillAvailableSources = Set(stillAvailableClients.compactMap { Self.sourceMap[$0] })
+        let daily = try await Self.parse(data: graphData, clients: stillAvailableClients, deviceID: deviceID, timeZone: zone)
+        let filteredHourly = hourly.filter { stillAvailableSources.contains($0.sourceID) }
+        return CollectionBatch(daily: daily, hourly: filteredHourly, unavailableSourceIDs: unavailableSourceIDs)
     }
 
     static func parse(data: Data, clients: [String], deviceID: String, timeZone: TimeZone = .current) throws -> [UsageRecord] {
-        let graph = try JSONDecoder().decode(Graph.self, from: data)
+        let graph: Graph
+        do {
+            graph = try JSONDecoder().decode(Graph.self, from: data)
+        } catch {
+            throw CollectorError.invalidOutput("tokscale output was invalid")
+        }
         let requested = Set(clients)
         var totals: [Key: TokenCounts] = [:]
         var events: [Key: Int64] = [:]
         var rawModels: [Key: String] = [:]
         for contribution in graph.contributions {
             guard UsageDay.date(from: contribution.date, in: timeZone) != nil else {
-                throw CollectorError.invalidOutput("tokscale returned an invalid contribution date")
+                throw CollectorError.invalidOutput("tokscale output was invalid")
             }
             for usage in contribution.clients {
                 guard requested.contains(usage.client), let sourceID = sourceMap[usage.client] else { continue }
                 let model = usage.modelId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                guard !model.isEmpty, (usage.messages ?? 0) >= 0 else { throw CollectorError.invalidOutput("Invalid tokscale model or event count") }
+                guard !model.isEmpty, (usage.messages ?? 0) >= 0 else { throw CollectorError.invalidOutput("tokscale output was invalid") }
                 let key = Key(day: contribution.date, sourceID: sourceID, modelID: model)
                 rawModels[key] = min(rawModels[key] ?? usage.modelId, usage.modelId)
-                guard Self.valid(usage.tokens) else { throw CollectorError.invalidOutput("Negative tokscale token count") }
+                guard Self.valid(usage.tokens) else { throw CollectorError.invalidOutput("tokscale output was invalid") }
                 totals[key, default: .zero] += usage.tokens
                 events[key, default: 0] += usage.messages ?? 0
             }
@@ -123,8 +177,13 @@ public struct TokscaleCollector: UsageCollector {
     }
 
     static func parseHourly(data: Data, client: String, deviceID: String, timeZone: TimeZone, now: Date = .now) throws -> [HourlyUsage] {
-        guard let sourceID = sourceMap[client] else { throw CollectorError.invalidOutput("Unknown tokscale client") }
-        let report = try JSONDecoder().decode(HourlyReport.self, from: data)
+        guard let sourceID = sourceMap[client] else { throw CollectorError.invalidOutput("tokscale output was invalid") }
+        let report: HourlyReport
+        do {
+            report = try JSONDecoder().decode(HourlyReport.self, from: data)
+        } catch {
+            throw CollectorError.invalidOutput("tokscale output was invalid")
+        }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -139,10 +198,10 @@ public struct TokscaleCollector: UsageCollector {
         for entry in report.entries {
             guard let hour = formatter.date(from: entry.hour), formatter.string(from: hour) == entry.hour,
                   entry.hour.hasSuffix(":00"), entry.messageCount >= 0 else {
-                throw CollectorError.invalidOutput("Invalid tokscale hour or message count")
+                throw CollectorError.invalidOutput("tokscale output was invalid")
             }
             let counts = TokenCounts(input: entry.input, cacheRead: entry.cacheRead, cacheWrite: entry.cacheWrite, output: entry.output)
-            guard valid(counts) else { throw CollectorError.invalidOutput("Negative tokscale hourly token count") }
+            guard valid(counts) else { throw CollectorError.invalidOutput("tokscale output was invalid") }
             guard hour >= cutoff, hour <= currentHour else { continue }
             var row = totals[hour] ?? HourlyUsage(hourStart: hour, deviceID: deviceID, sourceID: sourceID, counts: .zero, eventCount: 0, reasoningKnown: false)
             row.counts += counts
@@ -184,21 +243,25 @@ public struct TokscaleCollector: UsageCollector {
 
     private func ensureSettings(timeZone: TimeZone) throws {
         let manager = FileManager.default
-        try manager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
-        let settingsURL = configDirectory.appendingPathComponent("settings.json")
-        let settings = ["scanner": ["bucketTimezone": timeZone.identifier]]
-        try JSONSerialization.data(withJSONObject: settings).write(to: settingsURL, options: .atomic)
+        do {
+            try manager.createDirectory(at: configDirectory, withIntermediateDirectories: true)
+            let settingsURL = configDirectory.appendingPathComponent("settings.json")
+            let settings = ["scanner": ["bucketTimezone": timeZone.identifier]]
+            try JSONSerialization.data(withJSONObject: settings).write(to: settingsURL, options: .atomic)
+        } catch {
+            throw CollectorError.open("Could not write tokscale settings")
+        }
     }
 
     private func run(arguments: [String], timeZone: TimeZone, graph: Bool = false) async throws -> Data {
         let manager = FileManager.default
         let temporaryDirectory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try manager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
-        let outputURL = temporaryDirectory.appendingPathComponent("output.json")
-        let stderrURL = temporaryDirectory.appendingPathComponent("stderr.txt")
-        guard manager.createFile(atPath: stderrURL.path, contents: nil) else {
-            throw CollectorError.process("Could not create tokscale stderr output")
+        do {
+            try manager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+        } catch {
+            throw CollectorError.process("Could not create tokscale output")
         }
+        let outputURL = temporaryDirectory.appendingPathComponent("output.json")
 
         let process = Process()
         process.executableURL = executableURL
@@ -208,37 +271,48 @@ public struct TokscaleCollector: UsageCollector {
             if let value = ProcessInfo.processInfo.environment[key] { environment[key] = value }
         }
         process.environment = environment
-        guard manager.createFile(atPath: outputURL.path, contents: nil) else { throw CollectorError.process("Could not create tokscale output") }
-        let stdoutHandle = try FileHandle(forWritingTo: outputURL)
+        guard manager.createFile(atPath: outputURL.path, contents: nil),
+              let stdoutHandle = try? FileHandle(forWritingTo: outputURL) else {
+            try? manager.removeItem(at: temporaryDirectory)
+            throw CollectorError.process("Could not create tokscale output")
+        }
         process.standardOutput = graph ? FileHandle.nullDevice : stdoutHandle
-        let stderrHandle = try FileHandle(forWritingTo: stderrURL)
-        process.standardError = stderrHandle
-        let sendableProcess = SendableProcess(value: process, stderrHandle: stderrHandle, stdoutHandle: stdoutHandle)
+        process.standardError = FileHandle.nullDevice
+        let sendableProcess = SendableProcess(value: process, stdoutHandle: stdoutHandle)
+        let timeoutSeconds = timeoutSeconds
 
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
             DispatchQueue.global(qos: .utility).async {
                 let process = sendableProcess.value
                 defer {
-                    try? sendableProcess.stderrHandle.close()
                     try? sendableProcess.stdoutHandle.close()
                     try? FileManager.default.removeItem(at: temporaryDirectory)
                 }
                 do {
-                    try process.run()
+                    do {
+                        try process.run()
+                    } catch {
+                        throw CollectorError.process("Could not run tokscale")
+                    }
                     let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-                    timer.schedule(deadline: .now() + 300)
+                    timer.schedule(deadline: .now() + timeoutSeconds)
                     timer.setEventHandler {
+                        sendableProcess.markTimedOut()
                         if sendableProcess.value.isRunning { sendableProcess.value.terminate() }
                     }
                     timer.resume()
                     process.waitUntilExit()
                     timer.cancel()
-                    guard process.terminationStatus == 0 else {
-                        let stderr = (try? Data(contentsOf: stderrURL)) ?? Data()
-                        let message = String(decoding: stderr.prefix(2_048), as: UTF8.self)
-                        throw CollectorError.process("tokscale exited with status \(process.terminationStatus): \(message)")
+                    if sendableProcess.didTimeOut {
+                        throw CollectorError.process("tokscale timed out")
                     }
-                    continuation.resume(returning: try Data(contentsOf: outputURL))
+                    guard process.terminationStatus == 0 else {
+                        throw CollectorError.process("tokscale exited with status \(process.terminationStatus)")
+                    }
+                    guard let output = try? Data(contentsOf: outputURL) else {
+                        throw CollectorError.invalidOutput("tokscale output was invalid")
+                    }
+                    continuation.resume(returning: output)
                 } catch {
                     continuation.resume(throwing: error)
                 }
@@ -246,10 +320,28 @@ public struct TokscaleCollector: UsageCollector {
         }
     }
 
-    private struct SendableProcess: @unchecked Sendable {
+    private final class SendableProcess: @unchecked Sendable {
         let value: Process
-        let stderrHandle: FileHandle
         let stdoutHandle: FileHandle
+        private let lock = NSLock()
+        private var timedOut = false
+
+        init(value: Process, stdoutHandle: FileHandle) {
+            self.value = value
+            self.stdoutHandle = stdoutHandle
+        }
+
+        var didTimeOut: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return timedOut
+        }
+
+        func markTimedOut() {
+            lock.lock()
+            timedOut = true
+            lock.unlock()
+        }
     }
 
     private struct Key: Hashable {

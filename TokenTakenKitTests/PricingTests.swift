@@ -10,7 +10,7 @@ final class PricingTests: XCTestCase {
 
     func testVersionString() {
         XCTAssertEqual(table.version, "tokscale-4.21.0-2026-11-10")
-        XCTAssertEqual(PriceTable.aliasTableVersion, "v1")
+        XCTAssertEqual(PriceTable.aliasTableVersion, "v2")
     }
 
     func testExactModelID() throws {
@@ -27,10 +27,57 @@ final class PricingTests: XCTestCase {
         XCTAssertEqual(try cost("anthropic/claude-sonnet-5-5", counts), 12.0, accuracy: 1e-9)
     }
 
-    func testAliasEffortAndVariantSuffixes() throws {
+    func testExplicitAliasesResolveAgainstBaseRates() throws {
+        let aliases = [
+            "claude-fable-5-1-medium": "claude-fable-5-1",
+            "claude-fable-5-1-thinking-high": "claude-fable-5-1",
+            "claude-fable-5-1-thinking-medium": "claude-fable-5-1",
+            "claude-fable-5-1-thinking-xhigh": "claude-fable-5-1",
+            "claude-opus-4-8-thinking-high": "claude-opus-4-8",
+            "claude-opus-5-5-medium": "claude-opus-5-5",
+            "claude-opus-5-5-xhigh": "claude-opus-5-5",
+            "claude-opus-5-low": "claude-opus-5",
+            "claude-opus-5-thinking-high": "claude-opus-5",
+            "composer-2.5-fast": "composer-2.5",
+            "cursor-grok-4.5-high": "cursor-grok-4.5",
+            "cursor-grok-4.5-high-fast": "cursor-grok-4.5",
+            "cursor-grok-4.6-high": "cursor-grok-4.6",
+            "cursor-grok-4.6-high-fast": "cursor-grok-4.6",
+            "cursor-grok-4.6-xhigh": "cursor-grok-4.6",
+            "gemini-3.5-flash-high": "gemini-3.5-flash",
+            "gemini-3.8-flash-n": "gemini-3.8-flash",
+            "gemini-3.8-flash-tiered": "gemini-3.8-flash",
+            "gemini-4-argon-c": "gemini-4-argon",
+            "gemini-4-argon-trial": "gemini-4-argon",
+            "gpt-5-6-sol-medium": "gpt-5.6-sol",
+            "gpt-5.6-luna-high": "gpt-5.6-luna",
+            "gpt-5.6-sol-medium": "gpt-5.6-sol",
+            "gpt-6-astra-low": "gpt-6-astra",
+            "grok-4.7-xhigh": "grok-4.7",
+        ]
         let counts = TokenCounts(input: 1_000_000, output: 1_000_000)
-        XCTAssertEqual(try cost("claude-sonnet-5-5-high", counts), 12.0, accuracy: 1e-9)
-        XCTAssertEqual(try cost("anthropic/claude-sonnet-5-5-thinking-xhigh-fast", counts), 12.0, accuracy: 1e-9)
+        for (alias, base) in aliases {
+            let baseTable = PriceTable(version: "fixture", rates: [
+                base: .init(input: 2, cacheRead: nil, cacheWrite: nil, output: 3),
+            ])
+            XCTAssertEqual(PriceTable.normalizedModelID(alias), base)
+            let model = "router/provider/\(alias.uppercased()):cloud"
+            let estimate = baseTable.estimate(model: model, counts: counts)
+            XCTAssertEqual(estimate.usd, 5, accuracy: 1e-9, model)
+            XCTAssertEqual(estimate.unpricedTokens, 0, model)
+        }
+    }
+
+    func testUnknownVariantsStayUnpriced() {
+        let counts = TokenCounts(input: 1_000_000, output: 250_000)
+        for model in ["gpt-5.5-max", "gpt-5.5-c", "gpt-5.5-n", "gpt-5.5-fast",
+                      "claude-sonnet-5-5-high", "claude-sonnet-5-5-thinking-xhigh-fast",
+                      "claude-opus-5-5-medium-fast"] {
+            let estimate = table.estimate(model: model, counts: counts)
+            XCTAssertEqual(estimate.usd, 0, model)
+            XCTAssertEqual(estimate.unpricedTokens, counts.total, model)
+            XCTAssertNil(table.cost(model: model, counts: counts), model)
+        }
     }
 
     func testAliasCloudSuffix() {
@@ -41,7 +88,8 @@ final class PricingTests: XCTestCase {
     }
 
     func testAliasDoesNotShadowExactKey() throws {
-        // -max is a stripped variant suffix, but qwen3.7-max has its own entry at 1.475 in / 4.425 out.
+        // The model name includes -max; it is not a generic effort alias.
+        XCTAssertEqual(PriceTable.normalizedModelID("qwen3.7-max"), "qwen3.7-max")
         XCTAssertEqual(
             try cost("qwen3.7-max", TokenCounts(input: 1_000_000, output: 1_000_000)),
             1.475 + 4.425,

@@ -466,8 +466,17 @@ private struct SourcesSettingsTab: View {
     }
 
     private func isDetected(_ source: SourceInfo) -> Bool {
-        if refreshCoordinator?.health.contains(where: { $0.sourceID == source.id && $0.recordCount > 0 }) == true {
-            return true
+        if let health = refreshCoordinator?.health.first(where: { $0.sourceID == source.id }) {
+            switch health.state {
+            case .ok, .stale:
+                return true
+            case .notInstalled:
+                return false
+            case .unavailable, .failed:
+                if health.recordCount > 0 || health.lastSuccess != nil {
+                    return true
+                }
+            }
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
         return Self.dataLocations[source.id, default: []].contains { path in

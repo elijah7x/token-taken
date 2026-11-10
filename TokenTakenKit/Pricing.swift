@@ -17,13 +17,13 @@ public struct PriceTable: Sendable {
         }
     }
 
-    /// Versioned alias table used for lookups that miss an exact key. Bump it with the price version
-    /// whenever the rules in `normalizedModelID(_:)` change.
-    public static let aliasTableVersion = "v1"
+    /// Versioned alias table used for lookups that miss an exact key. Bump it whenever the
+    /// mappings or rules in `normalizedModelID(_:)` change.
+    public static let aliasTableVersion = "v2"
 
     public let version: String
     private let rates: [String: Rates]
-    private let aliases: [String: Rates]
+    private let aliasRates: [String: Rates]
 
     public init(version: String, rates: [String: Rates]) {
         self.version = version
@@ -38,7 +38,7 @@ public struct PriceTable: Sendable {
             let alias = Self.normalizedModelID(key)
             if indexed[alias] == nil { indexed[alias] = rates[key] }
         }
-        self.aliases = indexed
+        self.aliasRates = indexed
     }
 
     /// Priced portion of the counts in USD plus the token count no rate covered. A model with no
@@ -73,27 +73,42 @@ public struct PriceTable: Sendable {
         return result.unpricedTokens == 0 ? result.usd : nil
     }
 
-    /// Alias table v1: how a model id written by an agent log maps onto a price-snapshot key.
-    ///
-    /// Lowercases the id, drops the provider prefix up to the last `/`, drops a `:` suffix such as
-    /// `:cloud` or `:batch`, then peels effort and variant suffixes until none applies: `-low`,
-    /// `-medium`, `-high`, `-xhigh`, `-max`, `-fast`, `-thinking`, `-thinking-<effort>`, `-n`,
-    /// `-tiered`, `-trial`, `-c`.
-    ///
-    /// Exact keys are matched before this runs, so a name that only looks like a suffix survives:
-    /// `qwen3.7-max` is priced from its own entry even though it also normalizes to `qwen3.7`.
+    /// Alias table v2: lowercase, drop the provider prefix up to the last `/` and any `:` suffix,
+    /// then apply only reviewed variant mappings. Unknown variant suffixes remain unpriced.
+    /// Exact snapshot keys take precedence over aliases.
     public static func normalizedModelID(_ id: String) -> String {
         var alias = baseModelID(id)
         if let colon = alias.firstIndex(of: ":") { alias = String(alias[alias.startIndex..<colon]) }
-        while let suffix = variantSuffixes.first(where: { alias.hasSuffix($0) && alias.count > $0.count }) {
-            alias.removeLast(suffix.count)
-        }
-        return alias
+        return aliases[alias] ?? alias
     }
 
-    private static let variantSuffixes = [
-        "-thinking", "-xhigh", "-medium", "-high", "-low",
-        "-fast", "-tiered", "-trial", "-max", "-n", "-c",
+    /// Observed variants in engine/price-snapshot-2026-11-10.json; no suffix guessing.
+    private static let aliases: [String: String] = [
+        "claude-fable-5-1-medium": "claude-fable-5-1",
+        "claude-fable-5-1-thinking-high": "claude-fable-5-1",
+        "claude-fable-5-1-thinking-medium": "claude-fable-5-1",
+        "claude-fable-5-1-thinking-xhigh": "claude-fable-5-1",
+        "claude-opus-4-8-thinking-high": "claude-opus-4-8",
+        "claude-opus-5-5-medium": "claude-opus-5-5",
+        "claude-opus-5-5-xhigh": "claude-opus-5-5",
+        "claude-opus-5-low": "claude-opus-5",
+        "claude-opus-5-thinking-high": "claude-opus-5",
+        "composer-2.5-fast": "composer-2.5",
+        "cursor-grok-4.5-high": "cursor-grok-4.5",
+        "cursor-grok-4.5-high-fast": "cursor-grok-4.5",
+        "cursor-grok-4.6-high": "cursor-grok-4.6",
+        "cursor-grok-4.6-high-fast": "cursor-grok-4.6",
+        "cursor-grok-4.6-xhigh": "cursor-grok-4.6",
+        "gemini-3.5-flash-high": "gemini-3.5-flash",
+        "gemini-3.8-flash-n": "gemini-3.8-flash",
+        "gemini-3.8-flash-tiered": "gemini-3.8-flash",
+        "gemini-4-argon-c": "gemini-4-argon",
+        "gemini-4-argon-trial": "gemini-4-argon",
+        "gpt-5-6-sol-medium": "gpt-5.6-sol",
+        "gpt-5.6-luna-high": "gpt-5.6-luna",
+        "gpt-5.6-sol-medium": "gpt-5.6-sol",
+        "gpt-6-astra-low": "gpt-6-astra",
+        "grok-4.7-xhigh": "grok-4.7",
     ]
 
     /// Lowercase and drop the provider prefix, which the alias table treats as a routing detail.
@@ -110,7 +125,7 @@ public struct PriceTable: Sendable {
     private func rates(for model: String) -> Rates? {
         if let exact = rates[model] { return exact }
         let alias = Self.normalizedModelID(model)
-        return rates[alias] ?? aliases[alias]
+        return rates[alias] ?? aliasRates[alias]
     }
 
     /// Placeholder prices for synthetic data. `kimi-k3.1-pro` is left out on purpose to exercise unpriced tokens.

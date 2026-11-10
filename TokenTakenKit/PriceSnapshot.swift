@@ -10,7 +10,7 @@
 // unpriced for the model instead of free.
 
 extension PriceTable {
-    /// Rates tokscale 4.21.0 reported on 2026-11-10, read with the alias table v1.
+    /// Rates tokscale 4.21.0 reported on 2026-11-10, read with the alias table v2.
     public static let bundled = PriceTable(
         version: "tokscale-4.21.0-2026-11-10",
         rates: [
