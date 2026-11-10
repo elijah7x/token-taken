@@ -61,6 +61,46 @@
         }
       }
     },
+    "%lld minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 分钟"
+          }
+        }
+      }
+    },
+    "A file named token-taken already exists in the chosen folder." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所选文件夹中已存在名为 token-taken 的文件。"
+          }
+        }
+      }
+    },
+    "About" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关于"
+          }
+        }
+      }
+    },
+    "Acknowledgements" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "致谢"
+          }
+        }
+      }
+    },
     "All" : {
       "localizations" : {
         "zh-Hans" : {
@@ -77,6 +117,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部 · %@ 起"
+          }
+        }
+      }
+    },
+    "Available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用"
+          }
+        }
+      }
+    },
+    "Binary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "二进制文件"
           }
         }
       }
@@ -131,6 +191,86 @@
         }
       }
     },
+    "Choose a folder for the token-taken symlink." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择 token-taken 符号链接的安装文件夹。"
+          }
+        }
+      }
+    },
+    "Choose the tokscale executable." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择 tokscale 可执行文件。"
+          }
+        }
+      }
+    },
+    "Choose…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择…"
+          }
+        }
+      }
+    },
+    "Collected · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已采集 · %@"
+          }
+        }
+      }
+    },
+    "Collected · just now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已采集 · 刚刚"
+          }
+        }
+      }
+    },
+    "Collecting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在采集…"
+          }
+        }
+      }
+    },
+    "Collection engine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "采集引擎"
+          }
+        }
+      }
+    },
+    "Collection engine not found" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到采集引擎"
+          }
+        }
+      }
+    },
     "Condensation" : {
       "localizations" : {
         "zh-Hans" : {
@@ -141,12 +281,42 @@
         }
       }
     },
+    "Could not open the local usage store." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开本地用量数据库。"
+          }
+        }
+      }
+    },
     "Day" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "日"
+          }
+        }
+      }
+    },
+    "Demo data only; not collected usage." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于演示，并非实际采集数据。"
+          }
+        }
+      }
+    },
+    "Developer" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发"
           }
         }
       }
@@ -181,12 +351,112 @@
         }
       }
     },
+    "General" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通用"
+          }
+        }
+      }
+    },
+    "Install Command-Line Tool" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装命令行工具"
+          }
+        }
+      }
+    },
+    "Install Here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装到此文件夹"
+          }
+        }
+      }
+    },
+    "Installed at %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装到 %@"
+          }
+        }
+      }
+    },
+    "Invalid engine override" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "采集引擎自定义路径无效"
+          }
+        }
+      }
+    },
+    "Invalid override path" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义路径无效"
+          }
+        }
+      }
+    },
     "Last 7 days" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "近 7 天"
+          }
+        }
+      }
+    },
+    "Last refresh" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次刷新"
+          }
+        }
+      }
+    },
+    "Last success" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次成功"
+          }
+        }
+      }
+    },
+    "Launch at login" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录时启动"
+          }
+        }
+      }
+    },
+    "License" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "许可证"
           }
         }
       }
@@ -221,12 +491,52 @@
         }
       }
     },
+    "Never" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从未"
+          }
+        }
+      }
+    },
     "New input" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "新输入"
+          }
+        }
+      }
+    },
+    "No collected data yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无采集数据"
+          }
+        }
+      }
+    },
+    "No successful collection yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未成功采集"
+          }
+        }
+      }
+    },
+    "No usage collected yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有采集到用量"
           }
         }
       }
@@ -251,6 +561,46 @@
         }
       }
     },
+    "Not bundled" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未内置"
+          }
+        }
+      }
+    },
+    "Not collected yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未采集"
+          }
+        }
+      }
+    },
+    "Not found" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到"
+          }
+        }
+      }
+    },
+    "Open Settings…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置…"
+          }
+        }
+      }
+    },
     "Open Token Taken" : {
       "localizations" : {
         "zh-Hans" : {
@@ -271,12 +621,42 @@
         }
       }
     },
+    "Override path" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义路径"
+          }
+        }
+      }
+    },
+    "Pinned version" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定版本"
+          }
+        }
+      }
+    },
     "Price table %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "价格表 %@"
+          }
+        }
+      }
+    },
+    "Privacy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐私"
           }
         }
       }
@@ -291,12 +671,52 @@
         }
       }
     },
+    "Read-only local Agent logs, no content uploads, no telemetry" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只读读取本机 Agent 日志，不上传内容，无遥测"
+          }
+        }
+      }
+    },
     "Reasoning" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "推理"
+          }
+        }
+      }
+    },
+    "Records: %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "记录数：%lld"
+          }
+        }
+      }
+    },
+    "Refresh every" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刷新间隔"
+          }
+        }
+      }
+    },
+    "Refresh now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即刷新"
           }
         }
       }
@@ -321,6 +741,46 @@
         }
       }
     },
+    "Status" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "状态"
+          }
+        }
+      }
+    },
+    "Storage unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地存储不可用"
+          }
+        }
+      }
+    },
+    "Sync" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步"
+          }
+        }
+      }
+    },
+    "Synthetic data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "合成数据"
+          }
+        }
+      }
+    },
     "Synthetic data · Not connected to collection yet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -337,6 +797,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "TOTAL TOKENS / 总用量"
+          }
+        }
+      }
+    },
+    "The bundled token-taken tool was not found." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到应用内置的 token-taken 工具。"
           }
         }
       }
@@ -381,6 +851,16 @@
         }
       }
     },
+    "Token Taken reads agent logs on this Mac. Choose sources in Settings, or wait for the first collection to finish." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken 读取这台 Mac 上的 Agent 日志。可以在设置中选择来源，或等待首次采集完成。"
+          }
+        }
+      }
+    },
     "Token mix" : {
       "localizations" : {
         "zh-Hans" : {
@@ -411,6 +891,16 @@
         }
       }
     },
+    "Unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不可用"
+          }
+        }
+      }
+    },
     "Usage period" : {
       "localizations" : {
         "zh-Hans" : {
@@ -421,12 +911,82 @@
         }
       }
     },
+    "Use synthetic data" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用合成数据"
+          }
+        }
+      }
+    },
+    "Version" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本"
+          }
+        }
+      }
+    },
     "Year" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "年"
+          }
+        }
+      }
+    },
+    "iCloud sync" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 同步"
+          }
+        }
+      }
+    },
+    "iCloud sync is in development" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 同步正在开发"
+          }
+        }
+      }
+    },
+    "• Hourly UTC buckets contain token and event counts with a random device ID." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• 按 UTC 小时分桶，仅含 Token、事件计数和随机设备 ID。"
+          }
+        }
+      }
+    },
+    "• Never sync prompts, responses, paths, project names, credentials, or cost." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• 从不同步提示词、回复、路径、项目名称、凭据或费用。"
+          }
+        }
+      }
+    },
+    "• Sync is opt-in and contains aggregate usage only." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "• 同步由用户主动开启，仅包含聚合用量。"
           }
         }
       }

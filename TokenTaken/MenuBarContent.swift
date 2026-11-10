@@ -38,7 +38,7 @@ struct MenuBarContent: View {
                     .accessibilityElement(children: .combine)
                 }
                 if today.bySource.isEmpty {
-                    Text("No usage yet today")
+                    Text(model.isEmpty ? model.statusText : LocalizedStringKey("No usage yet today"))
                         .foregroundStyle(Palette.muted)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }

@@ -31,6 +31,33 @@ targets:
     dependencies:
       - target: TokenTakenKit
         embed: true
+      - target: TokenTakenCLI
+        embed: false
+        link: false
+    postBuildScripts:
+      - name: Bundle helper tools
+        shell: /bin/bash
+        showEnvVars: false
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          helpers="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Helpers"
+          resources="${TARGET_BUILD_DIR}/${CONTENTS_FOLDER_PATH}/Resources"
+          mkdir -p "$helpers" "$resources" "${DERIVED_FILE_DIR}"
+          # Hardened runtime enables library validation, which rejects ad-hoc frameworks; use it only with a real identity.
+          identity="${EXPANDED_CODE_SIGN_IDENTITY:--}"
+          options=""; if [[ "$identity" != "-" ]]; then options="runtime"; fi
+          # Incremental builds may skip re-sealing the app, so touch a helper only when its source changed.
+          bundle_tool() {
+            local source="$1" target="$helpers/$2" stamp="${DERIVED_FILE_DIR}/helper-$2.source"
+            if [[ -f "$target" && -f "$stamp" ]] && cmp -s "$source" "$stamp"; then return; fi
+            cp "$source" "$target"; chmod 755 "$target"
+            codesign --force ${options:+--options "$options"} --timestamp=none --sign "$identity" "$target"
+            cp "$source" "$stamp"
+          }
+          bundle_tool "${BUILT_PRODUCTS_DIR}/token-taken" token-taken
+          if [[ -f "${SRCROOT}/Vendor/engine/tokscale" ]]; then bundle_tool "${SRCROOT}/Vendor/engine/tokscale" tokscale; fi
+          cmp -s "${SRCROOT}/engine/engine.lock.json" "$resources/engine.lock.json" || cp "${SRCROOT}/engine/engine.lock.json" "$resources/engine.lock.json"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTaken
@@ -56,7 +83,12 @@ targets:
   TokenTakenKitTests:
     type: bundle.unit-test
     platform: macOS
-    sources: [TokenTakenKitTests]
+    sources:
+      - path: TokenTakenKitTests
+        excludes: ["Fixtures/**"]
+      - path: TokenTakenKitTests/Fixtures
+        optional: true
+        buildPhase: resources
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

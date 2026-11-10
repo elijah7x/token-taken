@@ -1,0 +1,49 @@
+{
+  "contributions": [
+    {
+      "date": "2026-11-08",
+      "clients": [
+        {
+          "client": "claude",
+          "modelId": "claude-sonnet",
+          "tokens": { "input": 100, "output": 50, "cacheRead": 20, "cacheWrite": 10, "reasoning": 5 }
+        },
+        {
+          "client": "claude",
+          "modelId": "claude-sonnet",
+          "tokens": { "input": 7, "output": 3, "cacheRead": 2, "cacheWrite": 1, "reasoning": 1 }
+        },
+        {
+          "client": "droid",
+          "modelId": "droid-large",
+          "tokens": { "input": 200, "output": 80, "cacheRead": 30, "cacheWrite": 20, "reasoning": 10 }
+        },
+        {
+          "client": "zcode",
+          "modelId": "glm-ignored",
+          "tokens": { "input": 9000, "output": 900, "cacheRead": 900, "cacheWrite": 90, "reasoning": 9 }
+        }
+      ]
+    },
+    {
+      "date": "2026-11-09",
+      "clients": [
+        {
+          "client": "claude",
+          "modelId": "claude-sonnet",
+          "tokens": { "input": 300, "output": 100, "cacheRead": 50, "cacheWrite": 25, "reasoning": 20 }
+        },
+        {
+          "client": "droid",
+          "modelId": "droid-large",
+          "tokens": { "input": 400, "output": 150, "cacheRead": 60, "cacheWrite": 30, "reasoning": 15 }
+        },
+        {
+          "client": "zcode",
+          "modelId": "glm-ignored",
+          "tokens": { "input": 9000, "output": 900, "cacheRead": 900, "cacheWrite": 90, "reasoning": 9 }
+        }
+      ]
+    }
+  ]
+}

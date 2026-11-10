@@ -24,6 +24,7 @@ public enum SourceCatalog {
         SourceInfo(id: "grok", name: "Grok", colorHex: "#A7AEF4"),
         SourceInfo(id: "opencode", name: "OpenCode", colorHex: "#BFDB86"),
         SourceInfo(id: "gemini", name: "Gemini CLI", colorHex: "#7CCFD9"),
+        SourceInfo(id: "factory", name: "Factory Droid", colorHex: "#D8B4A0"),
     ]
 
     private static let byID: [String: SourceInfo] = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })

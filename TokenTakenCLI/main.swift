@@ -7,7 +7,8 @@ enum CLI {
 
     static let usage = """
         Usage:
-          token-taken summary [--period day|month|year|all] [--json]
+          token-taken summary [--period day|month|year|all] [--json] [--synthetic]
+          token-taken sources [--json] [--synthetic]
           token-taken --version
         """
 }
@@ -23,18 +24,18 @@ func usageError(_ message: String) -> Never {
 
 // MARK: - JSON (docs/contracts/cli.md)
 
-struct Envelope: Encodable {
+struct Envelope<Payload: Encodable>: Encodable {
     let schemaVersion = 1
     let generatedAt: String
     let timeZone: String
     let range: DateRange
-    let data: SummaryData
+    let data: Payload
     let warnings: [Warning]
 }
 
 struct DateRange: Encodable {
-    let from: String
-    let to: String
+    let from: String?
+    let to: String?
 }
 
 struct Counts: Encodable {
@@ -81,9 +82,66 @@ struct SummaryData: Encodable {
     let cost: Cost
 }
 
+struct SourcesData: Encodable {
+    let sources: [SourceStatus]
+}
+
+struct SourceStatus: Encodable {
+    let id: String
+    let lastSuccess: String?
+    let records: Int
+    let error: String?
+}
+
 struct Warning: Encodable {
     let code: String
     let message: String
+}
+
+struct StoreSelection {
+    let store: any UsageStore
+    let now: Date
+    let health: [SourceHealth]
+    let warnings: [Warning]
+}
+
+func selectStore(synthetic: Bool) -> StoreSelection {
+    if synthetic {
+        return StoreSelection(
+            store: SyntheticUsageStore(),
+            now: SyntheticUsageStore.defaultToday,
+            health: [],
+            warnings: [Warning(code: "synthetic-data", message: "synthetic fixture data, not real usage")]
+        )
+    }
+
+    guard FileManager.default.fileExists(atPath: AppPaths.databaseURL.path) else {
+        writeError("no data yet: open Token Taken once")
+        exit(3)
+    }
+    do {
+        let store = try SQLiteUsageStore(url: AppPaths.databaseURL, readOnly: true)
+        return StoreSelection(store: store, now: .now, health: store.health(), warnings: [])
+    } catch {
+        writeError("token-taken: could not open usage store")
+        exit(1)
+    }
+}
+
+func rfc3339(_ date: Date) -> String {
+    let formatter = ISO8601DateFormatter()
+    formatter.timeZone = TimeZone(identifier: "UTC")
+    return formatter.string(from: date)
+}
+
+func printJSON<T: Encodable>(_ value: T) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
+    guard let data = try? encoder.encode(value), let text = String(data: data, encoding: .utf8) else {
+        writeError("token-taken: could not encode JSON")
+        exit(1)
+    }
+    print(text)
 }
 
 // MARK: - Commands
@@ -101,11 +159,14 @@ func parsePeriod(_ value: String) -> Period {
 func runSummary(_ arguments: [String]) -> Never {
     var period = Period.month
     var json = false
+    var synthetic = false
     var remaining = arguments[...]
     while let argument = remaining.popFirst() {
         switch argument {
         case "--json":
             json = true
+        case "--synthetic":
+            synthetic = true
         case "--period":
             guard let value = remaining.popFirst() else { usageError("--period needs a value") }
             period = parsePeriod(value)
@@ -116,10 +177,10 @@ func runSummary(_ arguments: [String]) -> Never {
         }
     }
 
+    let selection = selectStore(synthetic: synthetic)
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = .current
-    // Synthetic data ends on a fixed day, so "now" follows it rather than the clock.
-    let aggregator = UsageAggregator(store: SyntheticUsageStore(), calendar: calendar, now: SyntheticUsageStore.defaultToday)
+    let aggregator = UsageAggregator(store: selection.store, calendar: calendar, now: selection.now)
     let summary = aggregator.summary(for: period)
 
     let dayFormatter = DateFormatter()
@@ -130,13 +191,10 @@ func runSummary(_ arguments: [String]) -> Never {
     let from = dayFormatter.string(from: summary.start)
     let lastDay = calendar.date(byAdding: .day, value: -1, to: summary.end) ?? summary.start
     let to = dayFormatter.string(from: lastDay)
-    let syntheticWarning = Warning(code: "synthetic-data", message: "synthetic data: no collector yet")
 
     if json {
-        let generatedAt = ISO8601DateFormatter()
-        generatedAt.timeZone = TimeZone(identifier: "UTC")
         let envelope = Envelope(
-            generatedAt: generatedAt.string(from: .now),
+            generatedAt: rfc3339(.now),
             timeZone: calendar.timeZone.identifier,
             range: DateRange(from: from, to: to),
             data: SummaryData(
@@ -151,15 +209,9 @@ func runSummary(_ arguments: [String]) -> Never {
                     unpricedTokens: summary.cost.unpricedTokens
                 )
             ),
-            warnings: [syntheticWarning]
+            warnings: selection.warnings
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
-        guard let data = try? encoder.encode(envelope), let text = String(data: data, encoding: .utf8) else {
-            writeError("token-taken: could not encode JSON")
-            exit(1)
-        }
-        print(text)
+        printJSON(envelope)
         exit(0)
     }
 
@@ -185,9 +237,57 @@ func runSummary(_ arguments: [String]) -> Never {
     if summary.cost.unpricedTokens > 0 {
         lines.append("  \(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced")
     }
-    lines.append("")
-    lines.append("Warning: \(syntheticWarning.message)")
+    for warning in selection.warnings {
+        lines.append("")
+        lines.append("Warning: \(warning.message)")
+    }
     print(lines.joined(separator: "\n"))
+    exit(0)
+}
+
+func runSources(_ arguments: [String]) -> Never {
+    var json = false
+    var synthetic = false
+    for argument in arguments {
+        switch argument {
+        case "--json": json = true
+        case "--synthetic": synthetic = true
+        default: usageError("unknown argument '\(argument)'")
+        }
+    }
+
+    let selection = selectStore(synthetic: synthetic)
+    let statuses = selection.health.sorted { $0.sourceID < $1.sourceID }.map { health in
+        SourceStatus(
+            id: health.sourceID,
+            lastSuccess: health.lastSuccess.map(rfc3339),
+            records: health.recordCount,
+            error: health.errorMessage
+        )
+    }
+    if json {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let envelope = Envelope(
+            generatedAt: rfc3339(.now),
+            timeZone: calendar.timeZone.identifier,
+            range: DateRange(from: nil, to: nil),
+            data: SourcesData(sources: statuses),
+            warnings: selection.warnings
+        )
+        printJSON(envelope)
+    } else {
+        if statuses.isEmpty {
+            print("No source health recorded")
+        } else {
+            for status in statuses {
+                print("\(status.id)  last success: \(status.lastSuccess ?? "never")  records: \(status.records)  error: \(status.error ?? "none")")
+            }
+        }
+        for warning in selection.warnings {
+            print("Warning: \(warning.message)")
+        }
+    }
     exit(0)
 }
 
@@ -202,6 +302,8 @@ case "--help", "-h", "help":
     print(CLI.usage)
 case "summary":
     runSummary(Array(arguments.dropFirst()))
+case "sources":
+    runSources(Array(arguments.dropFirst()))
 case let command?:
     usageError("unknown command '\(command)'")
 case nil:

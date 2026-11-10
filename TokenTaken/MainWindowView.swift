@@ -25,9 +25,20 @@ struct MainWindowView: View {
                 Rectangle().fill(Palette.hairline).frame(width: 1)
 
                 VStack(spacing: 16) {
-                    CondensationView(summary: model.summary)
-                        .frame(maxWidth: .infinity, minHeight: 340, maxHeight: .infinity)
-                    BreakdownColumns(summary: model.summary)
+                    if model.isEmpty {
+                        ContentUnavailableView {
+                            Label("No usage collected yet", systemImage: "drop")
+                        } description: {
+                            Text("Token Taken reads agent logs on this Mac. Choose sources in Settings, or wait for the first collection to finish.")
+                        } actions: {
+                            SettingsLink { Text("Open Settings…") }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        CondensationView(summary: model.summary)
+                            .frame(maxWidth: .infinity, minHeight: 340, maxHeight: .infinity)
+                        BreakdownColumns(summary: model.summary)
+                    }
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 20)
@@ -73,7 +84,8 @@ private struct PeriodBar: View {
             Spacer(minLength: 12)
             HStack(spacing: 7) {
                 Circle().fill(Palette.liveDot).frame(width: 6, height: 6)
-                Text("Synthetic data · Not connected to collection yet")
+                // Relative time ("5 min ago") must re-render as the clock advances.
+                TimelineView(.everyMinute) { _ in Text(model.statusText) }
                     .font(.system(size: 12))
                     .foregroundStyle(Palette.muted)
                     .lineLimit(1)

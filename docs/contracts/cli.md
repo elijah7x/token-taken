@@ -16,6 +16,7 @@ Status: Draft v0 (2026-11-09)
 - `models`: list normalized model IDs and their retained raw IDs.
 - `devices`: list local and synced devices with their available sync health.
 - `export`: export the selected aggregate with `--format json|csv`, using the same range, grouping, filtering, and numeric semantics as `summary`.
+- `--synthetic` reads the bundled deterministic fixture instead of the store, for demos and tests. Its output MUST carry a `synthetic-data` warning so consumers never mistake it for real usage.
 - Global flags are `--json`, `--tz <IANA>`, `--version`, and the schema selector `--schema N` described below.
 - The effective time zone is the system time zone unless `--tz` supplies a valid IANA identifier. Named periods and custom date boundaries are interpreted in that zone.
 - Custom range endpoints are inclusive. `--from` and `--to` define a custom range and MUST NOT be combined with `--period`; an omitted endpoint is unbounded.

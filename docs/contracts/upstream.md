@@ -38,6 +38,10 @@ Status: Draft v0 (2026-11-09)
 - TokenTracker's React Bits assets have a separate license and MUST NOT be copied into the product or repository.
 - Reference-only code is not automatically approved for copying. Any copied code requires an explicit license review and notice update.
 
+## Current pin
+
+The tokscale distribution is pinned in `engine/engine.lock.json`. `scripts/fetch-engine.sh` verifies the per-architecture archives and assembles the universal binary under `Vendor/engine/`.
+
 ## Open questions
 
 - Engine selection and packaging mechanism: TBD after engine spike (ADR-0003).
