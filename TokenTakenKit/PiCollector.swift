@@ -1,4 +1,3 @@
-import CoreFoundation
 import Foundation
 
 /// Counts pi usage from its session JSONL (`~/.pi/agent/sessions/<encoded-cwd>/*.jsonl`) instead of
@@ -68,11 +67,21 @@ struct PiFormatScan: Sendable {
     static let toolsSummariesModel = "tools/summaries"
     /// Only recent usage needs hour resolution; older events roll into the daily totals only.
     static let hourlyWindow: TimeInterval = 48 * 3_600
-    /// Tool results can be enormous and cannot carry usage, so an over-long line is dropped instead
-    /// of buffered whole. Same ceiling as TokenTracker's collector.
+    /// Bounds the single buffered line; oversized records are discarded while streaming.
     static let maximumLineBytes = 64 << 20
     /// Placeholder epoch timestamps used to land usage in 1970; treated as missing.
     static let minimumTimestamp = Date(timeIntervalSince1970: 1_577_836_800)
+
+    /// Every counted record has a literal `"usage"` key, while model changes and assistant replies
+    /// must also be decoded when they only advance model state. Session headers retain their existing
+    /// validation. The quoted markers are independent of whitespace around JSON colons; a marker in
+    /// content merely causes a minimal decode, and `content` itself is never decoded.
+    private static let decodeMarkers = [
+        Data(#""usage""#.utf8),
+        Data(#""model_change""#.utf8),
+        Data(#""assistant""#.utf8),
+        Data(#""session""#.utf8),
+    ]
 
     let root: URL
     let sourceID: String
@@ -84,6 +93,7 @@ struct PiFormatScan: Sendable {
         let files = try sessionFiles()
         var totals = Totals(sourceID: sourceID, deviceID: deviceID, timeZone: timeZone, now: now)
 
+        let decoder = JSONDecoder()
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let plain = ISO8601DateFormatter()
@@ -93,13 +103,16 @@ struct PiFormatScan: Sendable {
             let modificationDate = Self.modificationDate(of: file) ?? now
             var state = FileState()
             try Self.forEachLine(in: file, onLine: { line in
-                totals.scan(
-                    line: line,
-                    state: &state,
-                    fallbackDate: modificationDate,
-                    fractional: fractional,
-                    plain: plain
-                )
+                autoreleasepool {
+                    totals.scan(
+                        line: line,
+                        state: &state,
+                        fallbackDate: modificationDate,
+                        decoder: decoder,
+                        fractional: fractional,
+                        plain: plain
+                    )
+                }
             }, onOverlongLine: {
                 totals.skippedRecords += 1
             })
@@ -193,6 +206,95 @@ struct PiFormatScan: Sendable {
         }
     }
 
+    private struct ScanRecord: Decodable {
+        let type: String?
+        let id: String?
+        let timestamp: String?
+        let model: String?
+        let modelId: String?
+        let responseId: String?
+        let message: ScanMessage?
+        let usage: ScanUsage?
+
+        enum CodingKeys: String, CodingKey {
+            case type, id, timestamp, model, modelId, responseId, message, usage
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            type = try values.decodeIfPresent(String.self, forKey: .type)
+            id = try? values.decodeIfPresent(String.self, forKey: .id)
+            timestamp = try? values.decodeIfPresent(String.self, forKey: .timestamp)
+            model = try? values.decodeIfPresent(String.self, forKey: .model)
+            modelId = try? values.decodeIfPresent(String.self, forKey: .modelId)
+            responseId = try? values.decodeIfPresent(String.self, forKey: .responseId)
+            message = try? values.decodeIfPresent(ScanMessage.self, forKey: .message)
+            usage = try? values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+        }
+    }
+
+    private struct ScanMessage: Decodable {
+        let role: String?
+        let model: String?
+        let responseId: String?
+        let timestamp: JSONInteger?
+        let usage: ScanUsage?
+
+        enum CodingKeys: String, CodingKey {
+            case role, model, responseId, timestamp, usage
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            role = try? values.decodeIfPresent(String.self, forKey: .role)
+            model = try? values.decodeIfPresent(String.self, forKey: .model)
+            responseId = try? values.decodeIfPresent(String.self, forKey: .responseId)
+            timestamp = try? values.decodeIfPresent(JSONInteger.self, forKey: .timestamp)
+            usage = try? values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+        }
+    }
+
+    private struct ScanUsage: Decodable {
+        let input: JSONInteger?
+        let cacheRead: JSONInteger?
+        let cacheWrite: JSONInteger?
+        let output: JSONInteger?
+        let reasoningTokens: JSONInteger?
+        let reasoning: JSONInteger?
+
+        enum CodingKeys: String, CodingKey {
+            case input, cacheRead, cacheWrite, output, reasoningTokens, reasoning
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            input = try? values.decodeIfPresent(JSONInteger.self, forKey: .input)
+            cacheRead = try? values.decodeIfPresent(JSONInteger.self, forKey: .cacheRead)
+            cacheWrite = try? values.decodeIfPresent(JSONInteger.self, forKey: .cacheWrite)
+            output = try? values.decodeIfPresent(JSONInteger.self, forKey: .output)
+            reasoningTokens = try? values.decodeIfPresent(JSONInteger.self, forKey: .reasoningTokens)
+            reasoning = try? values.decodeIfPresent(JSONInteger.self, forKey: .reasoning)
+        }
+    }
+
+    private struct JSONInteger: Decodable {
+        let value: Int64?
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.singleValueContainer()
+            guard let number = try? values.decode(Double.self), number.isFinite else {
+                value = nil
+                return
+            }
+            let rounded = number.rounded(.towardZero)
+            guard rounded >= Double(Int64.min), rounded < 0x1p63 else {
+                value = nil
+                return
+            }
+            value = Int64(rounded)
+        }
+    }
+
     private struct Totals {
         let sourceID: String
         let deviceID: String
@@ -208,6 +310,7 @@ struct PiFormatScan: Sendable {
             line rawLine: Data,
             state: inout FileState,
             fallbackDate: Date,
+            decoder: JSONDecoder,
             fractional: ISO8601DateFormatter,
             plain: ISO8601DateFormatter
         ) {
@@ -219,25 +322,30 @@ struct PiFormatScan: Sendable {
             }
             let trimmed = line.drop { $0 == 0x20 || $0 == 0x0D || $0 == 0x09 }
             guard !trimmed.isEmpty else { return }
+            guard trimmed.first == 0x7B else {
+                skippedRecords += 1
+                return
+            }
+            guard PiFormatScan.decodeMarkers.contains(where: { trimmed.range(of: $0) != nil }) else { return }
 
-            guard let object = (try? JSONSerialization.jsonObject(with: trimmed)) as? [String: Any],
-                  let type = object["type"] as? String else {
+            guard let object = try? decoder.decode(ScanRecord.self, from: trimmed),
+                  let type = object.type else {
                 skippedRecords += 1
                 return
             }
 
             switch type {
             case "model_change":
-                if let model = Self.text(object["modelId"]) { state.currentModel = model }
+                if let model = Self.text(object.modelId) { state.currentModel = model }
             case "message":
-                guard let message = object["message"] as? [String: Any] else { return }
-                let role = Self.text(message["role"])
-                let loggedModel = Self.text(message["model"])
+                guard let message = object.message else { return }
+                let role = Self.text(message.role)
+                let loggedModel = Self.text(message.model)
                 if role == "assistant" {
                     // Only a reply (or a `model_change`) advances the session's selected model.
                     if let loggedModel { state.currentModel = loggedModel }
                 }
-                guard let usage = message["usage"] as? [String: Any] else { return }
+                guard let usage = message.usage else { return }
                 let model: String?
                 switch role {
                 case "assistant": model = loggedModel ?? state.currentModel
@@ -245,20 +353,20 @@ struct PiFormatScan: Sendable {
                 default: return
                 }
                 record(
-                    object: object, type: type, model: model, usage: usage, messageTimestamp: message["timestamp"],
+                    object: object, type: type, model: model, usage: usage, messageTimestamp: message.timestamp,
                     line: rawLine, fallbackDate: fallbackDate, fractional: fractional, plain: plain
                 )
             case "compaction", "branch_summary":
-                guard let usage = object["usage"] as? [String: Any] else { return }
+                guard let usage = object.usage else { return }
                 record(
-                    object: object, type: type, model: Self.text(object["model"]) ?? PiFormatScan.toolsSummariesModel,
+                    object: object, type: type, model: Self.text(object.model) ?? PiFormatScan.toolsSummariesModel,
                     usage: usage, messageTimestamp: nil, line: rawLine, fallbackDate: fallbackDate,
                     fractional: fractional, plain: plain
                 )
             case "usage":
-                guard let usage = object["usage"] as? [String: Any] else { return }
+                guard let usage = object.usage else { return }
                 record(
-                    object: object, type: type, model: Self.text(object["model"]) ?? state.currentModel,
+                    object: object, type: type, model: Self.text(object.model) ?? state.currentModel,
                     usage: usage, messageTimestamp: nil, line: rawLine, fallbackDate: fallbackDate,
                     fractional: fractional, plain: plain
                 )
@@ -269,11 +377,11 @@ struct PiFormatScan: Sendable {
         }
 
         private mutating func record(
-            object: [String: Any],
+            object: ScanRecord,
             type: String,
             model: String?,
-            usage: [String: Any],
-            messageTimestamp: Any?,
+            usage: ScanUsage,
+            messageTimestamp: JSONInteger?,
             line: Data,
             fallbackDate: Date,
             fractional: ISO8601DateFormatter,
@@ -286,7 +394,7 @@ struct PiFormatScan: Sendable {
             guard counts.total > 0 else { return }
             let sourceDate = Self.sourceEventDate(
                 messageTimestamp: messageTimestamp,
-                recorded: object["timestamp"],
+                recorded: object.timestamp,
                 fractional: fractional,
                 plain: plain
             )
@@ -298,7 +406,7 @@ struct PiFormatScan: Sendable {
             // Identity is session-independent and never the response id alone: fork/branch copies repeat
             // the entry id and the usage in a new file and must collapse, while two calls that share
             // a short response id differ in entry id, timestamp, or counts and must both count.
-            let identifier = Self.text(object["id"]).map { "\(type):\($0)" }
+            let identifier = Self.text(object.id).map { "\(type):\($0)" }
                 ?? "\(type):line:\(Self.fingerprint(line))"
             let timestampIdentity = sourceDate.map {
                 String(Int64(($0.timeIntervalSince1970 * 1_000).rounded()))
@@ -312,8 +420,7 @@ struct PiFormatScan: Sendable {
             key.combine(counts.cacheWrite)
             key.combine(counts.output)
             key.combine(counts.reasoning)
-            if let responseID = Self.text((object["message"] as? [String: Any])?["responseId"])
-                ?? Self.text(object["responseId"]) {
+            if let responseID = Self.text(object.message?.responseId) ?? Self.text(object.responseId) {
                 key.combine(responseID)
             }
             guard seen.insert(key).inserted else { return }
@@ -366,12 +473,12 @@ struct PiFormatScan: Sendable {
 
         /// Splits reasoning out of output. pi and oh-my-pi both report reasoning as a breakdown of
         /// `output` and print a `totalTokens` that excludes it, so adding it again would double count.
-        static func tokenCounts(from usage: [String: Any]) -> (TokenCounts, Bool)? {
-            let input = integer(usage["input"]) ?? 0
-            let cacheRead = integer(usage["cacheRead"]) ?? 0
-            let cacheWrite = integer(usage["cacheWrite"]) ?? 0
-            let rawOutput = integer(usage["output"]) ?? 0
-            let reportedReasoning = integer(usage["reasoningTokens"]) ?? integer(usage["reasoning"])
+        static func tokenCounts(from usage: ScanUsage) -> (TokenCounts, Bool)? {
+            let input = usage.input?.value ?? 0
+            let cacheRead = usage.cacheRead?.value ?? 0
+            let cacheWrite = usage.cacheWrite?.value ?? 0
+            let rawOutput = usage.output?.value ?? 0
+            let reportedReasoning = usage.reasoningTokens?.value ?? usage.reasoning?.value
             guard input >= 0, cacheRead >= 0, cacheWrite >= 0, rawOutput >= 0, (reportedReasoning ?? 0) >= 0 else {
                 return nil
             }
@@ -395,40 +502,29 @@ struct PiFormatScan: Sendable {
         }
 
         static func sourceEventDate(
-            messageTimestamp: Any?,
-            recorded: Any?,
+            messageTimestamp: JSONInteger?,
+            recorded: String?,
             fractional: ISO8601DateFormatter,
             plain: ISO8601DateFormatter
         ) -> Date? {
             // An assistant message's own timestamp is the request start; the entry timestamp is
             // when the record was persisted, so the message timestamp wins when it is usable.
-            if let milliseconds = integer(messageTimestamp), milliseconds > 0 {
+            if let milliseconds = messageTimestamp?.value, milliseconds > 0 {
                 let date = Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
                 if date >= PiFormatScan.minimumTimestamp { return date }
             }
-            if let text = recorded as? String,
-               let date = fractional.date(from: text) ?? plain.date(from: text),
+            if let recorded,
+               let date = fractional.date(from: recorded) ?? plain.date(from: recorded),
                date >= PiFormatScan.minimumTimestamp {
                 return date
             }
             return nil
         }
 
-        private static func text(_ value: Any?) -> String? {
-            guard let value = value as? String else { return nil }
+        private static func text(_ value: String?) -> String? {
+            guard let value else { return nil }
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
-        }
-
-        /// A JSON number, excluding booleans (which bridge to `NSNumber` too).
-        private static func integer(_ value: Any?) -> Int64? {
-            guard let value, let number = value as? NSNumber,
-                  CFGetTypeID(number) != CFBooleanGetTypeID() else {
-                return nil
-            }
-            let double = number.doubleValue
-            guard double.isFinite else { return nil }
-            return Int64(double.rounded(.towardZero))
         }
 
         /// Stable content fingerprint for a record that carries no entry id.
@@ -442,7 +538,7 @@ struct PiFormatScan: Sendable {
         }
     }
 
-    /// Splits a JSONL file into lines without loading it whole.
+    /// Splits a JSONL file into lines without loading it whole, reusing one line buffer.
     private static func forEachLine(
         in url: URL,
         onLine: (Data) -> Void,
@@ -455,12 +551,19 @@ struct PiFormatScan: Sendable {
         var pending = Data()
         var discardingOverlongLine = false
 
-        while let chunk = try file.read(upToCount: 262_144), !chunk.isEmpty {
+        while true {
+            let chunk = try autoreleasepool { try file.read(upToCount: 1 << 20) }
+            guard let chunk, !chunk.isEmpty else { break }
             var rest = chunk[...]
             while let index = rest.firstIndex(of: newline) {
                 if !discardingOverlongLine {
-                    pending.append(contentsOf: rest[rest.startIndex..<index])
-                    onLine(pending)
+                    let segment = rest[rest.startIndex..<index]
+                    if pending.count + segment.count > maximumLineBytes {
+                        onOverlongLine()
+                    } else {
+                        pending.append(contentsOf: segment)
+                        onLine(pending)
+                    }
                 }
                 discardingOverlongLine = false
                 pending.removeAll(keepingCapacity: true)

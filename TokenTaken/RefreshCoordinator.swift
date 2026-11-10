@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Observation
 import TokenTakenKit
@@ -96,6 +97,8 @@ final class RefreshCoordinator {
         let results = await Task.detached(priority: .utility) {
             await runner.runAll(now: attemptedAt)
         }.value
+        // Return freed pages so the menu bar app's resident memory drops after collection.
+        malloc_zone_pressure_relief(nil, 0)
 
         health = results.map { $0.markingStale() }
         if health.contains(where: { $0.state == .ok && ($0.lastSuccess.map({ $0 >= attemptedAt }) ?? false) }) {

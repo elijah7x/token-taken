@@ -270,6 +270,47 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertEqual(batch.hourly.first?.reasoningKnown, false)
     }
 
+    func testFiveMegabyteAssistantContentWithUsageIsCounted() async throws {
+        let root = directory.appendingPathComponent("large-content", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let entry: [String: Any] = [
+            "type": "message",
+            "id": "large-assistant",
+            "timestamp": "2026-11-10T10:00:00Z",
+            "message": [
+                "role": "assistant",
+                "model": "claude-sonnet-4-5",
+                "content": String(repeating: "x", count: 5 * 1_024 * 1_024),
+                "usage": ["input": 100, "cacheRead": 10, "cacheWrite": 5, "output": 50, "reasoning": 20],
+            ],
+        ]
+        var line = try JSONSerialization.data(withJSONObject: entry)
+        line.append(0x0A)
+        XCTAssertGreaterThan(line.count, 5 * 1_024 * 1_024)
+        try line.write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.eventCount, 1)
+        XCTAssertEqual(
+            batch.daily.first?.counts,
+            TokenCounts(input: 100, cacheRead: 10, cacheWrite: 5, output: 30, reasoning: 20)
+        )
+    }
+
+    func testUsageMarkerInsideMessageContentIsNotCounted() async throws {
+        let root = directory.appendingPathComponent("content-marker", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let entry = #"{"type":"message","id":"text-only","timestamp":"2026-11-10T10:00:00Z","message":{"role":"user","content":"usage"}}"# + "\n"
+        try Data(entry.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertTrue(batch.hourly.isEmpty)
+    }
+
     func testNonDirectoryRootErrorDoesNotExposePath() async throws {
         let fileRoot = directory.appendingPathComponent("not-a-dir.jsonl")
         try Data().write(to: fileRoot)

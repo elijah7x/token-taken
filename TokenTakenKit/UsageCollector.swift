@@ -5,17 +5,21 @@ public struct CollectionBatch: Sendable {
     public var hourly: [HourlyUsage]
     public var skippedRecords: Int
     public var unavailableSourceIDs: Set<String>
+    /// Sources whose collection failed in this batch (sourceID to a path-free message); their cache is kept.
+    public var failedSourceIDs: [String: String]
 
     public init(
         daily: [UsageRecord] = [],
         hourly: [HourlyUsage] = [],
         skippedRecords: Int = 0,
-        unavailableSourceIDs: Set<String> = []
+        unavailableSourceIDs: Set<String> = [],
+        failedSourceIDs: [String: String] = [:]
     ) {
         self.daily = daily
         self.hourly = hourly
         self.skippedRecords = skippedRecords
         self.unavailableSourceIDs = unavailableSourceIDs
+        self.failedSourceIDs = failedSourceIDs
     }
 }
 
