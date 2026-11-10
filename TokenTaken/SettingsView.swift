@@ -478,26 +478,61 @@ private struct SourcesSettingsTab: View {
 
 private struct SyncSettingsTab: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(AppModel.self) private var model
+    @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
 
     var body: some View {
         @Bindable var settings = settings
         Form {
             Section {
                 Toggle("iCloud sync", isOn: $settings.syncEnabled)
-                    .disabled(true)
-                Text("iCloud sync is in development")
+                Text("Combine usage from your Macs through iCloud Drive. Only totals are shared.")
                     .foregroundStyle(.secondary)
+                if refreshCoordinator?.iCloudAvailable == false || ICloudSync.defaultRoot == nil {
+                    Text("iCloud Drive is not available on this Mac.")
+                        .foregroundStyle(.secondary)
+                } else if settings.syncEnabled && refreshCoordinator?.syncFailed == true {
+                    Text("Unavailable").foregroundStyle(.secondary)
+                }
             }
 
-            Section("Privacy") {
-                Text("• Sync is opt-in and contains aggregate usage only.")
-                Text("• Hourly UTC buckets contain token and event counts with a random device ID.")
-                Text("• Never sync prompts, responses, paths, project names, credentials, or cost.")
+            if settings.syncEnabled {
+                Section("Other Macs") {
+                    if model.remoteDevices.isEmpty {
+                        Text("No other Macs yet").foregroundStyle(.secondary)
+                    }
+                    ForEach(model.remoteDevices, id: \.deviceID) { device in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(verbatim: device.displayName)
+                                if let lastWrite = device.lastWrite {
+                                    Text("Last synced \(Self.relativeFormatter.localizedString(for: lastWrite, relativeTo: .now))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            Spacer()
+                            if device.state == .stale || device.lastWrite.map({ Date.now.timeIntervalSince($0) > 86_400 }) == true {
+                                Text("Stale").foregroundStyle(.secondary)
+                            }
+                            if device.state == .unavailable || device.state == .partial {
+                                Text("Unavailable").foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
             }
         }
         .scrollContentBackground(.hidden)
         .formStyle(.grouped)
     }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
 }
 
 private struct AboutSettingsTab: View {

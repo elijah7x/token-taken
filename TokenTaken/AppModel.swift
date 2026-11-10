@@ -31,19 +31,27 @@ final class AppModel {
         var count: Int { failed + unavailable + stale }
     }
 
+    var remoteDevices: [RemoteDeviceStatus] {
+        guard settings?.syncEnabled == true else { return [] }
+        return refreshCoordinator?.remoteSnapshots.map(\.status) ?? []
+    }
+
     var dataIssues: DataIssues {
         let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
         let failed = health.filter { $0.state == .failed }.count
         let unavailable = health.filter { $0.state == .unavailable }.count
+            + remoteDevices.filter { $0.state == .unavailable || $0.state == .partial }.count
         let stale = health.filter { $0.state == .stale }.count
+            + remoteDevices.filter { $0.state == .stale }.count
         let skipped = health.reduce(0) { $0 + $1.skippedRecords }
         return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped,
-            isPartial: failed + unavailable + stale > 0 || skipped > 0 || storageError != nil || readError != nil)
+            isPartial: failed + unavailable + stale > 0 || skipped > 0 || storageError != nil || readError != nil
+                || (settings?.syncEnabled == true && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false)))
     }
 
     var isEmpty: Bool {
         if settings != nil {
-            return realStore?.isEmpty ?? true
+            return summary.total.total == 0 && ((try? store.records().isEmpty) ?? true)
         }
         return (try? fixedStore?.records().isEmpty) ?? true
     }
@@ -146,8 +154,12 @@ final class AppModel {
 
     private var store: any UsageStore {
         if settings != nil {
-            if let realStore { return realStore }
-            return emptyStore
+            let local: any UsageStore
+            if let realStore { local = realStore } else { local = emptyStore }
+            if settings?.syncEnabled == true {
+                return MergedUsageStore(local: local, remote: refreshCoordinator?.remoteSnapshots ?? [])
+            }
+            return local
         }
         if let fixedStore { return fixedStore }
         return emptyStore

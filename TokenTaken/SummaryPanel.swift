@@ -7,6 +7,7 @@ import TokenTakenKit
 struct SummaryRail: View {
     let summary: UsageSummary
 
+    @Environment(AppModel.self) private var model
     @Environment(AppSettings.self) private var settings
 
     var body: some View {
@@ -61,8 +62,14 @@ struct SummaryRail: View {
             ) {
                 VStack(spacing: 9) {
                     ForEach(summary.byDevice) { device in
-                        HStack(alignment: .firstTextBaseline) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
                             Text(verbatim: device.name).foregroundStyle(Palette.muted).lineLimit(1)
+                            if let status = remoteStatusLabel(for: device) {
+                                Text(status)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(Palette.muted)
+                                    .fixedSize()
+                            }
                             Spacer(minLength: 8)
                             VStack(alignment: .trailing, spacing: 1) {
                                 Text(TokenFormat.short(device.counts.total)).fontWeight(.semibold)
@@ -79,6 +86,22 @@ struct SummaryRail: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func remoteStatusLabel(for device: Breakdown) -> LocalizedStringKey? {
+        guard let remote = model.remoteDevices.first(where: {
+            $0.deviceID == device.id || $0.displayName == device.name
+        }) else {
+            return nil
+        }
+        return switch remote.state {
+        case .ok:
+            nil
+        case .stale:
+            "Stale"
+        case .partial, .unavailable:
+            "Unavailable"
+        }
     }
 }
 

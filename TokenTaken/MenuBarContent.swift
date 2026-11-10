@@ -7,6 +7,7 @@ import TokenTakenKit
 struct MenuBarContent: View {
     @Environment(AppModel.self) private var model
     @Environment(MainWindowRouter.self) private var router
+    @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.openWindow) private var openWindow
 
     private var today: UsageSummary { model.todaySummary }
@@ -49,6 +50,29 @@ struct MenuBarContent: View {
             .monospacedDigit()
 
             Divider()
+
+            if let note = model.statusIssueNote {
+                Button {
+                    router.route = .settings
+                    openWindow(id: MainWindowView.windowID)
+                    NSApplication.shared.activate()
+                } label: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(AppModel.statusIssueDotColor)
+                            .frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                        Text(note)
+                            .font(.system(size: 11))
+                            .foregroundStyle(AppModel.statusIssueTextColor)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(model.statusTooltip(refreshCoordinator: refreshCoordinator))
+            }
 
             HStack(alignment: .center) {
                 VStack(alignment: .leading, spacing: 1) {

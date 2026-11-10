@@ -38,7 +38,7 @@ See the [privacy contract](docs/contracts/privacy.md) and [sync contract](docs/c
 The CLI does not exist yet. The planned interface includes commands such as:
 
 ```sh
-token-taken summary --period month --by model --json
+token-taken models --period month --json
 ```
 
 The [CLI contract](docs/contracts/cli.md) defines the planned output and error behavior.

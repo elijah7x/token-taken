@@ -38,7 +38,7 @@ v1 采用本地优先设计：
 CLI 尚不存在。计划中的接口包含如下命令：
 
 ```sh
-token-taken summary --period month --by model --json
+token-taken models --period month --json
 ```
 
 [CLI 契约](docs/contracts/cli.md)定义了计划中的输出和错误行为。

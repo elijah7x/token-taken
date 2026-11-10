@@ -56,7 +56,7 @@ The release check must record the reference hardware, dataset size, build config
 Planned example:
 
 ```sh
-token-taken summary --period month --by model --json
+token-taken models --period month --json
 ```
 
 ## v1 scope

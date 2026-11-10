@@ -51,6 +51,7 @@ final class AppSettings {
         didSet {
             guard syncEnabled != oldValue else { return }
             defaults.set(syncEnabled, forKey: Keys.syncEnabled)
+            onSyncEnabledChange?()
         }
     }
 
@@ -90,6 +91,7 @@ final class AppSettings {
     private var launchAtLoginStatus: SMAppService.Status
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored var onRefreshIntervalChange: (() -> Void)?
+    @ObservationIgnored var onSyncEnabledChange: (() -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

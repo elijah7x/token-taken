@@ -15,12 +15,17 @@ final class RefreshCoordinator {
     private(set) var lastRefresh: Date?
     private(set) var health: [SourceHealth]
     private(set) var engineStatus: EngineStatus = .missing
+    private(set) var remoteSnapshots: [RemoteDeviceSnapshot] = []
+    private(set) var iCloudAvailable = ICloudSync.defaultRoot != nil
+    private(set) var syncFailed = false
 
     @ObservationIgnored let store: SQLiteUsageStore
     @ObservationIgnored var onChange: (() -> Void)?
     @ObservationIgnored private let settings: AppSettings
     @ObservationIgnored private let device: Device
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var syncTask: Task<Void, Never>?
+    @ObservationIgnored private let syncWorker = SyncWorker()
 
     init(settings: AppSettings) throws {
         self.settings = settings
@@ -31,6 +36,17 @@ final class RefreshCoordinator {
         updateEngineStatus()
         settings.onRefreshIntervalChange = { [weak self] in
             self?.restart()
+        }
+        settings.onSyncEnabledChange = { [weak self] in
+            guard let self else { return }
+            self.syncTask?.cancel()
+            if self.settings.syncEnabled {
+                Task { [weak self] in await self?.readRemotes() }
+            } else {
+                self.remoteSnapshots = []
+                self.syncFailed = false
+                self.onChange?()
+            }
         }
     }
 
@@ -71,6 +87,7 @@ final class RefreshCoordinator {
             isRefreshing = false
             onChange?()
         }
+        await readRemotes()
         let collectors = makeCollectors()
         let store = store
         let device = device
@@ -81,8 +98,73 @@ final class RefreshCoordinator {
         }.value
 
         health = results.map { $0.markingStale() }
-        if health.contains(where: { $0.lastSuccess.map({ $0 >= attemptedAt }) ?? false }) {
+        if health.contains(where: { $0.state == .ok && ($0.lastSuccess.map({ $0 >= attemptedAt }) ?? false) }) {
             lastRefresh = health.compactMap(\.lastSuccess).max()
+            await scheduleSyncWrite()
+        }
+    }
+
+    private func readRemotes() async {
+        iCloudAvailable = ICloudSync.defaultRoot != nil
+        guard settings.syncEnabled else { return }
+        guard let root = ICloudSync.defaultRoot else {
+            markRemotesUnavailable()
+            onChange?()
+            return
+        }
+        let snapshots = await syncWorker.read(root: root, excludingDeviceID: device.id)
+        guard settings.syncEnabled else { return }
+        guard let snapshots else {
+            markRemotesUnavailable()
+            syncFailed = true
+            onChange?()
+            return
+        }
+        let previous = Dictionary(remoteSnapshots.map { ($0.device.id, $0) }, uniquingKeysWith: { first, _ in first })
+        remoteSnapshots = snapshots.map { snapshot in
+            guard snapshot.status.state != .ok, let cached = previous[snapshot.device.id] else { return snapshot }
+            return RemoteDeviceSnapshot(device: cached.device, daily: cached.daily, hourly: cached.hourly, status: RemoteDeviceStatus(
+                deviceID: cached.device.id, displayName: cached.device.name,
+                lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state))
+        }
+        onChange?()
+    }
+
+    private func markRemotesUnavailable() {
+        remoteSnapshots = remoteSnapshots.map { snapshot in
+            RemoteDeviceSnapshot(device: snapshot.device, daily: snapshot.daily, hourly: snapshot.hourly, status: RemoteDeviceStatus(
+                deviceID: snapshot.device.id, displayName: snapshot.device.name, lastWrite: snapshot.status.lastWrite, state: .unavailable))
+        }
+    }
+
+    private func scheduleSyncWrite() async {
+        guard settings.syncEnabled else { return }
+        syncTask?.cancel()
+        let store = store
+        let publication = await Task.detached(priority: .utility) {
+            Result { try SyncPublicationStore(store: store) }
+        }.value
+        guard settings.syncEnabled else { return }
+        guard case .success(let snapshot) = publication else {
+            syncFailed = true
+            return
+        }
+        let health = health
+        syncTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(1)) } catch { return }
+            guard let self, self.settings.syncEnabled else { return }
+            self.iCloudAvailable = ICloudSync.defaultRoot != nil
+            guard let root = ICloudSync.defaultRoot else {
+                self.syncFailed = true
+                self.onChange?()
+                return
+            }
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
+            let succeeded = await self.syncWorker.write(store: snapshot, device: self.device, root: root,
+                appVersion: version, health: health)
+            guard self.settings.syncEnabled else { return }
+            self.syncFailed = !succeeded
+            await self.readRemotes()
         }
     }
 
@@ -130,6 +212,40 @@ final class RefreshCoordinator {
                 guard interval == self.settings.refreshIntervalMinutes else { continue }
                 await self.refresh()
             }
+        }
+    }
+}
+
+private struct SyncPublicationStore: UsageStore {
+    let devices: [Device]
+    private let dailyRows: [UsageRecord]
+    private let hourlyRows: [HourlyUsage]
+
+    init(store: any UsageStore) throws {
+        devices = store.devices
+        dailyRows = try store.records()
+        hourlyRows = try store.hourly()
+    }
+
+    func records() -> [UsageRecord] { dailyRows }
+    func hourly() -> [HourlyUsage] { hourlyRows }
+}
+
+private actor SyncWorker {
+    func read(root: URL, excludingDeviceID: String) -> [RemoteDeviceSnapshot]? {
+        let devices = root.appendingPathComponent("v1/devices", isDirectory: true)
+        if FileManager.default.fileExists(atPath: devices.path) {
+            guard (try? SyncBackend(root: root).list("v1/devices")) != nil else { return nil }
+        }
+        return ICloudSync.readRemote(root: root, excludingDeviceID: excludingDeviceID)
+    }
+
+    func write(store: any UsageStore, device: Device, root: URL, appVersion: String, health: [SourceHealth]) -> Bool {
+        do {
+            try ICloudSync.write(local: store, device: device, root: root, appVersion: appVersion, health: health)
+            return true
+        } catch {
+            return false
         }
     }
 }

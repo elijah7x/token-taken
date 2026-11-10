@@ -1,12 +1,26 @@
 import Foundation
 
 public enum LocalDevice {
-    public static func current(defaults: UserDefaults = .standard) -> Device {
-        if let id = defaults.string(forKey: "deviceID") {
-            return Device(id: id, name: Host.current().localizedName ?? "Mac")
+    /// The id lives in the shared support folder so the app and the CLI (separate defaults domains) agree on it.
+    /// Earlier builds kept it in the app's defaults; that value is adopted once.
+    public static func current(defaults: UserDefaults = .standard, supportDirectory: URL = AppPaths.supportDirectory) -> Device {
+        let name = Host.current().localizedName ?? "Mac"
+        let file = supportDirectory.appendingPathComponent("device-id")
+        if let stored = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+           UUID(uuidString: stored) != nil {
+            return Device(id: stored, name: name)
         }
-        let id = UUID().uuidString
+        let id = defaults.string(forKey: "deviceID") ?? UUID().uuidString
+        try? id.write(to: file, atomically: true, encoding: .utf8)
         defaults.set(id, forKey: "deviceID")
-        return Device(id: id, name: Host.current().localizedName ?? "Mac")
+        return Device(id: id, name: name)
+    }
+
+    /// Reads the id without creating one; nil before the app's first launch.
+    public static func storedID(supportDirectory: URL = AppPaths.supportDirectory) -> String? {
+        let file = supportDirectory.appendingPathComponent("device-id")
+        guard let stored = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+              UUID(uuidString: stored) != nil else { return nil }
+        return stored
     }
 }

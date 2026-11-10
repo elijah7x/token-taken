@@ -138,6 +138,8 @@ private struct RailSettingsButtonStyle: ButtonStyle {
 
 private struct PeriodBar: View {
     @Environment(AppModel.self) private var model
+    @Environment(MainWindowRouter.self) private var router
+    @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
 
     var body: some View {
         HStack(spacing: 16) {
@@ -148,18 +150,38 @@ private struct PeriodBar: View {
                 .monospacedDigit()
                 .contentTransition(.numericText())
             Spacer(minLength: 12)
-            HStack(spacing: 7) {
-                Circle().fill(Palette.liveDot).frame(width: 6, height: 6)
-                    .accessibilityHidden(true)
-                // Relative time ("5 min ago") must re-render as the clock advances.
-                TimelineView(.everyMinute) { _ in Text(model.statusText) }
-                    .font(.system(size: 12))
-                    .foregroundStyle(Palette.muted)
-                    .lineLimit(1)
+            // Relative time ("5 min ago") and staleness must re-render as the clock advances.
+            TimelineView(.everyMinute) { _ in
+                let hasIssue = model.hasStatusIssue
+                let tooltip = model.statusTooltip(refreshCoordinator: refreshCoordinator)
+                Button {
+                    router.route = .settings
+                } label: {
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(hasIssue ? AppModel.statusIssueDotColor : Palette.liveDot)
+                            .frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                        statusLabel
+                            .font(.system(size: 12))
+                            .foregroundStyle(hasIssue ? AppModel.statusIssueTextColor : Palette.muted)
+                            .lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(tooltip)
             }
         }
         .padding(.horizontal, 22)
         .frame(height: 50)
+    }
+
+    private var statusLabel: Text {
+        if let note = model.statusIssueNote {
+            return Text(model.statusText) + Text(verbatim: " · ") + Text(note)
+        }
+        return Text(model.statusText)
     }
 
     private var rangeTitle: LocalizedStringKey {
@@ -174,6 +196,80 @@ private struct PeriodBar: View {
         case .all:
             return "All time · since \(start.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)))"
         }
+    }
+}
+
+extension AppModel {
+    static let statusIssueDotColor = Color(
+        light: "#D9822B",
+        dark: "#E9AE78",
+        contrastLight: "#B36210",
+        contrastDark: "#F5C693"
+    )
+    static let statusIssueTextColor = Color(
+        light: "#94530E",
+        dark: "#E9AE78",
+        contrastLight: "#703C05",
+        contrastDark: "#F5C693"
+    )
+
+    var hasStatusIssue: Bool {
+        dataIssues.isPartial || remoteDevices.contains { $0.state != .ok }
+    }
+
+    var statusIssueNote: LocalizedStringKey? {
+        let issues = dataIssues
+        guard issues.isPartial || remoteDevices.contains(where: { $0.state != .ok }) else {
+            return nil
+        }
+        if issues.stale > 0, issues.failed == 0, issues.unavailable == 0 {
+            return issues.stale == 1 ? "1 source stale" : "\(issues.stale) sources stale"
+        }
+        if issues.count > 0 {
+            return issues.count == 1 ? "1 source unavailable" : "\(issues.count) sources unavailable"
+        }
+        return "data may be incomplete"
+    }
+
+    func statusTooltip(refreshCoordinator: RefreshCoordinator?) -> String {
+        guard hasStatusIssue else { return "" }
+        var lines: [String] = []
+        let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
+        for entry in health {
+            let state: String? = switch entry.state {
+            case .ok:
+                entry.skippedRecords > 0 ? String(localized: "Partial") : nil
+            case .unavailable:
+                String(localized: "Unavailable")
+            case .failed:
+                String(localized: "Failed")
+            case .stale:
+                String(localized: "Stale")
+            }
+            if let state {
+                let name = SourceCatalog.info(for: entry.sourceID).name
+                lines.append(String(localized: "\(name): \(state)"))
+            }
+        }
+        for device in remoteDevices {
+            let state: String? = switch device.state {
+            case .ok:
+                nil
+            case .stale:
+                String(localized: "Stale")
+            case .partial:
+                String(localized: "Partial")
+            case .unavailable:
+                String(localized: "Unavailable")
+            }
+            if let state {
+                lines.append(String(localized: "\(device.displayName): \(state)"))
+            }
+        }
+        if lines.isEmpty, let error = storageError ?? readError {
+            lines.append(error)
+        }
+        return lines.joined(separator: "\n")
     }
 }
 
