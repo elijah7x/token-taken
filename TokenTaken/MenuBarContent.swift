@@ -56,7 +56,7 @@ struct MenuBarContent: View {
                 let tooltip = model.statusTooltip(refreshCoordinator: refreshCoordinator)
                 HStack(spacing: 8) {
                     Button {
-                        router.route = .settings
+                        router.openSettings(for: hasIssue ? model.dataIssues : nil)
                         openWindow(id: MainWindowView.windowID)
                         NSApplication.shared.activate()
                     } label: {

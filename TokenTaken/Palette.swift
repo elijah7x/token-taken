@@ -262,10 +262,12 @@ enum Share {
     /// a non-zero part that would round to `0.0%` renders `<0.1%`.
     static func percent(_ part: Int64, of total: Int64) -> String {
         let ratio = total > 0 ? Double(part) / Double(total) : 0
-        if part > 0, ratio < 0.0005 {
+        let text = ratio.formatted(.percent.precision(.fractionLength(1)))
+        // Compare against the formatted zero so ties that round down (e.g. exactly 0.05%) are caught too.
+        if part > 0, text == 0.0.formatted(.percent.precision(.fractionLength(1))) {
             return "<" + 0.001.formatted(.percent.precision(.fractionLength(1)))
         }
-        return ratio.formatted(.percent.precision(.fractionLength(1)))
+        return text
     }
 
     static func ratio(_ part: Int64, of total: Int64) -> Double {

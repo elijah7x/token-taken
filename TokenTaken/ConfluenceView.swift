@@ -229,6 +229,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(side == .source ? Text("Sources") : Text("Categories"))
+        .accessibilityAddTraits(.isHeader)
         .accessibilityHidden(current.isEmpty)
     }
 }

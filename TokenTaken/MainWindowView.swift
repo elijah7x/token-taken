@@ -10,7 +10,19 @@ final class MainWindowRouter {
         case settings
     }
 
+    /// Settings section requested by the next opening of Settings: "sources" or "sync"; nil keeps the last one.
+    enum SettingsTarget: Equatable { case sources, sync }
+
     var route: Route = .dashboard
+    var settingsTarget: SettingsTarget?
+
+    /// Opens Settings at the section that explains the current status issue.
+    func openSettings(for issues: AppModel.DataIssues?) {
+        if let issues {
+            settingsTarget = issues.count == 0 && issues.skippedRecords == 0 && issues.devices > 0 ? .sync : .sources
+        }
+        route = .settings
+    }
 }
 
 /// Two-column main window: summary rail on the left, the selected hero view
@@ -160,7 +172,7 @@ private struct PeriodBar: View {
                     let hasIssue = model.hasStatusIssue
                     let tooltip = model.statusTooltip(refreshCoordinator: refreshCoordinator)
                     Button {
-                        router.route = .settings
+                        router.openSettings(for: hasIssue ? model.dataIssues : nil)
                     } label: {
                         HStack(spacing: 7) {
                             Circle()

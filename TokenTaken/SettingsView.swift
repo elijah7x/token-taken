@@ -5,6 +5,7 @@ import TokenTakenKit
 struct SettingsView: View {
     @State private var selection: SettingsSection = .general
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(MainWindowRouter.self) private var router
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
@@ -25,6 +26,17 @@ struct SettingsView: View {
         .padding(.bottom, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: selection)
+        .onAppear(perform: applyTarget)
+        .onChange(of: router.settingsTarget) { applyTarget() }
+    }
+
+    private func applyTarget() {
+        guard let target = router.settingsTarget else { return }
+        selection = switch target {
+        case .sources: .sources
+        case .sync: .sync
+        }
+        router.settingsTarget = nil
     }
 
     @ViewBuilder
@@ -1055,7 +1067,7 @@ private struct SyncSettingsTab: View {
     private func remoteRow(_ device: RemoteDeviceStatus) -> some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(verbatim: device.displayName)
+                (device.displayName == device.deviceID ? Text("Unknown Mac") : Text(verbatim: device.displayName))
                     .font(.system(size: 11, weight: .medium))
                 if let lastWrite = device.lastWrite {
                     Text("Last synced \(Self.relativeFormatter.localizedString(for: lastWrite, relativeTo: .now))")
