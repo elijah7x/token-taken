@@ -14,7 +14,7 @@
 - 原生 Liquid Glass 主题；主题系统从首版开始设计，后续加入 Geek 和 Sketchbook 主题。
 - `token-taken` CLI，支持 JSON 输出和 JSON/CSV 数据导出。
 - 通过 String Catalog 提供英文和简体中文界面。
-- 根据带版本的价格表（`tokscale-4.21.0-2026-11-10`）估算费用。估算结果不是账单。
+- 根据带版本的价格表（`tokscale-4.21.0-2026-11-10+alias-v3`）估算费用。估算结果不是账单。
 
 v1 支持的本机来源：Claude Code、Codex、Zcode、oh-my-pi、pi、Kimi Code、Grok、OpenCode、Gemini CLI 和 Factory Droid。Cursor 与 Qoder 暂缓纳入 v1，见 [ADR-0003](docs/decisions/0003-usage-engine.md) 和 [ADR-0005](docs/decisions/0005-collection-granularity.md)。
 
@@ -62,7 +62,7 @@ Token Taken 参考以下采用 MIT 许可证的项目：
 - [TokenTracker](https://github.com/xiufengsun/TokenTracker)：Node 采集器和本地 API 设计。
 - [Token Monitor](https://github.com/Javis603/token-monitor)：同步和历史记录设计。
 
-Token Taken 捆绑了锁定版本的 `tokscale` 4.21.0 二进制文件以及源自 `tokscale` 的价格表快照（`tokscale-4.21.0-2026-11-10`）。许可说明详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，其中包括 TokenTracker 内 React Bits 素材的独立许可排除说明。
+Token Taken 捆绑了锁定版本的 `tokscale` 4.21.0 二进制文件以及源自 `tokscale` 的价格表快照（`tokscale-4.21.0-2026-11-10+alias-v3`）。许可说明详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，其中包括 TokenTracker 内 React Bits 素材的独立许可排除说明。
 
 ## 许可证
 

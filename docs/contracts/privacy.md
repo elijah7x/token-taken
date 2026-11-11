@@ -10,8 +10,8 @@ Status: Draft v0 (2026-11-09)
 
 ## Network boundaries
 
+- The price table is bundled with the app. v1 makes no network request to fetch or refresh prices; a new table ships with a new release ([statistics.md](statistics.md)).
 - v1 network access is allowed only for:
-  - price-table updates when required by the selected engine, using a documented endpoint and a user-accessible disable control;
   - account-scoped source APIs after explicit opt-in for that source; and
   - iCloud Drive through system services after sync opt-in.
 - No other outbound product traffic is permitted in v1. Engine behavior MUST NOT bypass these boundaries.
@@ -33,5 +33,4 @@ Status: Draft v0 (2026-11-09)
 
 ## Open questions
 
-- Price-table endpoint and disable-setting behavior: TBD after engine spike ([ADR-0003](../decisions/0003-usage-engine.md)).
 - Account-scoped API endpoints, credential types, and per-source permission prompts: TBD after engine spike (ADR-0003).

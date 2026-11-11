@@ -14,7 +14,7 @@ A small, beautiful token-usage dashboard for macOS with native Liquid Glass.
 - A native Liquid Glass theme, with a theme system designed for later Geek and Sketchbook themes.
 - A `token-taken` CLI with JSON output and JSON/CSV data export.
 - English and Simplified Chinese app interfaces through a String Catalog.
-- Cost estimates from a versioned price table (`tokscale-4.21.0-2026-11-10`). Estimates are not bills.
+- Cost estimates from a versioned price table (`tokscale-4.21.0-2026-11-10+alias-v3`). Estimates are not bills.
 
 Supported device-local sources in v1: Claude Code, Codex, Zcode, oh-my-pi, pi, Kimi Code, Grok, OpenCode, Gemini CLI, and Factory Droid. Cursor and Qoder are deferred; see [ADR-0003](docs/decisions/0003-usage-engine.md) and [ADR-0005](docs/decisions/0005-collection-granularity.md).
 
@@ -62,7 +62,7 @@ Token Taken uses these MIT-licensed projects as references:
 - [TokenTracker](https://github.com/xiufengsun/TokenTracker): Node collectors and local API design.
 - [Token Monitor](https://github.com/Javis603/token-monitor): synchronization and history design.
 
-Token Taken bundles the pinned `tokscale` 4.21.0 binary and a `tokscale`-derived price snapshot (`tokscale-4.21.0-2026-11-10`). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license notices, including the separate license exclusion for TokenTracker's React Bits assets.
+Token Taken bundles the pinned `tokscale` 4.21.0 binary and a `tokscale`-derived price snapshot (`tokscale-4.21.0-2026-11-10+alias-v3`). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license notices, including the separate license exclusion for TokenTracker's React Bits assets.
 
 ## License
 

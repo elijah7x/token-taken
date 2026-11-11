@@ -57,8 +57,24 @@ These rules describe the collection design, not acceptance of every source as re
 - Estimated cost is the sum of priced category tokens multiplied by rates in a versioned price table. Use `PriceTable.bundled` for real data and `PriceTable.synthetic` only for synthetic stores. Record the price-table version with each estimate.
 - Historical estimates MUST be recomputed when the table updates. The displayed result MUST identify the version actually used.
 - An unpriced model or category is `unpriced`, never zero-cost. `uncategorized` always contributes to `unpricedTokens`, even for a model with priced named categories. The estimate covers only the priced portion.
+- Rates are the pinned engine's reported prices or a vendor's published first-party tariff. Subscription-inclusive and reseller rates MUST NOT be added.
 - Source-reported actual cost is separate, explicitly labelled, and MUST NOT be merged with or presented as the token-derived estimate. tokscale's cost field is not canonical pricing input.
 - Cost UI MUST include “estimate, not a bill”.
+
+### Price-table delivery
+
+- The price table ships inside the app bundle. v1 makes no network request for prices; a new table arrives only with a new release ([privacy.md](privacy.md)).
+- `engine/price-snapshot-*.json` is the reviewed source of truth and records each matched key, dataset, and unpriced category. The newest file by date name is generated into `TokenTakenKit/PriceSnapshot.swift`.
+- `scripts/update-prices.py` performs that generation from the repository root. It uses only the Python 3.9 standard library and never fetches anything.
+- A maintainer refreshes the snapshot and regenerates the Swift table before each release. `python3 scripts/update-prices.py --check` exits 1 with a one-line message when the committed file is stale, and `scripts/release.sh` runs it before `xcodegen generate`.
+- The bundled version is `<snapshot version>+alias-<aliasTableVersion>`, for example `tokscale-4.21.0-2026-11-10+alias-v3`, so an alias-table change also changes the version recorded with every estimate.
+
+### Alias admission
+
+- A canonical vendor model with a published tariff enters the snapshot as an exact key.
+- A spelling variant with an identical tariff may become an alias entry, and that change MUST bump `PriceTable.aliasTableVersion`.
+- A distinct tier with its own tariff, a `:free` id, and local or synthetic ids MUST NOT be aliased. They stay unpriced unless the snapshot carries their exact reviewed key.
+- Exact match wins over the alias table, so a bundled key is never shadowed by an alias target. A `:free` suffix is never dropped, so a free variant cannot resolve to a paid base model.
 
 ## Reconciliation and source health
 
@@ -73,4 +89,3 @@ These rules describe the collection design, not acceptance of every source as re
 
 - Recovering genuinely total-only legacy Codex data: the pinned engine does not expose it as uncategorized usage; see ADR-0005's source inspection. No recovery counts are assumed.
 - Exact privacy-preserving account-scoped cross-device deduplication remains unsupported.
-- Price-table update delivery and versioned alias-table expansion require their own implementation contracts.

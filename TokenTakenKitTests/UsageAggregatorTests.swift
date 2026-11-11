@@ -225,7 +225,7 @@ final class UsageAggregatorTests: XCTestCase {
             now: SyntheticUsageStore.defaultToday, priceTable: .bundled).summary(for: .day)
         XCTAssertEqual(summary.cost.estimatedUSD, 0.75 + 2 * 3.75, accuracy: 1e-9)
         XCTAssertEqual(summary.cost.unpricedTokens, 500)
-        XCTAssertEqual(summary.cost.priceTableVersion, "tokscale-4.21.0-2026-11-10")
+        XCTAssertEqual(summary.cost.priceTableVersion, "tokscale-4.21.0-2026-11-10+alias-v3")
     }
 
     func testTokenFormat() throws {

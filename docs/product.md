@@ -106,5 +106,5 @@ These items follow v1 and are not release commitments:
 ## Open decisions
 
 - Engine upgrade verification and recovery of legacy total-only Codex records: [ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/upstream.md`.
-- Price-table update delivery and versioned alias-table expansion: `docs/contracts/statistics.md`.
+- Price-table delivery (resolved 2026-11-11): prices ship bundled with no runtime network access, refreshed by `scripts/update-prices.py` before each release with the version and alias rules in `docs/contracts/statistics.md`.
 - Privacy-preserving account-scoped cross-device deduplication, device removal/adoption UI, and real multi-Mac iCloud Drive acceptance: [ADR-0005](decisions/0005-collection-granularity.md) and `docs/contracts/sync.md`.

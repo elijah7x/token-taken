@@ -27,6 +27,7 @@ Status: Draft v0 (2026-11-09)
 - Read the upstream changelog and release notes for the exact old and new versions.
 - Diff the engine's input and output schemas, category meanings, model aliases, source coverage, and price behavior.
 - Re-run reconciliation on the same sanitized sample set against both the previous and candidate versions; record every deviation and reason.
+- Regenerate and review the price snapshot: run `python3 scripts/update-prices.py`, and compare the new rates, matched keys, and unpriced categories against the previous snapshot before committing it ([statistics.md](statistics.md)).
 - Update the adapter and engine lock together, including the new version, full commit, and checksum.
 - Update [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) for every changed copied component or bundled binary and add a [CHANGELOG.md](../../CHANGELOG.md) entry.
 - Do not ship an upgrade with unexplained reconciliation differences or unreviewed license changes.

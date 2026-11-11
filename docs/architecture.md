@@ -61,6 +61,9 @@ See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merg
 ### Pricing
 
 - Uses `PriceTable.bundled` for real usage and `PriceTable.synthetic` for synthetic previews. Maps normalized model IDs to versioned rates; uncategorized tokens remain unpriced.
+- The bundled table ships inside the app and has no runtime network path. `engine/price-snapshot-*.json` is the reviewed source of truth, and `scripts/update-prices.py` regenerates `TokenTakenKit/PriceSnapshot.swift` from its newest file; `scripts/release.sh` fails the release when the generated file is stale.
+- Rates are exact keys from the engine's reported prices or a vendor's published first-party tariff. Reviewed spelling variants map through the alias table; exact match wins, and a `:free` id never resolves to a paid base model.
+- The bundled version is `<snapshot version>+alias-<aliasTableVersion>`, so an alias change also changes the recorded version.
 - Derives cost at read time and returns the price-table version with the estimate.
 - Never syncs cost and never presents an estimate as a bill.
 - Keeps pricing semantics aligned with `docs/contracts/statistics.md`.
@@ -124,6 +127,6 @@ Exact account-scoped deduplication remains unsupported without privacy-preservin
 | Can a future privacy-preserving identity export enable exact account-scoped deduplication? | ADR-0005 and `docs/contracts/sync.md`; unsupported today |
 | How should sync transport publish consistent multi-file generations and per-source health? | `docs/contracts/sync.md` before enabling sync |
 | What incremental fallback should refresh use when a source lacks verified cursors? | Refresh cadence is fixed to launch + manual + 4-hour sleep-tolerant fallback (owner decision 2026-11-10); incremental collection follows ADR-0006 |
-| What price-table sources, update cadence, and model aliases should Pricing use? | `docs/contracts/statistics.md` and `docs/contracts/upstream.md` |
+| Which first-party rates should replace reseller or subscription-inclusive price rows the engine reports? | Owner decision 2026-11-11: prices ship bundled and are refreshed by `scripts/update-prices.py` before a release; per-model admission rules live in `docs/contracts/statistics.md` |
 
 Developer ID signing, notarization, and release mechanics are resolved by [ADR-0004](decisions/0004-distribution.md).

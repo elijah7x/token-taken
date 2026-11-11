@@ -1,13 +1,5 @@
 {
  "rates": {
-  "claude-4-5-sonnet": {
-   "cacheRead": 0.326,
-   "cacheWrite": 4.078,
-   "input": 2.989,
-   "matchedKey": "cortecs/claude-4-5-sonnet",
-   "output": 14.945,
-   "source": "Models.dev"
-  },
   "claude-fable-5-1-medium": {
    "cacheRead": 0.25,
    "cacheWrite": 12.5,
@@ -103,6 +95,14 @@
    "matchedKey": "claude-opus-5",
    "output": 25.0,
    "source": "LiteLLM"
+  },
+  "claude-sonnet-4-5": {
+   "cacheRead": 0.3,
+   "cacheWrite": 3.75,
+   "input": 3.0,
+   "matchedKey": "anthropic/claude-sonnet-4-5",
+   "output": 15.0,
+   "source": "Anthropic"
   },
   "claude-sonnet-5-5": {
    "cacheRead": 0.1,
@@ -497,6 +497,6 @@
    "source": "OpenRouter"
   }
  },
- "source": "tokscale pricing (LiteLLM, models.dev, OpenRouter)",
+ "source": "tokscale pricing (LiteLLM, models.dev, OpenRouter) plus Anthropic first-party rates",
  "version": "tokscale-4.21.0-2026-11-10"
 }

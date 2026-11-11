@@ -27,7 +27,7 @@ fi
 identity="${TOKEN_TAKEN_SIGNING_IDENTITY:-Developer ID Application}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-for tool in xcodegen xcodebuild codesign diskutil xcrun; do
+for tool in python3 xcodegen xcodebuild codesign diskutil xcrun; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "$tool is required" >&2
         exit 1
@@ -65,6 +65,7 @@ dmg="$artifacts/local-packages/TokenTaken-$version-$build_number.dmg"
 mkdir -p "$release_dir"
 
 "$root/scripts/fetch-engine.sh"
+python3 "$root/scripts/update-prices.py" --check
 (cd "$root" && xcodegen generate)
 xcodebuild \
     -project "$root/TokenTaken.xcodeproj" \

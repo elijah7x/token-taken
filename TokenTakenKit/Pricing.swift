@@ -18,8 +18,9 @@ public struct PriceTable: Sendable {
     }
 
     /// Versioned alias table used for lookups that miss an exact key. Bump it whenever the
-    /// mappings or rules in `normalizedModelID(_:)` change.
-    public static let aliasTableVersion = "v2"
+    /// mappings or rules in `normalizedModelID(_:)` change; `PriceTable.bundled` folds it into
+    /// its version, so every alias change also changes the recorded price-table version.
+    public static let aliasTableVersion = "v3"
 
     public let version: String
     private let rates: [String: Rates]
@@ -73,17 +74,22 @@ public struct PriceTable: Sendable {
         return result.unpricedTokens == 0 ? result.usd : nil
     }
 
-    /// Alias table v2: lowercase, drop the provider prefix up to the last `/` and any `:` suffix,
+    /// Alias table v3: lowercase, drop the provider prefix up to the last `/` and any `:` suffix,
     /// then apply only reviewed variant mappings. Unknown variant suffixes remain unpriced.
-    /// Exact snapshot keys take precedence over aliases.
+    /// A `:free` suffix is kept, so a free variant never resolves to a paid model; it prices only
+    /// from an exact key. Exact snapshot keys take precedence over aliases.
     public static func normalizedModelID(_ id: String) -> String {
         var alias = baseModelID(id)
+        // Free tiers carry no tariff of their own, and the base model's rates do not describe them.
+        if alias.hasSuffix(":free") { return alias }
         if let colon = alias.firstIndex(of: ":") { alias = String(alias[alias.startIndex..<colon]) }
         return aliases[alias] ?? alias
     }
 
-    /// Observed variants in engine/price-snapshot-2026-11-10.json; no suffix guessing.
-    private static let aliases: [String: String] = [
+    /// Observed variants in engine/price-snapshot-2026-11-10.json; no suffix guessing. Internal so
+    /// tests can check that every alias still resolves against the bundled table.
+    static let aliases: [String: String] = [
+        "claude-4-5-sonnet": "claude-sonnet-4-5",
         "claude-fable-5-1-medium": "claude-fable-5-1",
         "claude-fable-5-1-thinking-high": "claude-fable-5-1",
         "claude-fable-5-1-thinking-medium": "claude-fable-5-1",

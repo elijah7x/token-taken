@@ -9,8 +9,68 @@ final class PricingTests: XCTestCase {
     }
 
     func testVersionString() {
-        XCTAssertEqual(table.version, "tokscale-4.21.0-2026-11-10")
-        XCTAssertEqual(PriceTable.aliasTableVersion, "v2")
+        XCTAssertEqual(table.version, "tokscale-4.21.0-2026-11-10+alias-v3")
+        XCTAssertEqual(PriceTable.aliasTableVersion, "v3")
+    }
+
+    func testBundledVersionTracksAliasTable() {
+        XCTAssertTrue(table.version.hasSuffix("+alias-" + PriceTable.aliasTableVersion), table.version)
+        XCTAssertTrue(table.version.contains("+alias-v3"), table.version)
+    }
+
+    func testClaudeSonnet45UsesFirstPartyRates() throws {
+        // Anthropic first-party tariff: $3.00/$15.00 per 1M, $0.30 cache read, $3.75 cache write.
+        let counts = TokenCounts(input: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000, output: 1_000_000)
+        let estimate = table.estimate(model: "claude-sonnet-4-5", counts: counts)
+        XCTAssertEqual(estimate.usd, 3.0 + 0.3 + 3.75 + 15.0, accuracy: 1e-9)
+        XCTAssertEqual(estimate.unpricedTokens, 0)
+        // The Cursor spelling of the same tariff is a reviewed alias, not a separate rate.
+        XCTAssertEqual(try cost("claude-4-5-sonnet", TokenCounts(input: 1_000_000)), 3.0, accuracy: 1e-9)
+    }
+
+    func testEveryAliasResolvesInBundledTable() {
+        // Some targets leave cacheWrite unpriced (nil) by design, so check input and output only.
+        let counts = TokenCounts(input: 1_000_000, output: 1_000_000)
+        for (variant, base) in PriceTable.aliases {
+            XCTAssertEqual(PriceTable.normalizedModelID(variant), base, variant)
+            // A provider prefix cannot match an exact key, so this exercises the alias target.
+            let estimate = table.estimate(model: "router/\(variant)", counts: counts)
+            XCTAssertEqual(estimate.unpricedTokens, 0, "\(variant) does not resolve to priced rates")
+            XCTAssertGreaterThan(estimate.usd, 0, variant)
+        }
+    }
+
+    func testAliasKeysDoNotShadowExactEntries() {
+        // Exact keys win in `rates(for:)`, so a row is billed at its own rate even when its spelling
+        // is also an alias key. A prefixed spelling has no exact key and must reach the base row.
+        let counts = TokenCounts(input: 1_000_000)
+        for (variant, base) in PriceTable.aliases {
+            XCTAssertNotEqual(variant, base)
+            let fixture = PriceTable(version: "fixture", rates: [
+                base: .init(input: 1, cacheRead: nil, cacheWrite: nil, output: nil),
+                variant: .init(input: 2, cacheRead: nil, cacheWrite: nil, output: nil),
+            ])
+            XCTAssertEqual(fixture.estimate(model: variant, counts: counts).usd, 2, accuracy: 1e-9, variant)
+            XCTAssertEqual(fixture.estimate(model: "router/\(variant)", counts: counts).usd, 1, accuracy: 1e-9, variant)
+        }
+    }
+
+    func testFreeSuffixStaysUnpriced() throws {
+        // A `:free` variant has no published tariff and must never borrow the paid base rates.
+        let counts = TokenCounts(input: 1_000_000, output: 1_000_000)
+        for model in ["z-ai/glm-5.2:free", "glm-5.2:free", "router/z-ai/glm-5.2:free",
+                      "claude-sonnet-4-5:free"] {
+            let estimate = table.estimate(model: model, counts: counts)
+            XCTAssertEqual(estimate.usd, 0, model)
+            XCTAssertEqual(estimate.unpricedTokens, counts.total, model)
+            XCTAssertNil(table.cost(model: model, counts: counts), model)
+        }
+        XCTAssertEqual(PriceTable.normalizedModelID("z-ai/glm-5.2:free"), "glm-5.2:free")
+        // An exact reviewed key still prices a free id; nothing else about the suffix is guessed.
+        let reviewed = PriceTable(version: "fixture", rates: [
+            "glm-5.2:free": .init(input: 1, cacheRead: nil, cacheWrite: nil, output: 1),
+        ])
+        XCTAssertEqual(try XCTUnwrap(reviewed.cost(model: "z-ai/glm-5.2:free", counts: counts)), 2, accuracy: 1e-9)
     }
 
     func testExactModelID() throws {
