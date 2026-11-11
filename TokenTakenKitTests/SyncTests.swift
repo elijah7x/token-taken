@@ -718,6 +718,16 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(mergedSummary.cost.unpricedTokens, localSummary.cost.unpricedTokens * 2 + 7)
     }
 
+    func testBackendWritesUnderMissingRootBelowSymlinkedAncestor() throws {
+        let real = directory.appendingPathComponent("real", isDirectory: true)
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        let link = directory.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        let backend = SyncBackend(root: link.appendingPathComponent("Token Taken", isDirectory: true))
+        try backend.write(Data("ok".utf8), to: "v1/devices/x/device.json")
+        XCTAssertEqual(try backend.read("v1/devices/x/device.json"), Data("ok".utf8))
+    }
+
     func testBackendRejectsSymlinkEscapeAndLocalDevicePersistsUUID() throws {
         let outside = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)

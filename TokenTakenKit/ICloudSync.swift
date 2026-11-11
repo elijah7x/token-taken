@@ -68,18 +68,22 @@ public struct SyncBackend: Sendable {
     private func resolve(_ path: String) throws -> URL {
         guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else { throw SyncError.invalidSnapshot }
         let url = root.appendingPathComponent(path).standardizedFileURL
-        let base = root.resolvingSymlinksInPath().path
-        // resolvingSymlinksInPath leaves a path untouched when its last component does not exist yet,
-        // so resolve the deepest existing ancestor to catch a symlinked folder before a new file is written.
-        var existing = url
+        let base = Self.canonical(root).path
+        let resolved = Self.canonical(url).path
+        guard resolved == base || resolved.hasPrefix(base + "/") else { throw SyncError.invalidSnapshot }
+        return url
+    }
+
+    // resolvingSymlinksInPath leaves a path untouched when its last component does not exist yet,
+    // so resolve the deepest existing ancestor to catch a symlinked folder before a new file is written.
+    private static func canonical(_ url: URL) -> URL {
+        var existing = url.standardizedFileURL
         var missing: [String] = []
         while !FileManager.default.fileExists(atPath: existing.path), existing.pathComponents.count > 1 {
             missing.insert(existing.lastPathComponent, at: 0)
             existing.deleteLastPathComponent()
         }
-        let resolved = missing.reduce(existing.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }.path
-        guard resolved == base || resolved.hasPrefix(base + "/") else { throw SyncError.invalidSnapshot }
-        return url
+        return missing.reduce(existing.resolvingSymlinksInPath()) { $0.appendingPathComponent($1) }
     }
 }
 
