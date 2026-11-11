@@ -39,6 +39,13 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             } else {
                 try execute("PRAGMA journal_mode=WAL;")
                 try migrate(from: version)
+                if version < Self.schemaVersion {
+                    // A new or rebuilt cache has no rows, so collector state that marks sources unchanged
+                    // would keep them empty; drop it to force a full collection (ADR-0006).
+                    try? FileManager.default.removeItem(
+                        at: url.deletingLastPathComponent().appendingPathComponent("collector-state", isDirectory: true)
+                    )
+                }
             }
         } catch {
             sqlite3_close(handle)

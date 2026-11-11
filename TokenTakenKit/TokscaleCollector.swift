@@ -24,7 +24,7 @@ public struct TokscaleCollector: UsageCollector {
     private let fingerprint: @Sendable (String) -> ClientFingerprint
 
     /// Bump when the per-client fingerprint or output mapping changes.
-    static let stateFormatVersion = 1
+    static let stateFormatVersion = 2
     /// Must match engine/engine.lock.json; a new engine forces a full collection.
     static let engineVersion = "4.21.0"
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
@@ -33,6 +33,9 @@ public struct TokscaleCollector: UsageCollector {
         var fileCount: Int
         var totalSize: UInt64
         var latestModification: Double
+        /// Order-independent hash of every file's path, size and modification time, so a same-size edit
+        /// to any single file changes the fingerprint even when it is not the newest file.
+        var filesHash: UInt64 = 0
     }
 
     struct State: Codable, Sendable {
@@ -304,6 +307,12 @@ public struct TokscaleCollector: UsageCollector {
             result.totalSize += UInt64(values.fileSize ?? 0)
             result.latestModification = max(result.latestModification,
                 values.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0)
+            var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+            func mix(_ value: UInt64) { for shift in stride(from: 0, to: 64, by: 8) { hash = (hash ^ ((value >> UInt64(shift)) & 0xff)) &* 0x100_0000_01b3 } }
+            for byte in url.path.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+            mix(UInt64(values.fileSize ?? 0))
+            mix((values.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0).bitPattern)
+            result.filesHash &+= hash
         }
         for root in roots(client: client) + extraFingerprintRoots(client: client) {
             var isDirectory: ObjCBool = false

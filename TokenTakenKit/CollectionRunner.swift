@@ -101,7 +101,8 @@ public actor CollectionRunner {
                 if let errorMessage = health.errorMessage {
                     health.errorMessage = Self.sanitizeErrorMessage(errorMessage)
                 }
-                if health.state == .failed || health.state == .unavailable { allStored = false }
+                // Unavailable sources keep their cache and are left out of collector state, so they do not block it.
+                if health.state == .failed { allStored = false }
                 do {
                     try store.record(health: health)
                 } catch {

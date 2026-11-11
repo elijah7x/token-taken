@@ -80,7 +80,7 @@ struct PiFormatScan: Sendable {
     /// Placeholder epoch timestamps used to land usage in 1970; treated as missing.
     static let minimumTimestamp = Date(timeIntervalSince1970: 1_577_836_800)
     /// Bumped whenever the persisted incremental state layout or scan semantics change.
-    static let stateFormatVersion = 1
+    static let stateFormatVersion = 2
 
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
@@ -168,9 +168,13 @@ struct PiFormatScan: Sendable {
                         continue
                     }
                     // A pure append keeps the inode, only grows, and its mtime did not move back.
+                    // The bytes before the saved offset must be untouched: a truncate-and-rewrite on the same
+                    // inode can grow past the old size. Mtime-dated records would be redated, so reparse those.
                     if fingerprint.inode == entry.fingerprint.inode,
                        fingerprint.size > entry.fingerprint.size,
-                       fingerprint.modified >= entry.fingerprint.modified {
+                       fingerprint.modified >= entry.fingerprint.modified,
+                       !entry.usedFallbackDate,
+                       Self.prefixHash(of: file, endingAt: entry.offset) == entry.prefixHash {
                         plans.append(FilePlan(file: file, key: key, fingerprint: fingerprint, entry: entry, kind: .grow))
                         changed = true
                         continue
@@ -197,6 +201,7 @@ struct PiFormatScan: Sendable {
                         reparsedFiles += 1
                         // The previous tail is not replayed: the reread below covers its bytes again.
                         for event in entry.events { totals.replay(event, models: entry.models) }
+                        totals.skippedRecords += entry.skipped
                         let scanned = try scanFile(
                             plan.file, totals: &totals, fractional: fractional, plain: plain,
                             startOffset: entry.offset, seedModel: entry.currentModel, seedModels: entry.models
@@ -209,6 +214,8 @@ struct PiFormatScan: Sendable {
                         entry.tailEvents = scanned.tailEvents
                         entry.skipped += scanned.skipped
                         entry.tailSkipped = scanned.tailSkipped
+                        entry.usedFallbackDate = scanned.usedFallbackDate
+                        entry.prefixHash = scanned.prefixHash
                         nextState.files[plan.key] = entry
                     case .reparse:
                         reparsedFiles += 1
@@ -272,6 +279,8 @@ struct PiFormatScan: Sendable {
         var tailEvents: [PiFormatScanEvent]
         var skipped: Int
         var tailSkipped: Int
+        var usedFallbackDate: Bool
+        var prefixHash: UInt64
 
         func state(fingerprint: FileFingerprint) -> PiFormatFileState {
             PiFormatFileState(
@@ -282,7 +291,9 @@ struct PiFormatScan: Sendable {
                 events: events,
                 tailEvents: tailEvents,
                 skipped: skipped,
-                tailSkipped: tailSkipped
+                tailSkipped: tailSkipped,
+                usedFallbackDate: usedFallbackDate,
+                prefixHash: prefixHash
             )
         }
     }
@@ -339,8 +350,23 @@ struct PiFormatScan: Sendable {
             events: capture.events,
             tailEvents: capture.tailEvents,
             skipped: capture.skipped,
-            tailSkipped: capture.tailSkipped
+            tailSkipped: capture.tailSkipped,
+            usedFallbackDate: capture.usedFallbackDate,
+            prefixHash: Self.prefixHash(of: file, endingAt: offset) ?? 0
         )
+    }
+
+    /// FNV-1a of up to 4 KB ending at `offset`; nil when the bytes cannot be read.
+    static func prefixHash(of file: URL, endingAt offset: UInt64) -> UInt64? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        let start = offset > 4_096 ? offset - 4_096 : 0
+        guard (try? handle.seek(toOffset: start)) != nil,
+              let data = try? handle.read(upToCount: Int(offset - start)),
+              data.count == Int(offset - start) else { return nil }
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in data { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01b3 }
+        return hash
     }
 
     private func sessionFiles() throws -> [URL] {
@@ -872,6 +898,8 @@ struct PiFormatScan: Sendable {
         private(set) var tailEvents: [PiFormatScanEvent] = []
         private(set) var skipped = 0
         private(set) var tailSkipped = 0
+        /// A record was dated by the file's modification time, which moves on every append.
+        var usedFallbackDate = false
 
         init(models: [String] = []) {
             self.models = models
@@ -1078,6 +1106,7 @@ struct PiFormatScan: Sendable {
                 plain: plain
             )
             let date = sourceDate ?? fallbackDate
+            if sourceDate == nil, capturing { capture.usedFallbackDate = true }
 
             let rawModelID = model ?? "unknown"
 
@@ -1298,6 +1327,10 @@ struct PiFormatFileState: Codable, Sendable {
     /// Malformed or overlong complete lines, and the same for the trailing line.
     var skipped: Int
     var tailSkipped: Int
+    /// Some record was dated by the file's modification time; an append must reparse the whole file.
+    var usedFallbackDate: Bool
+    /// Hash of the bytes just before `offset`, so a rewrite of the same inode is not mistaken for an append.
+    var prefixHash: UInt64
 }
 
 /// One counted record, encoded as a fixed-field array `[keyA, keyB, epochMs, modelIndex, input,

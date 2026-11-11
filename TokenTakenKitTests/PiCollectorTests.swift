@@ -411,6 +411,36 @@ extension PiCollectorTests {
         XCTAssertTrue(batch.daily.contains { $0.modelID == "test/seeded-model" && $0.eventCount == 2 })
     }
 
+    func testSameInodeRewriteLargerIsNotTreatedAsAppend() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantClaude + "\n")])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        try await assertMatchesFullScan(incremental, full)
+
+        // Truncate and rewrite in place: same inode, larger size, different leading bytes.
+        let file = root.appendingPathComponent("cwd-a/a.jsonl")
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.truncate(atOffset: 0)
+        try handle.write(contentsOf: Data((incrementalAssistantKimi + "\n" + incrementalAssistantKimi.replacingOccurrences(of: "inc-2", with: "inc-3") + "\n").utf8))
+        try handle.close()
+        let batch = try await assertMatchesFullScan(incremental, full)
+        XCTAssertFalse(batch.daily.contains { $0.rawModelID == "claude-sonnet-4-5" })
+    }
+
+    func testAppendKeepsEarlierSkippedRecords() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantClaude + "\n" + #"{"type":"usage","id":"bad","usage":"oops"}"# + "\n")])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        let first = try await assertMatchesFullScan(incremental, full)
+        let file = root.appendingPathComponent("cwd-a/a.jsonl")
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((incrementalAssistantKimi + "\n").utf8))
+        try handle.close()
+        let second = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(second.skippedRecords, first.skippedRecords)
+    }
+
     func testTruncatedOrReplacedFileIsReparsed() async throws {
         let root = try makeIncrementalRoot(files: [
             ("cwd-a/a.jsonl", incrementalAssistantClaude + "\n" + incrementalAssistantKimi + "\n"),
