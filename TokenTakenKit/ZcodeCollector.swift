@@ -1,30 +1,47 @@
 import Foundation
+import OSLog
 import SQLite3
 
 public struct ZcodeCollector: UsageCollector {
     public let sourceIDs = ["zcode"]
 
+    private static let stateFormatVersion = 1
+    private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
+
     private let databaseURL: URL
     private let deviceID: String
     private let timeZone: TimeZone
     private let now: Date
+    private let stateFile: CollectorStateFile<SavedState>?
 
     public init(
         databaseURL: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".zcode/cli/db/db.sqlite"),
         deviceID: String,
         timeZone: TimeZone = .current,
-        now: Date = .now
+        now: Date = .now,
+        stateDirectory: URL? = nil
     ) {
         self.databaseURL = databaseURL
         self.deviceID = deviceID
         self.timeZone = timeZone
         self.now = now
+        self.stateFile = stateDirectory.map { CollectorStateFile(directory: $0, name: "zcode") }
     }
 
     public func collect() async throws -> CollectionBatch {
+        let started = Date.now
         let manager = FileManager.default
         guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
+
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
+        // Fingerprint before the snapshot: a write that lands during the backup must trigger a re-collect next time.
+        let fingerprints = Fingerprints(databaseURL: databaseURL)
+        if let stateFile, fingerprints.database != nil, let saved = stateFile.load(),
+           saved.stamp == stamp, saved.fingerprints == fingerprints {
+            log(mode: "unchanged", since: started)
+            return CollectionBatch(unchangedSourceIDs: Set(sourceIDs))
+        }
 
         // SQLite documents immutable=1 as unsafe while another process can write, so read a temporary snapshot.
         // Source: https://www.sqlite.org/c3ref/open.html#uri-filenames
@@ -55,7 +72,35 @@ public struct ZcodeCollector: UsageCollector {
         try collectNative(db: handle, into: &aggregator)
         try collectLegacy(db: handle, boundary: boundary, into: &aggregator)
         guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
-        return aggregator.batch()
+        var batch = aggregator.batch()
+        if let stateFile {
+            let saved = SavedState(stamp: stamp, fingerprints: fingerprints)
+            batch.stateCommits = [{ try stateFile.save(saved) }]
+        }
+        log(mode: "full", since: started)
+        return batch
+    }
+
+    private func log(mode: String, since started: Date) {
+        let duration = Int((Date.now.timeIntervalSince(started) * 1_000).rounded())
+        Self.logger.info("source=zcode mode=\(mode, privacy: .public) duration_ms=\(duration, privacy: .public)")
+    }
+
+    private struct SavedState: Codable, Sendable {
+        var stamp: CollectionStamp
+        var fingerprints: Fingerprints
+    }
+
+    private struct Fingerprints: Codable, Hashable, Sendable {
+        var database: FileFingerprint?
+        var wal: FileFingerprint?
+        var shm: FileFingerprint?
+
+        init(databaseURL: URL) {
+            database = FileFingerprint(url: databaseURL)
+            wal = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-wal"))
+            shm = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-shm"))
+        }
     }
 
     private func backupDatabase(from sourceURL: URL, to destinationURL: URL) throws {

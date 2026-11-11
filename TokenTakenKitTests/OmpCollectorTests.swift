@@ -127,3 +127,73 @@ final class OmpCollectorTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Incremental collection
+
+private let ompIncrementalEntryOne = #"{"type":"message","id":"omp-inc-1","timestamp":"2026-11-10T08:00:00Z","message":{"role":"assistant","model":"claude-opus-5","usage":{"input":17,"output":10,"reasoningTokens":4}}}"#
+private let ompIncrementalEntryTwo = #"{"type":"message","id":"omp-inc-2","timestamp":"2026-11-10T09:00:00Z","message":{"role":"assistant","model":"gpt-5","usage":{"input":8,"cacheRead":3,"output":12,"reasoning":2}}}"#
+
+extension OmpCollectorTests {
+    private var stateDirectory: URL {
+        directory.appendingPathComponent("state", isDirectory: true)
+    }
+
+    private func incrementalCollector(root: URL) -> OmpCollector {
+        OmpCollector(
+            root: root, deviceID: "device-a", timeZone: utc,
+            stateDirectory: stateDirectory, now: { OmpCollectorTests.now }
+        )
+    }
+
+    @discardableResult
+    private func collectAndCommit(_ collector: OmpCollector) async throws -> CollectionBatch {
+        let batch = try await collector.collect()
+        for commit in batch.stateCommits { try commit() }
+        return batch
+    }
+
+    func testIncrementalAppendMatchesFullScan() async throws {
+        let root = directory.appendingPathComponent("sessions", isDirectory: true)
+        let cwd = root.appendingPathComponent("--tmp-omp-inc--", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        let file = cwd.appendingPathComponent("a.jsonl")
+        try Data((ompIncrementalEntryOne + "\n").utf8).write(to: file)
+
+        let incremental = incrementalCollector(root: root)
+        try await collectAndCommit(incremental)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: stateDirectory.appendingPathComponent("omp.json").path
+        ))
+
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((ompIncrementalEntryTwo + "\n").utf8))
+
+        let batch = try await collectAndCommit(incremental)
+        XCTAssertEqual(batch.daily.map(\.modelID), ["claude-opus-5", "gpt-5"])
+        XCTAssertEqual(batch.daily.map(\.counts), [
+            TokenCounts(input: 17, output: 6, reasoning: 4),
+            TokenCounts(input: 8, cacheRead: 3, output: 10, reasoning: 2),
+        ])
+        XCTAssertEqual(batch.hourly.map(\.counts), [
+            TokenCounts(input: 17, output: 6, reasoning: 4),
+            TokenCounts(input: 8, cacheRead: 3, output: 10, reasoning: 2),
+        ])
+    }
+
+    func testNoChangesReturnsUnchangedSourceIDs() async throws {
+        let root = directory.appendingPathComponent("sessions", isDirectory: true)
+        let cwd = root.appendingPathComponent("--tmp-omp-inc2--", isDirectory: true)
+        try FileManager.default.createDirectory(at: cwd, withIntermediateDirectories: true)
+        try Data((ompIncrementalEntryOne + "\n").utf8).write(to: cwd.appendingPathComponent("a.jsonl"))
+
+        let incremental = incrementalCollector(root: root)
+        try await collectAndCommit(incremental)
+
+        let again = try await incremental.collect()
+        XCTAssertEqual(again.unchangedSourceIDs, ["omp"])
+        XCTAssertTrue(again.daily.isEmpty)
+        XCTAssertTrue(again.stateCommits.isEmpty)
+    }
+}

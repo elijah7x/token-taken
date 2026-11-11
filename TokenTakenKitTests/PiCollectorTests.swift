@@ -324,3 +324,217 @@ final class PiCollectorTests: XCTestCase {
         }
     }
 }
+
+// MARK: - Incremental collection
+
+private let incrementalAssistantClaude = #"{"type":"message","id":"inc-1","timestamp":"2026-11-10T08:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":100,"output":40,"reasoning":10}}}"#
+private let incrementalModelChange = #"{"type":"model_change","id":"inc-mc","timestamp":"2026-11-10T09:30:00Z","modelId":"test/seeded-model"}"#
+private let incrementalSeededUsage = #"{"type":"usage","id":"inc-u1","timestamp":"2026-11-10T10:00:00Z","usage":{"input":7,"output":3}}"#
+private let incrementalSeededUsageLater = #"{"type":"usage","id":"inc-u2","timestamp":"2026-11-10T11:00:00Z","usage":{"input":9,"output":4}}"#
+private let incrementalAssistantKimi = #"{"type":"message","id":"inc-2","timestamp":"2026-11-10T20:00:00Z","message":{"role":"assistant","model":"kimi-k2","usage":{"input":11,"output":4,"reasoning":1}}}"#
+
+extension PiCollectorTests {
+    private var stateDirectory: URL {
+        directory.appendingPathComponent("state", isDirectory: true)
+    }
+
+    /// Writes synthetic sessions under `<root>/<relative path>`; each file needs its own directory.
+    private func makeIncrementalRoot(files: [(path: String, contents: String)]) throws -> URL {
+        let root = directory.appendingPathComponent("sessions-\(UUID().uuidString)", isDirectory: true)
+        for file in files {
+            let url = root.appendingPathComponent(file.path)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try Data(file.contents.utf8).write(to: url)
+        }
+        return root
+    }
+
+    private func incrementalCollector(root: URL, timeZone: TimeZone) -> PiCollector {
+        PiCollector(
+            root: root, deviceID: "device-a", timeZone: timeZone,
+            stateDirectory: stateDirectory, now: { PiCollectorTests.now }
+        )
+    }
+
+    private func fullCollector(root: URL, timeZone: TimeZone) -> PiCollector {
+        PiCollector(root: root, deviceID: "device-a", timeZone: timeZone, now: { PiCollectorTests.now })
+    }
+
+    @discardableResult
+    private func collectAndCommit(_ collector: PiCollector) async throws -> CollectionBatch {
+        let batch = try await collector.collect()
+        for commit in batch.stateCommits { try commit() }
+        return batch
+    }
+
+    /// Collects incrementally with a state commit and compares against a fresh full scan.
+    @discardableResult
+    private func assertMatchesFullScan(_ incremental: PiCollector, _ full: PiCollector) async throws -> CollectionBatch {
+        let incrementalBatch = try await collectAndCommit(incremental)
+        let fullBatch = try await full.collect()
+        XCTAssertEqual(incrementalBatch.daily, fullBatch.daily)
+        XCTAssertEqual(incrementalBatch.hourly, fullBatch.hourly)
+        XCTAssertEqual(incrementalBatch.skippedRecords, fullBatch.skippedRecords)
+        XCTAssertTrue(incrementalBatch.unavailableSourceIDs.isEmpty)
+        return incrementalBatch
+    }
+
+    func testIncrementalAppendMatchesFullScan() async throws {
+        let root = try makeIncrementalRoot(files: [
+            ("cwd-a/a.jsonl", incrementalAssistantClaude + "\n" + incrementalModelChange + "\n"),
+        ])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        try await assertMatchesFullScan(incremental, full)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: stateDirectory.appendingPathComponent("pi.json").path
+        ))
+
+        let file = root.appendingPathComponent("cwd-a/a.jsonl")
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+
+        // A record without its trailing newline yet is the state's tail and still counts exactly once.
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(incrementalSeededUsage.utf8))
+        try await assertMatchesFullScan(incremental, full)
+
+        // Completing the tail and appending more records re-reads only from the saved offset; the
+        // model-less record inherits the session model seeded from the state.
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(
+            ("\n" + incrementalSeededUsageLater + "\n" + incrementalAssistantKimi + "\n").utf8
+        ))
+        let batch = try await assertMatchesFullScan(incremental, full)
+        XCTAssertTrue(batch.daily.contains { $0.modelID == "test/seeded-model" && $0.eventCount == 2 })
+    }
+
+    func testTruncatedOrReplacedFileIsReparsed() async throws {
+        let root = try makeIncrementalRoot(files: [
+            ("cwd-a/a.jsonl", incrementalAssistantClaude + "\n" + incrementalAssistantKimi + "\n"),
+            ("cwd-b/b.jsonl", incrementalSeededUsage + "\n"),
+        ])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        try await assertMatchesFullScan(incremental, full)
+
+        // Truncating to the first line drops the second entry.
+        let a = root.appendingPathComponent("cwd-a/a.jsonl")
+        let handle = try FileHandle(forWritingTo: a)
+        try handle.truncate(atOffset: UInt64(incrementalAssistantClaude.utf8.count + 1))
+        try handle.close()
+        let truncated = try await assertMatchesFullScan(incremental, full)
+        XCTAssertFalse(truncated.daily.contains { $0.modelID == "kimi-k2" })
+
+        // Replacing b.jsonl under a new inode reparses it with the new bytes.
+        let b = root.appendingPathComponent("cwd-b/b.jsonl")
+        try FileManager.default.removeItem(at: b)
+        try Data((incrementalAssistantKimi + "\n").utf8).write(to: b)
+        try await assertMatchesFullScan(incremental, full)
+    }
+
+    func testDeletedFileDropsItsEvents() async throws {
+        let root = try makeIncrementalRoot(files: [
+            ("cwd-a/a.jsonl", incrementalAssistantClaude + "\n"),
+            ("cwd-b/b.jsonl", incrementalAssistantKimi + "\n"),
+        ])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        try await assertMatchesFullScan(incremental, full)
+
+        try FileManager.default.removeItem(at: root.appendingPathComponent("cwd-b/b.jsonl"))
+        let batch = try await assertMatchesFullScan(incremental, full)
+        XCTAssertFalse(batch.daily.contains { $0.modelID == "kimi-k2" })
+    }
+
+    func testDuplicatedEntryIdAcrossFilesCountsOnceAfterIncrementalUpdate() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantClaude + "\n")])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        try await assertMatchesFullScan(incremental, full)
+
+        // A fork copy in a second file adds no usage.
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("cwd-b"), withIntermediateDirectories: true
+        )
+        try Data((incrementalAssistantClaude + "\n").utf8)
+            .write(to: root.appendingPathComponent("cwd-b/b.jsonl"))
+        let copied = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(copied.daily.reduce(0) { $0 + Int($1.eventCount) }, 1)
+
+        // Deleting the original re-counts the surviving copy, like a full scan would.
+        try FileManager.default.removeItem(at: root.appendingPathComponent("cwd-a/a.jsonl"))
+        let surviving = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(surviving.daily.reduce(0) { $0 + Int($1.eventCount) }, 1)
+    }
+
+    func testNoChangesReturnsUnchangedSourceIDs() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantClaude + "\n")])
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        try await collectAndCommit(incremental)
+
+        let again = try await incremental.collect()
+        XCTAssertEqual(again.unchangedSourceIDs, ["pi"])
+        XCTAssertTrue(again.daily.isEmpty)
+        XCTAssertTrue(again.hourly.isEmpty)
+        XCTAssertEqual(again.skippedRecords, 0)
+        XCTAssertTrue(again.stateCommits.isEmpty)
+
+        // A later append leaves the unchanged fast path.
+        let handle = try FileHandle(forWritingTo: root.appendingPathComponent("cwd-a/a.jsonl"))
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((incrementalAssistantKimi + "\n").utf8))
+        try handle.close()
+        let after = try await collectAndCommit(incremental)
+        XCTAssertTrue(after.unchangedSourceIDs.isEmpty)
+        XCTAssertEqual(after.daily.count, 2)
+    }
+
+    func testTimeZoneChangeForcesFullScan() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantKimi + "\n")])
+        try await collectAndCommit(incrementalCollector(root: root, timeZone: utc))
+
+        // 20:00Z crosses to the next local day in UTC+08:00, so the state cannot be reused.
+        let shanghai = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let batch = try await assertMatchesFullScan(
+            incrementalCollector(root: root, timeZone: shanghai),
+            fullCollector(root: root, timeZone: shanghai)
+        )
+        XCTAssertTrue(batch.unchangedSourceIDs.isEmpty)
+        XCTAssertEqual(batch.daily.first?.day, "2026-11-11")
+        XCTAssertEqual(batch.daily.first?.timeZoneID, "Asia/Shanghai")
+    }
+
+    func testFormatVersionChangeForcesFullScan() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantClaude + "\n")])
+        try await collectAndCommit(incrementalCollector(root: root, timeZone: utc))
+
+        let stateFile = CollectorStateFile<PiFormatScanState>(directory: stateDirectory, name: "pi")
+        let loaded: PiFormatScanState? = stateFile.load()
+        var state = try XCTUnwrap(loaded)
+        state.stamp.formatVersion += 1
+        try stateFile.save(state)
+
+        // The files are untouched, but the stamp mismatch must still produce a full scan.
+        let batch = try await incrementalCollector(root: root, timeZone: utc).collect()
+        XCTAssertTrue(batch.unchangedSourceIDs.isEmpty)
+        let full = try await fullCollector(root: root, timeZone: utc).collect()
+        XCTAssertEqual(batch.daily, full.daily)
+    }
+
+    func testStateDirectoryNilWritesNothing() async throws {
+        let root = try makeIncrementalRoot(files: [("cwd-a/a.jsonl", incrementalAssistantClaude + "\n")])
+        let collector = fullCollector(root: root, timeZone: utc)
+
+        let first = try await collector.collect()
+        XCTAssertTrue(first.stateCommits.isEmpty)
+        XCTAssertTrue(first.unchangedSourceIDs.isEmpty)
+
+        // nil keeps rescanning in full: no state file appears anywhere.
+        let second = try await collector.collect()
+        XCTAssertEqual(second.daily, first.daily)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stateDirectory.path))
+    }
+}

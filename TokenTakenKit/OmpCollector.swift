@@ -14,6 +14,8 @@ public struct OmpCollector: UsageCollector {
     private let root: URL
     private let deviceID: String
     private let timeZone: TimeZone
+    /// When set, scan results are persisted here and later refreshes scan only what changed.
+    private let stateDirectory: URL?
     /// Defines "the last 48 hours" for the hourly buckets; injectable so tests can pin it.
     private let now: @Sendable () -> Date
 
@@ -22,18 +24,21 @@ public struct OmpCollector: UsageCollector {
             .appendingPathComponent(".omp/agent/sessions"),
         deviceID: String,
         timeZone: TimeZone = .current,
+        stateDirectory: URL? = nil,
         now: @escaping @Sendable () -> Date = { .now }
     ) {
         self.root = root
         self.deviceID = deviceID
         self.timeZone = timeZone
+        self.stateDirectory = stateDirectory
         self.now = now
     }
 
     public func collect() async throws -> CollectionBatch {
         try autoreleasepool {
             try PiFormatScan(
-                root: root, sourceID: "omp", deviceID: deviceID, timeZone: timeZone, now: now()
+                root: root, sourceID: "omp", deviceID: deviceID, timeZone: timeZone,
+                stateDirectory: stateDirectory, now: now()
             ).run()
         }
     }

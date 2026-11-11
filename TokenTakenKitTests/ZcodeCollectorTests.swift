@@ -191,6 +191,113 @@ final class ZcodeCollectorTests: XCTestCase {
         }
     }
 
+    private func stateDirectory() -> URL {
+        directory.appendingPathComponent("collector-state", isDirectory: true)
+    }
+
+    private func commitFullCollect(_ collector: ZcodeCollector) async throws {
+        let batch = try await collector.collect()
+        XCTAssertFalse(batch.daily.isEmpty)
+        for commit in batch.stateCommits { try commit() }
+    }
+
+    private func touch(_ url: URL) throws {
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date.now.addingTimeInterval(120)], ofItemAtPath: url.path
+        )
+    }
+
+    func testSecondCollectWithoutChangesSkipsWork() async throws {
+        let collector = ZcodeCollector(
+            databaseURL: try makeDatabase(), deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!, stateDirectory: stateDirectory()
+        )
+        let first = try await collector.collect()
+        XCTAssertEqual(first.daily.count, 3)
+        XCTAssertEqual(first.stateCommits.count, 1)
+        for commit in first.stateCommits { try commit() }
+
+        let second = try await collector.collect()
+        XCTAssertEqual(second.unchangedSourceIDs, ["zcode"])
+        XCTAssertTrue(second.daily.isEmpty && second.hourly.isEmpty)
+        XCTAssertTrue(second.stateCommits.isEmpty)
+    }
+
+    func testTouchingDatabaseForcesFullCollection() async throws {
+        let url = try makeDatabase()
+        let collector = ZcodeCollector(
+            databaseURL: url, deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!, stateDirectory: stateDirectory()
+        )
+        try await commitFullCollect(collector)
+        try touch(url)
+
+        let batch = try await collector.collect()
+        XCTAssertTrue(batch.unchangedSourceIDs.isEmpty)
+        XCTAssertEqual(batch.daily.count, 3)
+        XCTAssertEqual(batch.stateCommits.count, 1)
+    }
+
+    func testTouchingWALForcesFullCollection() async throws {
+        let url = try makeDatabase()
+        var writer: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &writer), SQLITE_OK)
+        let liveDB = try XCTUnwrap(writer)
+        defer { sqlite3_close(liveDB) }
+        try execute(liveDB, "PRAGMA journal_mode=WAL;")
+        try execute(liveDB, """
+            INSERT INTO model_usage VALUES (
+                'completed', \(milliseconds("2026-01-03T03:00:00Z")), 'glm-wal-state', 'zai', 10, 5, 0, 0, 0
+            );
+            """)
+        let walURL = URL(fileURLWithPath: url.path + "-wal")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: walURL.path))
+
+        // Keep the writer open so the WAL file survives the first collection.
+        let collector = ZcodeCollector(
+            databaseURL: url, deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!, stateDirectory: stateDirectory()
+        )
+        try await commitFullCollect(collector)
+        try touch(walURL)
+
+        let batch = try await collector.collect()
+        XCTAssertTrue(batch.unchangedSourceIDs.isEmpty)
+        XCTAssertNotNil(batch.daily.first { $0.modelID == "glm-wal-state" })
+    }
+
+    func testTimeZoneChangeForcesFullCollection() async throws {
+        let url = try makeDatabase()
+        let state = stateDirectory()
+        try await commitFullCollect(ZcodeCollector(
+            databaseURL: url, deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!, stateDirectory: state
+        ))
+
+        let collector = ZcodeCollector(
+            databaseURL: url, deviceID: "device-a",
+            timeZone: TimeZone(identifier: "America/Los_Angeles")!, stateDirectory: state
+        )
+        let batch = try await collector.collect()
+        XCTAssertTrue(batch.unchangedSourceIDs.isEmpty)
+        XCTAssertFalse(batch.daily.isEmpty)
+        XCTAssertEqual(batch.daily.first?.timeZoneID, "America/Los_Angeles")
+    }
+
+    func testNilStateDirectoryWritesNothing() async throws {
+        let collector = ZcodeCollector(
+            databaseURL: try makeDatabase(), deviceID: "device-a", timeZone: TimeZone(identifier: "UTC")!
+        )
+        let first = try await collector.collect()
+        XCTAssertFalse(first.daily.isEmpty)
+        XCTAssertTrue(first.stateCommits.isEmpty)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).sorted(), ["db.sqlite"])
+
+        let second = try await collector.collect()
+        XCTAssertTrue(second.unchangedSourceIDs.isEmpty)
+        XCTAssertEqual(second.daily.count, 3)
+    }
+
     func testInvalidReasoningSplitAndNegativeCounters() async throws {
         let url = try makeDatabase()
         var handle: OpaquePointer?
