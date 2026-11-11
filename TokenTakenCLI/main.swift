@@ -357,7 +357,9 @@ func deviceWarnings(_ remote: [RemoteDeviceSnapshot]) -> [Warning] {
             guard let code else { return nil }
             let label = deviceStateLabel(status)
             let lastWrite = status.lastWrite.map { ", last write \(rfc3339($0))" } ?? ""
-            return Warning(code: code, message: "\(status.displayName) (\(status.deviceID)): \(label)\(lastWrite)")
+            // An unreadable device.json leaves only the id; say so instead of printing the id twice.
+            let name = status.displayName == status.deviceID ? "Unknown Mac" : status.displayName
+            return Warning(code: code, message: "\(name) (\(status.deviceID)): \(label)\(lastWrite)")
         }
 }
 

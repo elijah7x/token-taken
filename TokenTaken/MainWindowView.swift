@@ -285,6 +285,9 @@ extension AppModel {
         if issues.count > 0 {
             return issues.count == 1 ? "1 source unavailable" : "\(issues.count) sources unavailable"
         }
+        if issues.devices > 0 {
+            return issues.devices == 1 ? "1 Mac unavailable" : "\(issues.devices) Macs unavailable"
+        }
         return "data may be incomplete"
     }
 

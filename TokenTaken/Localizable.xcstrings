@@ -109,6 +109,22 @@
         }
       }
     },
+    "%lld Macs unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Macs unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 台 Mac 数据不可用"
+          }
+        }
+      }
+    },
     "%lld sources stale" : {
       "localizations" : {
         "en" : {
@@ -137,6 +153,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 个来源不可用"
+          }
+        }
+      }
+    },
+    "1 Mac unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Mac unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 台 Mac 数据不可用"
           }
         }
       }

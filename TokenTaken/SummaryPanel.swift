@@ -82,10 +82,30 @@ struct SummaryRail: View {
                         .font(.system(size: 12))
                         .accessibilityElement(children: .combine)
                     }
+                    // A remote Mac whose snapshot could not be read adds no rows; keep it visible, not silently absent.
+                    ForEach(missingRemoteDevices, id: \.deviceID) { remote in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(verbatim: remote.displayName).foregroundStyle(Palette.muted).lineLimit(1)
+                            Text(remote.state == .stale ? "Stale" : "Unavailable")
+                                .font(.system(size: 10))
+                                .foregroundStyle(Palette.muted)
+                                .fixedSize()
+                            Spacer(minLength: 8)
+                            Text(verbatim: "–").foregroundStyle(Palette.muted)
+                        }
+                        .font(.system(size: 12))
+                        .accessibilityElement(children: .combine)
+                    }
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var missingRemoteDevices: [RemoteDeviceStatus] {
+        model.remoteDevices.filter { remote in
+            remote.state != .ok && !summary.byDevice.contains { $0.id == remote.deviceID }
+        }
     }
 
     private func remoteStatusLabel(for device: Breakdown) -> LocalizedStringKey? {

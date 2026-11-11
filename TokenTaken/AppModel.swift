@@ -27,6 +27,8 @@ final class AppModel {
         let unavailable: Int
         let stale: Int
         let skippedRecords: Int
+        /// Other Macs whose synced data is stale, partial or unavailable; not counted as sources.
+        let devices: Int
         let isPartial: Bool
         var count: Int { failed + unavailable + stale }
     }
@@ -49,11 +51,10 @@ final class AppModel {
             case .ok, .notInstalled: break
             }
         }
-        unavailable += remoteDevices.filter { $0.state == .unavailable || $0.state == .partial }.count
-        stale += remoteDevices.filter { $0.state == .stale }.count
+        let devices = remoteDevices.filter { $0.state != .ok }.count
         let skipped = health.reduce(0) { $0 + $1.skippedRecords }
-        return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped,
-            isPartial: failed + unavailable + stale > 0 || skipped > 0 || storageError != nil || readError != nil
+        return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped, devices: devices,
+            isPartial: failed + unavailable + stale + devices > 0 || skipped > 0 || storageError != nil || readError != nil
                 || (settings?.syncEnabled == true && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false)))
     }
 
