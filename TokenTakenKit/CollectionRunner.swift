@@ -15,15 +15,19 @@ public actor CollectionRunner {
         let previous: [String: SourceHealth]
         let cachedRecordCounts: [String: Int]
         let cachedHourlySources: Set<String>
+        let cachedDaily: [UsageRecord]
+        let cachedHourly: [HourlyUsage]
         do {
             try store.upsert(device: device)
             previous = Dictionary(try store.health().map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
+            cachedDaily = try store.records().filter { $0.deviceID == device.id }
+            cachedHourly = try store.hourly().filter { $0.deviceID == device.id }
             var counts: [String: Int] = [:]
-            for record in try store.records() where record.deviceID == device.id {
+            for record in cachedDaily {
                 counts[record.sourceID, default: 0] += 1
             }
             cachedRecordCounts = counts
-            cachedHourlySources = Set(try store.hourly().filter { $0.deviceID == device.id }.map(\.sourceID))
+            cachedHourlySources = Set(cachedHourly.map(\.sourceID))
         } catch {
             let message = Self.sanitizeErrorMessage(Self.message(for: error))
             return collectors.flatMap(\.sourceIDs).map {
@@ -33,6 +37,7 @@ public actor CollectionRunner {
         let outcomes = await collectAll()
         var results: [SourceHealth] = []
         for (collector, outcome) in zip(collectors, outcomes) {
+            var allStored = outcome.batch != nil
             for sourceID in collector.sourceIDs {
                 let existing = previous[sourceID]
                 let cachedCount = cachedRecordCounts[sourceID, default: 0]
@@ -41,7 +46,25 @@ public actor CollectionRunner {
                 let hasHistory = cachedCount > 0 || cachedHourlySources.contains(sourceID)
                 var health: SourceHealth
                 if let batch = outcome.batch {
-                    if batch.unavailableSourceIDs.contains(sourceID) {
+                    if batch.unchangedSourceIDs.contains(sourceID) {
+                        // Unchanged inputs: the cached rows are the full-scan result; re-store them so the hourly
+                        // window and zero-coverage rows advance exactly as a fresh collection would.
+                        let skipped = existing?.skippedRecords ?? 0
+                        let cached = CollectionBatch(
+                            daily: cachedDaily.filter { $0.sourceID == sourceID },
+                            hourly: cachedHourly.filter { $0.sourceID == sourceID },
+                            skippedRecords: skipped
+                        )
+                        do {
+                            let scoped = sourceBatch(cached, sourceID: sourceID, now: now)
+                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: device.id)
+                            health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
+                                recordCount: scoped.daily.count, skippedRecords: skipped)
+                        } catch {
+                            health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                                now: now, message: Self.message(for: error), state: .failed)
+                        }
+                    } else if batch.unavailableSourceIDs.contains(sourceID) {
                         health = unavailableHealth(
                             sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
                             hasHistory: hasHistory, now: now,
@@ -78,6 +101,7 @@ public actor CollectionRunner {
                 if let errorMessage = health.errorMessage {
                     health.errorMessage = Self.sanitizeErrorMessage(errorMessage)
                 }
+                if health.state == .failed || health.state == .unavailable { allStored = false }
                 do {
                     try store.record(health: health)
                 } catch {
@@ -88,6 +112,10 @@ public actor CollectionRunner {
                     health.state = .failed
                 }
                 results.append(health)
+            }
+            if allStored, let commits = outcome.batch?.stateCommits {
+                // A failed commit only costs a full collection next time.
+                for commit in commits { try? commit() }
             }
         }
         return results

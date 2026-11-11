@@ -7,19 +7,29 @@ public struct CollectionBatch: Sendable {
     public var unavailableSourceIDs: Set<String>
     /// Sources whose collection failed in this batch (sourceID to a path-free message); their cache is kept.
     public var failedSourceIDs: [String: String]
+    /// Sources whose inputs are unchanged since the collector's last committed state. The runner re-stores their
+    /// cached rows through the same path as fresh rows, so the 48 h hourly window and zero coverage stay current.
+    public var unchangedSourceIDs: Set<String>
+    /// Persists collector state. The runner calls these only after every source of the batch was stored successfully,
+    /// so a failed collection or write leaves the previous state in place and the next refresh collects again.
+    public var stateCommits: [@Sendable () throws -> Void]
 
     public init(
         daily: [UsageRecord] = [],
         hourly: [HourlyUsage] = [],
         skippedRecords: Int = 0,
         unavailableSourceIDs: Set<String> = [],
-        failedSourceIDs: [String: String] = [:]
+        failedSourceIDs: [String: String] = [:],
+        unchangedSourceIDs: Set<String> = [],
+        stateCommits: [@Sendable () throws -> Void] = []
     ) {
         self.daily = daily
         self.hourly = hourly
         self.skippedRecords = skippedRecords
         self.unavailableSourceIDs = unavailableSourceIDs
         self.failedSourceIDs = failedSourceIDs
+        self.unchangedSourceIDs = unchangedSourceIDs
+        self.stateCommits = stateCommits
     }
 }
 
