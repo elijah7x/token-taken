@@ -17,6 +17,9 @@ final class RefreshCoordinator {
     /// a 4-hour fallback only keeps long-running sessions from going stale.
     static let fallbackRefreshInterval: TimeInterval = 4 * 60 * 60
     static let fallbackRefreshTolerance: TimeInterval = 15 * 60
+    /// Re-read remotes caught mid-write or awaiting iCloud download without waiting for the 4-hour fallback.
+    static let remoteRetryDelays: [TimeInterval] = [120, 600]
+    static let remoteRetryTolerance: TimeInterval = 15
 
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
@@ -35,6 +38,8 @@ final class RefreshCoordinator {
     @ObservationIgnored private let device: Device
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
     @ObservationIgnored private var syncTask: Task<Void, Never>?
+    @ObservationIgnored private var remoteRetryTask: Task<Void, Never>?
+    @ObservationIgnored private var remoteRetryAttempt = 0
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var lastAttempt: Date?
     @ObservationIgnored private let syncWorker = SyncWorker()
@@ -49,6 +54,7 @@ final class RefreshCoordinator {
         settings.onSyncEnabledChange = { [weak self] in
             guard let self else { return }
             self.syncTask?.cancel()
+            self.cancelRemoteRetry()
             if self.settings.syncEnabled {
                 Task { [weak self] in await self?.readRemotes() }
             } else {
@@ -92,6 +98,7 @@ final class RefreshCoordinator {
             isRefreshing = false
             onChange?()
         }
+        cancelRemoteRetry()
         await readRemotes()
         let collectors = makeCollectors()
         let store = store
@@ -112,19 +119,21 @@ final class RefreshCoordinator {
         }
     }
 
-    private func readRemotes() async {
+    private func readRemotes(isRetry: Bool = false) async {
         iCloudAvailable = ICloudSync.defaultRoot != nil
         guard settings.syncEnabled else { return }
         guard let root = ICloudSync.defaultRoot else {
             markRemotesUnavailable()
+            updateRemoteRetry(isRetry: isRetry)
             onChange?()
             return
         }
         let snapshots = await syncWorker.read(root: root, excludingDeviceID: device.id)
-        guard settings.syncEnabled else { return }
+        guard settings.syncEnabled, !Task.isCancelled else { return }
         guard let snapshots else {
             markRemotesUnavailable()
             syncReadFailed = true
+            updateRemoteRetry(isRetry: isRetry)
             onChange?()
             return
         }
@@ -140,7 +149,47 @@ final class RefreshCoordinator {
                 deviceID: cached.device.id, displayName: cached.device.name,
                 lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state))
         }
+        updateRemoteRetry(isRetry: isRetry)
         onChange?()
+    }
+
+    private func updateRemoteRetry(isRetry: Bool) {
+        if isRetry {
+            remoteRetryTask = nil
+        } else {
+            remoteRetryTask?.cancel()
+            remoteRetryTask = nil
+        }
+        let needsRetry = remoteSnapshots.contains {
+            $0.status.state == .unavailable || $0.status.state == .partial
+        }
+        guard needsRetry, settings.syncEnabled else {
+            remoteRetryAttempt = 0
+            return
+        }
+        if isRetry {
+            remoteRetryAttempt += 1
+        }
+        guard remoteRetryAttempt < Self.remoteRetryDelays.count else { return }
+        let delay = Self.remoteRetryDelays[remoteRetryAttempt]
+        remoteRetryTask = Task { [weak self] in
+            do {
+                try await Task.sleep(
+                    for: .seconds(delay),
+                    tolerance: .seconds(Self.remoteRetryTolerance)
+                )
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled, self.settings.syncEnabled else { return }
+            await self.readRemotes(isRetry: true)
+        }
+    }
+
+    private func cancelRemoteRetry() {
+        remoteRetryTask?.cancel()
+        remoteRetryTask = nil
+        remoteRetryAttempt = 0
     }
 
     private func markRemotesUnavailable() {
@@ -283,7 +332,7 @@ private actor SyncWorker {
         if FileManager.default.fileExists(atPath: devices.path) {
             guard (try? SyncBackend(root: root).list("v1/devices")) != nil else { return nil }
         }
-        return ICloudSync.readRemote(root: root, excludingDeviceID: excludingDeviceID)
+        return ICloudSync.readRemote(root: root, excludingDeviceID: excludingDeviceID, requestDownloads: true)
     }
 
     func write(store: any UsageStore, device: Device, root: URL, appVersion: String, health: [SourceHealth]) -> Bool {
