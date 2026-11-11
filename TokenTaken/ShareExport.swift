@@ -35,6 +35,7 @@ enum ShareAspect: String, CaseIterable, Identifiable {
 struct ShareExportSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(AppSettings.self) private var settings
+    @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
@@ -45,12 +46,24 @@ struct ShareExportSheet: View {
     @State private var aspect: ShareAspect = .portrait
     @State private var showCost = false
     @State private var showComposition = true
+    @State private var scopedSummary: UsageSummary?
+    @State private var loadedScopeKey: ScopeQueryKey?
     @State private var didCopy = false
     @State private var copyResetTask: Task<Void, Never>?
     @State private var shareAnchor = SharePickerAnchor()
 
     @Namespace private var aspectNamespace
     @FocusState private var focusedAspect: ShareAspect?
+
+    private struct ScopeQueryKey: Equatable {
+        let scope: ShareScope
+        let period: Period
+        let start: Date
+        let end: Date
+        let totalTokens: Int64
+        let syncEnabled: Bool
+        let remoteCount: Int
+    }
 
     private var summary: UsageSummary { model.summary }
 
@@ -65,8 +78,24 @@ struct ShareExportSheet: View {
         }
     }
 
+    private var scopeQueryKey: ScopeQueryKey {
+        ScopeQueryKey(
+            scope: effectiveScope,
+            period: summary.period,
+            start: summary.start,
+            end: summary.end,
+            totalTokens: summary.total.total,
+            syncEnabled: settings.syncEnabled,
+            remoteCount: refreshCoordinator?.remoteSnapshots.count ?? 0
+        )
+    }
+
     private var cardData: ShareCardData {
-        ShareCardData(summary: summary, scope: effectiveScope)
+        ShareCardData(
+            summary: summary,
+            scope: effectiveScope,
+            scopedSummary: loadedScopeKey == scopeQueryKey ? scopedSummary : nil
+        )
     }
 
     var body: some View {
@@ -90,6 +119,10 @@ struct ShareExportSheet: View {
                 theme: settings.theme,
                 transparency: settings.interfaceTransparency
             )
+        }
+        .onChange(of: scopeQueryKey, initial: true) { _, key in
+            scopedSummary = resolveScopedSummary(for: key.scope)
+            loadedScopeKey = key
         }
         .onExitCommand {
             dismiss()
@@ -187,22 +220,9 @@ struct ShareExportSheet: View {
                 .fill(Palette.hairline)
                 .frame(height: 1)
 
-            VStack(alignment: .leading, spacing: 12) {
-                Toggle(isOn: $showCost) {
-                    Text("Show cost estimate")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.ink1)
-                }
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Show cost estimate"))
-
-                Toggle(isOn: $showComposition) {
-                    Text("Show composition")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(Palette.ink1)
-                }
-                .toggleStyle(.switch)
-                .accessibilityLabel(Text("Show composition"))
+            VStack(spacing: 8) {
+                shareToggleRow(title: "Show cost estimate", isOn: $showCost)
+                shareToggleRow(title: "Show composition", isOn: $showComposition)
             }
 
             Spacer(minLength: 12)
@@ -227,6 +247,28 @@ struct ShareExportSheet: View {
                 sharePickerButton
             }
         }
+    }
+
+    private func shareToggleRow(
+        title: LocalizedStringKey,
+        isOn: Binding<Bool>
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.ink1)
+                .lineLimit(1)
+                .accessibilityHidden(true)
+
+            Spacer(minLength: 8)
+
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(GlassToggleStyle())
+                .accessibilityLabel(Text(title))
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 30)
     }
 
     // MARK: - Scope picker (Overall + Sources menu + Models menu)
@@ -461,7 +503,7 @@ struct ShareExportSheet: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 32)
-            .modifier(ShareActionButtonSurface( isProminent: false, reduceTransparency: reduceTransparency))
+            .modifier(ShareActionButtonSurface(isProminent: false, reduceTransparency: reduceTransparency))
             .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -492,7 +534,42 @@ struct ShareExportSheet: View {
         .accessibilityLabel(Text("Share…"))
     }
 
-    // MARK: - Rendering & Export
+    // MARK: - Scoped summary & export
+
+    /// Resolves per-source models or per-model sources outside `body` so rendering never queries SQLite per frame.
+    private func resolveScopedSummary(for targetScope: ShareScope) -> UsageSummary? {
+        let filter: UsageFilter
+        switch targetScope {
+        case .overall:
+            return nil
+        case .source(let id):
+            filter = UsageFilter(sources: [id])
+        case .model(let id):
+            filter = UsageFilter(models: [id])
+        }
+
+        let isSynthetic = summary.cost.priceTableVersion == PriceTable.synthetic.version
+        let baseStore: (any UsageStore)?
+        let now: Date
+        if let refreshCoordinator {
+            baseStore = settings.syncEnabled
+                ? MergedUsageStore(local: refreshCoordinator.store, remote: refreshCoordinator.remoteSnapshots)
+                : refreshCoordinator.store
+            now = .now
+        } else if isSynthetic {
+            baseStore = SyntheticUsageStore()
+            now = SyntheticUsageStore.defaultToday
+        } else {
+            baseStore = nil
+            now = .now
+        }
+
+        guard let baseStore else { return nil }
+        let filtered = FilteredUsageStore(store: baseStore, filter: filter)
+        let priceTable = isSynthetic ? PriceTable.synthetic : PriceTable.bundled
+        return try? UsageAggregator(store: filtered, now: now, priceTable: priceTable)
+            .summary(for: summary.period)
+    }
 
     private var defaultFileName: String {
         let periodLabel: String = switch summary.period {
@@ -517,9 +594,17 @@ struct ShareExportSheet: View {
     }
 
     private func renderPNGData() -> Data? {
+        let resolvedScoped = loadedScopeKey == scopeQueryKey
+            ? scopedSummary
+            : resolveScopedSummary(for: effectiveScope)
+        let exportData = ShareCardData(
+            summary: summary,
+            scope: effectiveScope,
+            scopedSummary: resolvedScoped
+        )
         let canvasSize = aspect.canvasSize
         let view = ShareCardView(
-            data: cardData,
+            data: exportData,
             aspect: aspect,
             showCost: showCost,
             showComposition: showComposition
@@ -603,17 +688,33 @@ struct ShareCardData {
         let id: String
         let label: LocalizedStringKey
         let value: String
-        let detail: String?
         let isMonospacedValue: Bool
     }
 
+    struct Stratum: Identifiable {
+        enum Label {
+            case verbatim(String, monospaced: Bool)
+            case localized(LocalizedStringKey)
+        }
+
+        let id: String
+        let label: Label
+        let tokens: Int64
+        let color: Color
+    }
+
     let summary: UsageSummary
+    let scopedSummary: UsageSummary?
     let kind: Kind
     let counts: TokenCounts
     let estimatedUSD: Double
 
-    init(summary: UsageSummary, scope: ShareScope) {
+    private static let overallSkyColor = Color(light: "#3A9BE0", dark: "#5BB2F0")
+    private static let mergedStratumColor = Color(light: "#6E7D92", dark: "#8494AB")
+
+    init(summary: UsageSummary, scope: ShareScope, scopedSummary: UsageSummary? = nil) {
         self.summary = summary
+        self.scopedSummary = scopedSummary
         let priceTable = summary.cost.priceTableVersion == PriceTable.synthetic.version
             ? PriceTable.synthetic
             : PriceTable.bundled
@@ -628,7 +729,9 @@ struct ShareCardData {
             if let source = summary.bySource.first(where: { $0.id == id }) {
                 self.kind = .source(id: source.id, name: source.name)
                 self.counts = source.counts
-                if summary.bySource.count == 1 {
+                if let scopedSummary {
+                    self.estimatedUSD = scopedSummary.cost.estimatedUSD
+                } else if summary.bySource.count == 1 {
                     self.estimatedUSD = summary.cost.estimatedUSD
                 } else {
                     self.estimatedUSD = summary.cost.estimatedUSD * Share.ratio(source.counts.total, of: summary.total.total)
@@ -643,7 +746,11 @@ struct ShareCardData {
             if let item = summary.byModel.first(where: { $0.id == id }) {
                 self.kind = .model(id: item.id, name: item.name)
                 self.counts = item.counts
-                self.estimatedUSD = priceTable.estimate(model: item.id, counts: item.counts).usd
+                if let scopedSummary {
+                    self.estimatedUSD = scopedSummary.cost.estimatedUSD
+                } else {
+                    self.estimatedUSD = priceTable.estimate(model: item.id, counts: item.counts).usd
+                }
             } else {
                 self.kind = .overall
                 self.counts = summary.total
@@ -663,10 +770,26 @@ struct ShareCardData {
         }
     }
 
+    var isPartialScope: Bool {
+        switch kind {
+        case .overall: false
+        case .source, .model: true
+        }
+    }
+
+    var periodShareRatio: Double {
+        switch kind {
+        case .overall:
+            return counts.total > 0 ? 1.0 : 0.0
+        case .source, .model:
+            return min(max(Share.ratio(counts.total, of: summary.total.total), 0), 1)
+        }
+    }
+
     var accentColor: Color {
         switch kind {
         case .overall:
-            Palette.color(for: .cacheRead)
+            Self.overallSkyColor
         case .source(let id, _):
             Palette.color(forSource: id)
         case .model(let id, _):
@@ -674,84 +797,341 @@ struct ShareCardData {
         }
     }
 
-    func supportingFacts(showCost: Bool) -> [SupportingFact] {
-        var facts: [SupportingFact] = [
-            SupportingFact(
-                id: "cacheRead",
-                label: "Cache read",
-                value: Share.percent(counts.cacheRead, of: counts.total),
-                detail: TokenFormat.short(counts.cacheRead),
-                isMonospacedValue: false
-            ),
-            SupportingFact(
-                id: "output",
-                label: "Output",
-                value: TokenFormat.short(counts.output),
-                detail: Share.percent(counts.output, of: counts.total),
-                isMonospacedValue: false
-            ),
-        ]
-
+    /// Stratified layers sorted descending by token count (index 0 is thickest at the bottom).
+    var strata: [Stratum] {
         switch kind {
-        case .overall, .source:
-            if let topModel = summary.byModel.first {
-                facts.append(SupportingFact(
+        case .overall:
+            let items = activeSources.map { source in
+                Stratum(
+                    id: source.id,
+                    label: .verbatim(source.name, monospaced: false),
+                    tokens: source.counts.total,
+                    color: Palette.color(forSource: source.id)
+                )
+            }
+            return Self.mergeTail(items, limit: 5)
+
+        case .source:
+            let models = resolvedModelsForSource
+            guard !models.isEmpty else {
+                return categoryStrata
+            }
+            let palette = Palette.modelColors(for: summary.byModel.map(\.id) + models.map(\.id))
+            let items = models.map { item in
+                Stratum(
+                    id: item.id,
+                    label: .verbatim(item.name, monospaced: true),
+                    tokens: item.counts.total,
+                    color: palette[item.id] ?? Palette.color(for: .output)
+                )
+            }
+            return Self.mergeTail(items, limit: 4)
+
+        case .model:
+            let sources = resolvedSourcesForModel
+            guard !sources.isEmpty else {
+                return categoryStrata
+            }
+            let items = sources.map { source in
+                Stratum(
+                    id: source.id,
+                    label: .verbatim(source.name, monospaced: false),
+                    tokens: source.counts.total,
+                    color: Palette.color(forSource: source.id)
+                )
+            }
+            return Self.mergeTail(items, limit: 4)
+        }
+    }
+
+    /// Exactly 3 supporting facts matching the Tide Line mockup for each scope.
+    var supportingFacts: [SupportingFact] {
+        switch kind {
+        case .overall:
+            let sourceCount = activeSources.count
+            let modelCount = activeModels.count
+            let topSourceName = activeSources.first?.name ?? "—"
+            return [
+                SupportingFact(
+                    id: "sourcesModels",
+                    label: "Sources · models",
+                    value: "\(sourceCount) · \(modelCount)",
+                    isMonospacedValue: false
+                ),
+                SupportingFact(
+                    id: "cacheRead",
+                    label: "Cache read",
+                    value: Share.percent(counts.cacheRead, of: counts.total),
+                    isMonospacedValue: false
+                ),
+                SupportingFact(
+                    id: "topSource",
+                    label: "Top source",
+                    value: topSourceName,
+                    isMonospacedValue: false
+                ),
+            ]
+
+        case .source:
+            let middleFact: SupportingFact = if let topModel = resolvedModelsForSource.first {
+                SupportingFact(
                     id: "topModel",
                     label: "Top model",
                     value: topModel.name,
-                    detail: TokenFormat.short(topModel.counts.total),
                     isMonospacedValue: true
-                ))
-            } else if let topSource = summary.bySource.first {
-                facts.append(SupportingFact(
-                    id: "topSource",
-                    label: "Top source",
-                    value: topSource.name,
-                    detail: TokenFormat.short(topSource.counts.total),
+                )
+            } else {
+                SupportingFact(
+                    id: "output",
+                    label: "Output",
+                    value: TokenFormat.short(counts.output),
                     isMonospacedValue: false
-                ))
+                )
             }
+            return [
+                SupportingFact(
+                    id: "periodShare",
+                    label: periodShareFactLabel,
+                    value: Share.percent(counts.total, of: summary.total.total),
+                    isMonospacedValue: false
+                ),
+                middleFact,
+                SupportingFact(
+                    id: "cacheRead",
+                    label: "Cache read",
+                    value: Share.percent(counts.cacheRead, of: counts.total),
+                    isMonospacedValue: false
+                ),
+            ]
+
         case .model:
-            if let topSource = summary.bySource.first {
-                facts.append(SupportingFact(
+            let middleFact: SupportingFact = if let topSource = resolvedSourcesForModel.first {
+                SupportingFact(
                     id: "topSource",
                     label: "Top source",
                     value: topSource.name,
-                    detail: Share.percent(counts.total, of: summary.total.total),
                     isMonospacedValue: false
-                ))
+                )
+            } else {
+                SupportingFact(
+                    id: "output",
+                    label: "Output",
+                    value: TokenFormat.short(counts.output),
+                    isMonospacedValue: false
+                )
             }
+            return [
+                SupportingFact(
+                    id: "periodShare",
+                    label: periodShareFactLabel,
+                    value: Share.percent(counts.total, of: summary.total.total),
+                    isMonospacedValue: false
+                ),
+                middleFact,
+                SupportingFact(
+                    id: "cacheRead",
+                    label: "Cache read",
+                    value: Share.percent(counts.cacheRead, of: counts.total),
+                    isMonospacedValue: false
+                ),
+            ]
         }
-
-        if showCost {
-            facts.append(SupportingFact(
-                id: "cost",
-                label: "Cost estimate",
-                value: TokenFormat.usd(estimatedUSD),
-                detail: nil,
-                isMonospacedValue: false
-            ))
-        }
-
-        return Array(facts.prefix(4))
     }
 
-    var categoryMix: [(category: TokenCategory, tokens: Int64, ratio: Double, color: Color)] {
-        let total = counts.total
-        return TokenCategory.allCases.compactMap { category in
-            let value = counts[category]
-            guard value > 0 else { return nil }
-            return (
-                category: category,
-                tokens: value,
-                ratio: Share.ratio(value, of: total),
-                color: Palette.color(for: category)
-            )
+    private var periodShareFactLabel: LocalizedStringKey {
+        switch summary.period {
+        case .day: "Of today"
+        case .week: "Of this week"
+        case .month: "Of this month"
+        case .year: "Of this year"
+        case .all: "Of all time"
         }
+    }
+
+    private var activeSources: [Breakdown] {
+        summary.bySource
+            .filter { $0.counts.total > 0 }
+            .sorted { $0.counts.total > $1.counts.total }
+    }
+
+    private var activeModels: [Breakdown] {
+        summary.byModel
+            .filter { $0.counts.total > 0 }
+            .sorted { $0.counts.total > $1.counts.total }
+    }
+
+    private var resolvedModelsForSource: [Breakdown] {
+        if let scopedSummary {
+            return scopedSummary.byModel
+                .filter { $0.counts.total > 0 }
+                .sorted { $0.counts.total > $1.counts.total }
+        }
+        if activeSources.count == 1 {
+            return activeModels
+        }
+        return []
+    }
+
+    private var resolvedSourcesForModel: [Breakdown] {
+        if let scopedSummary {
+            return scopedSummary.bySource
+                .filter { $0.counts.total > 0 }
+                .sorted { $0.counts.total > $1.counts.total }
+        }
+        if activeSources.count == 1 {
+            return activeSources
+        }
+        return []
+    }
+
+    private var categoryStrata: [Stratum] {
+        TokenCategory.allCases
+            .compactMap { category -> Stratum? in
+                let value = counts[category]
+                guard value > 0 else { return nil }
+                return Stratum(
+                    id: category.rawValue,
+                    label: .localized(category.title),
+                    tokens: value,
+                    color: Palette.color(for: category)
+                )
+            }
+            .sorted { $0.tokens > $1.tokens }
+    }
+
+    /// Mirrors `BreakdownCard`: folding a single trailing item into "Other 1" saves no space.
+    private static func mergeTail(_ items: [Stratum], limit: Int) -> [Stratum] {
+        guard items.count > limit + 1 else { return items }
+        let kept = Array(items.prefix(limit))
+        let remaining = items.dropFirst(limit)
+        let mergedTokens = remaining.reduce(Int64(0)) { $0 + $1.tokens }
+        guard mergedTokens > 0 else { return kept }
+        var result = kept
+        result.append(Stratum(
+            id: "others",
+            label: .localized("Other \(remaining.count)"),
+            tokens: mergedTokens,
+            color: mergedStratumColor
+        ))
+        return result
     }
 }
 
-// MARK: - ShareCardView (1080x1620 portrait / 1620x1080 landscape)
+// MARK: - Concept 3: Tide Line ShareCardView (1080x1620 portrait / 1620x1080 landscape)
+
+private struct TideGeometry {
+    struct Band: Identifiable {
+        let id: String
+        let stratum: ShareCardData.Stratum
+        let minY: CGFloat
+        let maxY: CGFloat
+        let labelMidY: CGFloat?
+    }
+
+    let canvasSize: CGSize
+    let horizontalMargin: CGFloat
+    let verticalMargin: CGFloat
+    let brimY: CGFloat
+    let brimHeight: CGFloat
+    let liquidHeight: CGFloat
+    let meniscusY: CGFloat
+    let waveAmplitude: CGFloat
+    let wavelength: CGFloat
+    let strataTotalTokens: Int64
+    let bands: [Band]
+    let footerSubmerged: Bool
+
+    init(data: ShareCardData, aspect: ShareAspect, showComposition: Bool) {
+        let size = aspect.canvasSize
+        self.canvasSize = size
+        switch aspect {
+        case .portrait:
+            self.horizontalMargin = 84
+            self.verticalMargin = 76
+        case .landscape:
+            self.horizontalMargin = 80
+            self.verticalMargin = 72
+        }
+
+        let brimFraction: CGFloat = aspect == .portrait ? 0.52 : 0.48
+        let brimH = size.height * brimFraction
+        self.brimHeight = brimH
+        self.brimY = size.height - brimH
+
+        let fillHeight: CGFloat
+        if data.counts.total <= 0 {
+            fillHeight = 0
+        } else if data.isPartialScope {
+            fillHeight = min(brimH, max(28, brimH * CGFloat(data.periodShareRatio)))
+        } else {
+            fillHeight = brimH
+        }
+        self.liquidHeight = fillHeight
+        let topY = size.height - fillHeight
+        self.meniscusY = topY
+        let amp: CGFloat = fillHeight > 0 ? 10 : 0
+        self.waveAmplitude = amp
+        self.wavelength = size.width / 1.6
+
+        let footerBaselineApprox = size.height - verticalMargin - 14
+        self.footerSubmerged = fillHeight > 0 && footerBaselineApprox > topY + 12
+
+        let strata = data.strata
+        let sum = strata.reduce(Int64(0)) { $0 + $1.tokens }
+        self.strataTotalTokens = max(sum, data.counts.total)
+
+        guard showComposition, fillHeight > 0, !strata.isEmpty, sum > 0 else {
+            self.bands = []
+            return
+        }
+
+        let minBandHeight = min(8, fillHeight / CGFloat(max(1, strata.count * 2)))
+        var heights = strata.map { item in
+            max(minBandHeight, fillHeight * CGFloat(Double(item.tokens) / Double(sum)))
+        }
+        let excess = heights.reduce(0, +) - fillHeight
+        if excess > 0 {
+            let slack = heights.reduce(CGFloat(0)) { $0 + max(0, $1 - minBandHeight) }
+            if slack > 0 {
+                heights = heights.map { h in
+                    let room = max(0, h - minBandHeight)
+                    return h - excess * (room / slack)
+                }
+            }
+        }
+
+        let footerSafeCeiling = size.height - verticalMargin - 44
+        let minLabelBandHeight: CGFloat = aspect == .portrait ? 62 : 54
+
+        var cursorY = size.height
+        var built: [Band] = []
+        built.reserveCapacity(strata.count)
+        for (index, item) in strata.enumerated() {
+            let bandMaxY = cursorY
+            let bandMinY = index == strata.count - 1 ? topY : (cursorY - heights[index])
+            cursorY = bandMinY
+
+            let safeTop = max(bandMinY, topY + amp + 8)
+            let safeBottom = min(bandMaxY, footerSafeCeiling)
+            let labelMidY = (safeBottom - safeTop) >= minLabelBandHeight
+                ? (safeTop + safeBottom) / 2
+                : nil
+
+            built.append(Band(
+                id: item.id,
+                stratum: item,
+                minY: bandMinY,
+                maxY: bandMaxY,
+                labelMidY: labelMidY
+            ))
+        }
+        self.bands = built
+    }
+
+    func waveY(at x: CGFloat, phase: CGFloat = 0.6) -> CGFloat {
+        meniscusY + waveAmplitude * sin((x / wavelength) * 2 * .pi + phase)
+    }
+}
 
 struct ShareCardView: View {
     let data: ShareCardData
@@ -766,296 +1146,354 @@ struct ShareCardView: View {
     private var isDark: Bool { scheme == .dark }
 
     var body: some View {
-        ZStack {
-            cardBackground
+        let geometry = TideGeometry(data: data, aspect: aspect, showComposition: showComposition)
 
-            switch aspect {
-            case .portrait:
-                portraitLayout
-            case .landscape:
-                landscapeLayout
-            }
-        }
-        .frame(width: aspect.canvasSize.width, height: aspect.canvasSize.height)
-    }
-
-    // MARK: - Layouts
-
-    private var portraitLayout: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cardHeader
-
-            Spacer(minLength: 36)
-
-            scopeBadgeRow
-
-            heroTotalBlock
-                .padding(.top, 16)
-
-            Spacer(minLength: 36)
-
-            vesselAndCompositionSection(vesselWidth: 220, vesselHeight: 420, horizontal: true)
-
-            Spacer(minLength: 36)
-
-            supportingFactsGrid(columns: 2)
-
-            footerRow
-                .padding(.top, 44)
-        }
-        .padding(76)
-    }
-
-    private var landscapeLayout: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cardHeader
-
-            Spacer(minLength: 28)
-
-            HStack(alignment: .center, spacing: 64) {
-                VStack(alignment: .leading, spacing: 0) {
-                    scopeBadgeRow
-
-                    heroTotalBlock
-                        .padding(.top, 12)
-
-                    Spacer(minLength: 28)
-
-                    supportingFactsGrid(columns: 2)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                vesselAndCompositionSection(vesselWidth: 200, vesselHeight: 440, horizontal: true)
-                    .frame(width: showComposition ? 560 : 240)
-            }
-
-            Spacer(minLength: 28)
-
-            footerRow
-        }
-        .padding(72)
-    }
-
-    // MARK: - Card sections
-
-    private var cardHeader: some View {
-        HStack(alignment: .firstTextBaseline) {
-            HStack(spacing: 14) {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [Color(hex: "#7CC8F2"), Color(hex: "#3A9BE0")],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: 22, height: 22)
-
-                Text(verbatim: "Token Taken")
-                    .font(.system(size: 28, weight: .semibold))
-                    .foregroundStyle(Palette.ink1)
-            }
-
-            Spacer()
-
-            Text(periodDescription)
-                .font(.system(size: 26, weight: .medium))
-                .foregroundStyle(Palette.ink2)
-                .monospacedDigit()
-        }
-    }
-
-    @ViewBuilder
-    private var scopeBadgeRow: some View {
-        switch data.kind {
-        case .overall:
-            Text("This period overall")
-                .font(.system(size: 30, weight: .semibold))
-                .foregroundStyle(Palette.ink2)
-
-        case .source(let id, let name):
-            let sourceColor = Palette.color(forSource: id)
-            HStack(spacing: 18) {
-                Text(verbatim: SourceMonogramBadge.monogram(for: id, name: name))
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
-                    .foregroundStyle(
-                        isDark
-                            ? sourceColor.mix(with: .white, by: 0.20)
-                            : sourceColor.mix(with: .black, by: 0.28)
-                    )
-                    .frame(width: 52, height: 52)
-                    .background {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(sourceColor.opacity(isDark ? 0.18 : 0.14))
-                    }
-                    .accessibilityHidden(true)
-
-                Text(verbatim: name)
-                    .font(.system(size: 36, weight: .semibold))
-                    .foregroundStyle(Palette.ink1)
-                    .lineLimit(1)
-            }
-
-        case .model(let id, let name):
-            HStack(spacing: 14) {
-                Circle()
-                    .fill(data.accentColor)
-                    .frame(width: 18, height: 18)
-                Text(verbatim: name.isEmpty ? id : name)
-                    .font(.system(size: 34, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Palette.ink1)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
-    }
-
-    private var heroTotalBlock: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 20) {
-            Text(TokenFormat.short(data.counts.total))
-                .font(.system(size: 160, weight: .bold))
-                .tracking(-4)
-                .foregroundStyle(Palette.ink1)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-
-            Text("Token")
-                .font(.system(size: 40, weight: .medium))
-                .foregroundStyle(Palette.ink2)
-        }
-    }
-
-    private func vesselAndCompositionSection(
-        vesselWidth: CGFloat,
-        vesselHeight: CGFloat,
-        horizontal: Bool
-    ) -> some View {
-        HStack(alignment: .center, spacing: 44) {
-            ShareVesselGraphic(
-                mix: data.categoryMix,
-                accentColor: data.accentColor,
+        ZStack(alignment: .topLeading) {
+            ShareTideVesselCanvas(
+                data: data,
+                geometry: geometry,
                 showComposition: showComposition,
                 isDark: isDark,
                 reduceTransparency: reduceTransparency
             )
-            .frame(width: vesselWidth, height: vesselHeight)
+
+            switch aspect {
+            case .portrait:
+                portraitTopContent(geometry: geometry)
+            case .landscape:
+                landscapeTopContent(geometry: geometry)
+            }
+
+            if data.isPartialScope {
+                brimAndShareCallouts(geometry: geometry)
+            }
 
             if showComposition {
-                VStack(alignment: .leading, spacing: 22) {
-                    ForEach(data.categoryMix, id: \.category.id) { item in
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                Circle()
-                                    .fill(item.color)
-                                    .frame(width: 16, height: 16)
+                inlineStrataLabels(geometry: geometry)
+            }
 
-                                Text(item.category.title)
-                                    .font(.system(size: 26, weight: .semibold))
-                                    .foregroundStyle(Palette.ink1)
-                                    .lineLimit(1)
+            footerDateOverlay(geometry: geometry)
+        }
+        .frame(width: aspect.canvasSize.width, height: aspect.canvasSize.height)
+    }
 
-                                Spacer(minLength: 16)
+    // MARK: - Top content layouts
 
-                                Text(Share.percent(item.tokens, of: data.counts.total))
-                                    .font(.system(size: 26, weight: .semibold))
-                                    .foregroundStyle(Palette.ink1)
-                                    .monospacedDigit()
-                            }
+    private func portraitTopContent(geometry: TideGeometry) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardHeader
 
-                            FullWidthProportionBar(
-                                ratio: item.ratio,
-                                color: item.color,
-                                height: 8
-                            )
+            scopeRow
+                .padding(.top, 64)
 
-                            Text("\(TokenFormat.short(item.tokens)) tokens")
-                                .font(.system(size: 21, weight: .medium))
-                                .foregroundStyle(Palette.ink3)
-                                .monospacedDigit()
-                        }
+            heroBlock(numberSize: 180, unitSize: 90, tokenLabelSize: 42)
+                .padding(.top, 20)
+
+            if showCost {
+                costRow(amountSize: 40, noteSize: 33)
+                    .padding(.top, 16)
+            }
+
+            portraitSupportingFacts
+                .padding(.top, 40)
+        }
+        .padding(.horizontal, geometry.horizontalMargin)
+        .padding(.top, geometry.verticalMargin)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func landscapeTopContent(geometry: TideGeometry) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardHeader
+
+            HStack(alignment: .top, spacing: 56) {
+                VStack(alignment: .leading, spacing: 0) {
+                    scopeRow
+
+                    heroBlock(numberSize: 148, unitSize: 74, tokenLabelSize: 38)
+                        .padding(.top, 18)
+
+                    if showCost {
+                        costRow(amountSize: 36, noteSize: 30)
+                            .padding(.top, 14)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                landscapeSupportingFacts
+                    .frame(width: 480)
+                    .padding(.top, 4)
             }
+            .padding(.top, 46)
         }
-        .padding(36)
-        .background {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .fill(Palette.cardSurface)
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 32, style: .continuous)
-                .strokeBorder(Palette.hairline, lineWidth: 1.5)
+        .padding(.horizontal, geometry.horizontalMargin)
+        .padding(.top, geometry.verticalMargin)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    // MARK: - Header, Scope, Hero, Cost, Supporting Facts
+
+    private var cardHeader: some View {
+        HStack(alignment: .center, spacing: 24) {
+            HStack(alignment: .center, spacing: 15) {
+                ShareDropGlyph()
+                    .frame(width: 36, height: 42)
+                    .accessibilityHidden(true)
+
+                Text(verbatim: "Token Taken")
+                    .font(.system(size: 35, weight: .semibold))
+                    .tracking(-0.4)
+                    .foregroundStyle(Palette.ink1)
+            }
+
+            Spacer(minLength: 20)
+
+            Text(periodDescription)
+                .font(.system(size: 33, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
         }
     }
 
-    private func supportingFactsGrid(columns: Int) -> some View {
-        let facts = data.supportingFacts(showCost: showCost)
-        let gridColumns = Array(
-            repeating: GridItem(.flexible(), spacing: 24, alignment: .leading),
-            count: max(1, columns)
-        )
-        return LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 24) {
-            ForEach(facts) { fact in
+    private var scopeRow: some View {
+        HStack(alignment: .center, spacing: 18) {
+            Circle()
+                .fill(data.accentColor)
+                .frame(width: 20, height: 20)
+                .accessibilityHidden(true)
+
+            Group {
+                switch data.kind {
+                case .overall:
+                    Text("All sources")
+                case .source(_, let name):
+                    Text("Source · \(name)")
+                case .model(let id, let name):
+                    let modelDisplay = name.isEmpty ? id : name
+                    let monoModel = Text(verbatim: modelDisplay)
+                        .font(.system(size: 34, weight: .semibold, design: .monospaced))
+                    Text("Model · \(monoModel)")
+                }
+            }
+            .font(.system(size: 35, weight: .semibold))
+            .foregroundStyle(Palette.ink2)
+            .lineLimit(1)
+            .truncationMode(.middle)
+        }
+    }
+
+    private func heroBlock(numberSize: CGFloat, unitSize: CGFloat, tokenLabelSize: CGFloat) -> some View {
+        let formatted = TokenFormat.short(data.counts.total)
+        let (digits, unit) = Self.splitShortTokens(formatted)
+
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(verbatim: digits)
+                    .font(.system(size: numberSize, weight: .bold))
+                    .tracking(numberSize > 160 ? -5 : -4)
+                    .foregroundStyle(Palette.ink1)
+                    .monospacedDigit()
+
+                if !unit.isEmpty {
+                    Text(verbatim: unit)
+                        .font(.system(size: unitSize, weight: .semibold))
+                        .tracking(-1.2)
+                        .foregroundStyle(Palette.ink1)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.68)
+
+            Text("Token")
+                .font(.system(size: tokenLabelSize, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+                .padding(.leading, 20)
+                .lineLimit(1)
+        }
+    }
+
+    private func costRow(amountSize: CGFloat, noteSize: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 14) {
+            Text(verbatim: TokenFormat.usd(data.estimatedUSD))
+                .font(.system(size: amountSize, weight: .semibold))
+                .foregroundStyle(Palette.ink1)
+                .monospacedDigit()
+
+            Text("estimate, not a bill")
+                .font(.system(size: noteSize, weight: .regular))
+                .foregroundStyle(Palette.ink2)
+        }
+        .lineLimit(1)
+    }
+
+    private var portraitSupportingFacts: some View {
+        HStack(alignment: .top, spacing: 32) {
+            ForEach(data.supportingFacts) { fact in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(fact.label)
-                        .font(.system(size: 22, weight: .medium))
+                        .font(.system(size: 29, weight: .medium))
                         .foregroundStyle(Palette.ink2)
                         .lineLimit(1)
 
                     Text(verbatim: fact.value)
                         .font(fact.isMonospacedValue
-                            ? .system(size: 34, weight: .semibold, design: .monospaced)
-                            : .system(size: 38, weight: .bold))
+                            ? .system(size: 38, weight: .semibold, design: .monospaced)
+                            : .system(size: 42, weight: .semibold))
                         .foregroundStyle(Palette.ink1)
                         .monospacedDigit()
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.70)
+                        .truncationMode(.middle)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
-                    if let detail = fact.detail {
-                        Text(verbatim: detail)
-                            .font(.system(size: 20, weight: .medium))
-                            .foregroundStyle(Palette.ink3)
+    private var landscapeSupportingFacts: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            ForEach(data.supportingFacts) { fact in
+                HStack(alignment: .firstTextBaseline, spacing: 20) {
+                    Text(fact.label)
+                        .font(.system(size: 29, weight: .medium))
+                        .foregroundStyle(Palette.ink2)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 12)
+
+                    Text(verbatim: fact.value)
+                        .font(fact.isMonospacedValue
+                            ? .system(size: 35, weight: .semibold, design: .monospaced)
+                            : .system(size: 39, weight: .semibold))
+                        .foregroundStyle(Palette.ink1)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.70)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+
+    // MARK: - Tide Line callouts, inline layer labels & footer
+
+    @ViewBuilder
+    private func brimAndShareCallouts(geometry: TideGeometry) -> some View {
+        let labelHeight: CGFloat = 38
+        let brimLabelBottomY = geometry.brimY - 14
+        let shareText = Share.percent(data.counts.total, of: data.summary.total.total)
+        let footerCeiling = geometry.canvasSize.height - geometry.verticalMargin - 44
+
+        // When the tide approaches the brim (> ~92%), lift the left share badge onto the brim baseline
+        // so text is never squeezed between the dashed brim line and the meniscus.
+        let shareBottomY: CGFloat = if geometry.meniscusY - geometry.brimY >= 64 {
+            min(geometry.meniscusY - 16, footerCeiling)
+        } else {
+            brimLabelBottomY
+        }
+
+        ZStack(alignment: .topLeading) {
+            HStack {
+                Spacer(minLength: 0)
+                brimPeriodTotalText
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, geometry.horizontalMargin)
+            .frame(width: geometry.canvasSize.width, height: labelHeight, alignment: .bottomTrailing)
+            .offset(y: brimLabelBottomY - labelHeight)
+
+            HStack {
+                Text(verbatim: shareText)
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, geometry.horizontalMargin)
+            .frame(width: geometry.canvasSize.width, height: labelHeight, alignment: .bottomLeading)
+            .offset(y: shareBottomY - labelHeight)
+        }
+    }
+
+    private func inlineStrataLabels(geometry: TideGeometry) -> some View {
+        let nameSize: CGFloat = aspect == .portrait ? 34 : 31
+        let valueSize: CGFloat = aspect == .portrait ? 31 : 28
+        let rowHeight: CGFloat = 46
+
+        return ZStack(alignment: .topLeading) {
+            ForEach(geometry.bands) { band in
+                if let midY = band.labelMidY {
+                    HStack(alignment: .firstTextBaseline, spacing: 24) {
+                        stratumNameText(band.stratum.label, size: nameSize)
+                            .foregroundStyle(Color.white)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        Spacer(minLength: 16)
+
+                        Text(verbatim: "\(Share.percent(band.stratum.tokens, of: geometry.strataTotalTokens)) · \(TokenFormat.short(band.stratum.tokens))")
+                            .font(.system(size: valueSize, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.92))
                             .monospacedDigit()
                             .lineLimit(1)
+                            .fixedSize()
                     }
-                }
-                .padding(.horizontal, 30)
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity, minHeight: 136, alignment: .topLeading)
-                .background {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .fill(Palette.cardSurface)
-                }
-                .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
-                        .strokeBorder(Palette.hairline, lineWidth: 1.5)
+                    .shadow(color: .black.opacity(reduceTransparency ? 0 : 0.18), radius: 3, x: 0, y: 1)
+                    .padding(.horizontal, geometry.horizontalMargin)
+                    .frame(width: geometry.canvasSize.width, height: rowHeight, alignment: .center)
+                    .offset(y: midY - rowHeight / 2)
                 }
             }
         }
     }
 
-    private var footerRow: some View {
-        VStack(spacing: 22) {
-            Rectangle()
-                .fill(Palette.hairline)
-                .frame(height: 1.5)
+    @ViewBuilder
+    private func stratumNameText(_ label: ShareCardData.Stratum.Label, size: CGFloat) -> some View {
+        switch label {
+        case .verbatim(let text, let monospaced):
+            Text(verbatim: text)
+                .font(monospaced
+                    ? .system(size: size - 1, weight: .semibold, design: .monospaced)
+                    : .system(size: size, weight: .semibold))
+        case .localized(let key):
+            Text(key)
+                .font(.system(size: size, weight: .semibold))
+        }
+    }
 
-            HStack(alignment: .firstTextBaseline) {
-                Text("Local data · Read-only")
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(Palette.ink3)
+    private func footerDateOverlay(geometry: TideGeometry) -> some View {
+        let dateText = Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day())
+        let inkColor: Color = geometry.footerSubmerged
+            ? Color.white.opacity(isDark ? 0.78 : 0.86)
+            : Palette.ink3
 
-                Spacer()
-
-                Text(verbatim: Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundStyle(Palette.ink3)
+        return VStack {
+            Spacer(minLength: 0)
+            HStack {
+                Spacer(minLength: 0)
+                Text(verbatim: dateText)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(inkColor)
                     .monospacedDigit()
+                    .shadow(
+                        color: .black.opacity(geometry.footerSubmerged && !reduceTransparency ? 0.16 : 0),
+                        radius: 2,
+                        x: 0,
+                        y: 1
+                    )
             }
+            .padding(.horizontal, geometry.horizontalMargin)
+            .padding(.bottom, geometry.verticalMargin)
         }
+        .frame(width: geometry.canvasSize.width, height: geometry.canvasSize.height)
     }
+
+    // MARK: - Formatting helpers
 
     private var periodDescription: LocalizedStringKey {
         let start = data.summary.start
@@ -1074,207 +1512,339 @@ struct ShareCardView: View {
         }
     }
 
-    @ViewBuilder
-    private var cardBackground: some View {
-        if reduceTransparency {
-            Palette.solid
-        } else {
-            let warm = isDark
-                ? Color(.sRGB, red: 186 / 255, green: 114 / 255, blue: 82 / 255, opacity: 0.14)
-                : Color(.sRGB, red: 235 / 255, green: 198 / 255, blue: 175 / 255, opacity: 0.28)
-            let cool = isDark
-                ? Color(.sRGB, red: 84 / 255, green: 124 / 255, blue: 198 / 255, opacity: 0.17)
-                : Color(.sRGB, red: 169 / 255, green: 194 / 255, blue: 238 / 255, opacity: 0.30)
+    private var brimPeriodTotalText: Text {
+        let overall = TokenFormat.short(data.summary.total.total)
+        switch data.summary.period {
+        case .day:
+            return Text("All of today \(overall)")
+        case .week:
+            return Text("All of this week \(overall)")
+        case .month:
+            return Text("All of this month \(overall)")
+        case .year:
+            return Text("All of this year \(overall)")
+        case .all:
+            return Text("All time \(overall)")
+        }
+    }
 
-            GeometryReader { proxy in
-                let radius = max(proxy.size.width, proxy.size.height) * 0.56
-                ZStack {
-                    Palette.solid
+    private static func splitShortTokens(_ formatted: String) -> (digits: String, unit: String) {
+        let numericSet: Set<Character> = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", ",", "-"]
+        guard let splitIndex = formatted.firstIndex(where: { !numericSet.contains($0) }) else {
+            return (formatted, "")
+        }
+        return (String(formatted[..<splitIndex]), String(formatted[splitIndex...]))
+    }
+}
 
-                    RadialGradient(
-                        colors: [warm, .clear],
-                        center: UnitPoint(x: 0.22, y: 0.22),
-                        startRadius: 0,
-                        endRadius: radius
-                    )
+// MARK: - Wordmark Droplet Glyph & Full-Card Tide Vessel Canvas
 
-                    RadialGradient(
-                        colors: [cool, .clear],
-                        center: UnitPoint(x: 0.80, y: 0.78),
-                        startRadius: 0,
-                        endRadius: radius * 1.08
-                    )
-                }
-            }
+private struct ShareDropGlyph: View {
+    var body: some View {
+        Canvas { context, size in
+            let sx = size.width / 14
+            let sy = size.height / 16
+
+            var drop = Path()
+            drop.move(to: CGPoint(x: 7 * sx, y: 0.8 * sy))
+            drop.addCurve(
+                to: CGPoint(x: 1.4 * sx, y: 10.3 * sy),
+                control1: CGPoint(x: 7 * sx, y: 0.8 * sy),
+                control2: CGPoint(x: 1.4 * sx, y: 6.9 * sy)
+            )
+            drop.addCurve(
+                to: CGPoint(x: 7.0 * sx, y: 15.9 * sy),
+                control1: CGPoint(x: 1.4 * sx, y: 13.4 * sy),
+                control2: CGPoint(x: 3.9 * sx, y: 15.9 * sy)
+            )
+            drop.addCurve(
+                to: CGPoint(x: 12.6 * sx, y: 10.3 * sy),
+                control1: CGPoint(x: 10.1 * sx, y: 15.9 * sy),
+                control2: CGPoint(x: 12.6 * sx, y: 13.4 * sy)
+            )
+            drop.addCurve(
+                to: CGPoint(x: 7 * sx, y: 0.8 * sy),
+                control1: CGPoint(x: 12.6 * sx, y: 6.9 * sy),
+                control2: CGPoint(x: 7 * sx, y: 0.8 * sy)
+            )
+            drop.closeSubpath()
+
+            context.fill(
+                drop,
+                with: .linearGradient(
+                    Gradient(colors: [Color(hex: "#7CC8F2"), Color(hex: "#3A9BE0")]),
+                    startPoint: CGPoint(x: size.width / 2, y: 0),
+                    endPoint: CGPoint(x: size.width / 2, y: size.height)
+                )
+            )
+
+            var highlight = Path()
+            highlight.move(to: CGPoint(x: 4.2 * sx, y: 10.6 * sy))
+            highlight.addQuadCurve(
+                to: CGPoint(x: 6.6 * sx, y: 13.2 * sy),
+                control: CGPoint(x: 4.5 * sx, y: 12.7 * sy)
+            )
+            context.stroke(
+                highlight,
+                with: .color(.white.opacity(0.78)),
+                style: StrokeStyle(lineWidth: max(1.5, 1.1 * sx), lineCap: .round)
+            )
         }
     }
 }
 
-// MARK: - Glass Vessel Graphic
-
-private struct ShareVesselGraphic: View {
-    let mix: [(category: TokenCategory, tokens: Int64, ratio: Double, color: Color)]
-    let accentColor: Color
+private struct ShareTideVesselCanvas: View {
+    let data: ShareCardData
+    let geometry: TideGeometry
     let showComposition: Bool
     let isDark: Bool
     let reduceTransparency: Bool
 
     var body: some View {
         Canvas { context, size in
-            let rect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
-            let cornerRadius = min(rect.width * 0.38, 56)
-            let vesselShape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .path(in: rect)
+            let fullRect = CGRect(origin: .zero, size: size)
 
-            var clipped = context
-            clipped.clip(to: vesselShape)
-
-            let headroom = max(24, rect.height * 0.10)
-            let meniscusY = rect.minY + headroom
-            let sag = min(14, max(8, rect.width * 0.05))
-            let controlY = meniscusY + sag * 2
-
-            // Air headspace above the meniscus.
+            // 1. Base vessel surface & soft warm/cool atmosphere glows.
             if reduceTransparency {
-                clipped.fill(vesselShape, with: .color(Palette.solid))
+                context.fill(Path(fullRect), with: .color(Palette.solid))
             } else {
-                var airBody = Path()
-                airBody.move(to: CGPoint(x: rect.minX, y: rect.minY))
-                airBody.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-                airBody.addLine(to: CGPoint(x: rect.maxX, y: meniscusY))
-                airBody.addQuadCurve(
-                    to: CGPoint(x: rect.minX, y: meniscusY),
-                    control: CGPoint(x: rect.midX, y: controlY)
+                let topBase = isDark ? Color(hex: "#1B212C") : Color(hex: "#F7F4F0")
+                let bottomBase = isDark ? Color(hex: "#121722") : Color(hex: "#EEF2F8")
+                context.fill(
+                    Path(fullRect),
+                    with: .linearGradient(
+                        Gradient(colors: [topBase, bottomBase]),
+                        startPoint: CGPoint(x: size.width / 2, y: 0),
+                        endPoint: CGPoint(x: size.width / 2, y: size.height)
+                    )
                 )
-                airBody.closeSubpath()
-                clipped.fill(
-                    airBody,
-                    with: .color(Color.white.opacity(isDark ? 0.06 : 0.48))
+
+                let glowSpan = max(size.width, size.height)
+                let warmGlow = isDark
+                    ? Color(.sRGB, red: 200 / 255, green: 122 / 255, blue: 82 / 255, opacity: 0.34)
+                    : Color(.sRGB, red: 255 / 255, green: 205 / 255, blue: 172 / 255, opacity: 0.68)
+                let coolGlow = isDark
+                    ? Color(.sRGB, red: 72 / 255, green: 112 / 255, blue: 192 / 255, opacity: 0.40)
+                    : Color(.sRGB, red: 172 / 255, green: 203 / 255, blue: 248 / 255, opacity: 0.72)
+                let depthGlow = isDark
+                    ? Color(.sRGB, red: 96 / 255, green: 84 / 255, blue: 168 / 255, opacity: 0.28)
+                    : Color(.sRGB, red: 204 / 255, green: 216 / 255, blue: 246 / 255, opacity: 0.78)
+
+                context.fill(
+                    Path(fullRect),
+                    with: .radialGradient(
+                        Gradient(colors: [warmGlow, .clear]),
+                        center: CGPoint(x: size.width * 0.10, y: size.height * 0.06),
+                        startRadius: 0,
+                        endRadius: glowSpan * 0.58
+                    )
+                )
+                context.fill(
+                    Path(fullRect),
+                    with: .radialGradient(
+                        Gradient(colors: [coolGlow, .clear]),
+                        center: CGPoint(x: size.width * 0.96, y: size.height * 0.32),
+                        startRadius: 0,
+                        endRadius: glowSpan * 0.62
+                    )
+                )
+                context.fill(
+                    Path(fullRect),
+                    with: .radialGradient(
+                        Gradient(colors: [depthGlow, .clear]),
+                        center: CGPoint(x: size.width * 0.42, y: size.height * 1.06),
+                        startRadius: 0,
+                        endRadius: glowSpan * 0.64
+                    )
                 )
             }
 
-            let liquidHeight = max(1, rect.maxY - meniscusY)
-            var liquidMask = Path()
-            liquidMask.move(to: CGPoint(x: rect.minX, y: meniscusY))
-            liquidMask.addQuadCurve(
-                to: CGPoint(x: rect.maxX, y: meniscusY),
-                control: CGPoint(x: rect.midX, y: controlY)
-            )
-            liquidMask.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            liquidMask.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            liquidMask.closeSubpath()
+            // 2. Dashed period-total brim line for single source / single model scopes.
+            if data.isPartialScope {
+                var brimPath = Path()
+                brimPath.move(to: CGPoint(x: geometry.horizontalMargin, y: geometry.brimY))
+                brimPath.addLine(to: CGPoint(x: size.width - geometry.horizontalMargin, y: geometry.brimY))
+                context.stroke(
+                    brimPath,
+                    with: .color(Palette.ink2.opacity(isDark ? 0.42 : 0.36)),
+                    style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [8, 13])
+                )
+            }
 
-            var liquidContext = clipped
-            liquidContext.clip(to: liquidMask)
+            // 3. Rising liquid, back wave, stratified bands (or single tint), and meniscus.
+            if geometry.liquidHeight > 0 {
+                let topLayerColor = (showComposition ? geometry.bands.last?.stratum.color : nil) ?? data.accentColor
 
-            if showComposition && !mix.isEmpty {
-                let ratioSum = max(0.0001, mix.reduce(0) { $0 + $1.ratio })
-                var currentY = meniscusY
-                for (index, entry) in mix.enumerated() {
-                    let bandHeight = index == mix.count - 1
-                        ? (rect.maxY - currentY)
-                        : liquidHeight * CGFloat(entry.ratio / ratioSum)
-                    let bandRect = CGRect(
-                        x: rect.minX,
-                        y: currentY,
-                        width: rect.width,
-                        height: max(0, bandHeight + 1)
+                if !reduceTransparency {
+                    let glowRect = CGRect(
+                        x: 0,
+                        y: geometry.meniscusY - 180,
+                        width: size.width,
+                        height: 360
+                    )
+                    context.fill(
+                        Path(glowRect),
+                        with: .radialGradient(
+                            Gradient(colors: [data.accentColor.opacity(isDark ? 0.26 : 0.28), .clear]),
+                            center: CGPoint(x: size.width * 0.5, y: geometry.meniscusY),
+                            startRadius: 0,
+                            endRadius: size.width * 0.68
+                        )
+                    )
+
+                    let backWave = waveClosedPath(in: size, phase: 2.4, verticalOffset: -16)
+                    context.fill(backWave, with: .color(topLayerColor.opacity(isDark ? 0.24 : 0.22)))
+                }
+
+                let frontClip = waveClosedPath(in: size, phase: 0.6, verticalOffset: 0)
+                var liquidContext = context
+                liquidContext.clip(to: frontClip)
+
+                if showComposition && !geometry.bands.isEmpty {
+                    for (index, band) in geometry.bands.enumerated() {
+                        let isTopBand = index == geometry.bands.count - 1
+                        let drawMinY = isTopBand ? (geometry.meniscusY - geometry.waveAmplitude - 16) : band.minY
+                        let bandRect = CGRect(
+                            x: 0,
+                            y: drawMinY,
+                            width: size.width,
+                            height: max(0, band.maxY - drawMinY + 1.5)
+                        )
+                        let pigmented = band.stratum.color.mix(with: .black, by: isDark ? 0.16 : 0.08)
+                        let fillOpacity = reduceTransparency ? 1.0 : (isDark ? 0.84 : 0.85)
+                        liquidContext.fill(Path(bandRect), with: .color(pigmented.opacity(fillOpacity)))
+
+                        if index > 0 {
+                            var divider = Path()
+                            divider.move(to: CGPoint(x: 0, y: band.maxY))
+                            divider.addLine(to: CGPoint(x: size.width, y: band.maxY))
+                            liquidContext.stroke(
+                                divider,
+                                with: .color(.white.opacity(isDark ? 0.30 : 0.42)),
+                                lineWidth: 2
+                            )
+                        }
+                    }
+                } else {
+                    let fillStartY = geometry.meniscusY - geometry.waveAmplitude - 16
+                    let fillRect = CGRect(
+                        x: 0,
+                        y: fillStartY,
+                        width: size.width,
+                        height: size.height - fillStartY
                     )
                     if reduceTransparency {
-                        liquidContext.fill(Path(bandRect), with: .color(entry.color.opacity(isDark ? 0.65 : 0.58)))
+                        let solidTint = data.accentColor.mix(with: .black, by: 0.18)
+                        liquidContext.fill(Path(fillRect), with: .color(solidTint))
                     } else {
+                        let topTint = data.accentColor.mix(with: .white, by: isDark ? 0.06 : 0.12)
+                        let deepTint = data.accentColor.mix(with: .black, by: isDark ? 0.18 : 0.10)
                         liquidContext.fill(
-                            Path(bandRect),
+                            Path(fillRect),
                             with: .linearGradient(
                                 Gradient(colors: [
-                                    entry.color.opacity(isDark ? 0.52 : 0.46),
-                                    entry.color.opacity(isDark ? 0.74 : 0.68),
+                                    topTint.opacity(isDark ? 0.78 : 0.80),
+                                    deepTint.opacity(isDark ? 0.88 : 0.88),
                                 ]),
-                                startPoint: CGPoint(x: bandRect.midX, y: bandRect.minY),
-                                endPoint: CGPoint(x: bandRect.midX, y: bandRect.maxY)
+                                startPoint: CGPoint(x: size.width / 2, y: geometry.meniscusY),
+                                endPoint: CGPoint(x: size.width / 2, y: size.height)
                             )
                         )
                     }
-                    if index > 0 {
-                        var divider = Path()
-                        divider.move(to: CGPoint(x: rect.minX, y: currentY))
-                        divider.addLine(to: CGPoint(x: rect.maxX, y: currentY))
-                        liquidContext.stroke(
-                            divider,
-                            with: .color(.white.opacity(isDark ? 0.22 : 0.45)),
-                            lineWidth: 1.5
-                        )
-                    }
-                    currentY += bandHeight
                 }
-            } else {
-                let fill = CGRect(x: rect.minX, y: meniscusY, width: rect.width, height: liquidHeight)
-                liquidContext.fill(
-                    Path(fill),
-                    with: .linearGradient(
-                        Gradient(colors: [
-                            accentColor.opacity(isDark ? 0.36 : 0.32),
-                            accentColor.opacity(isDark ? 0.64 : 0.58),
-                        ]),
-                        startPoint: CGPoint(x: rect.midX, y: meniscusY),
-                        endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+
+                if !reduceTransparency {
+                    let sheenStartY = geometry.meniscusY - geometry.waveAmplitude - 16
+                    let sheenRect = CGRect(
+                        x: 0,
+                        y: sheenStartY,
+                        width: size.width,
+                        height: size.height - sheenStartY
                     )
+                    liquidContext.fill(
+                        Path(sheenRect),
+                        with: .linearGradient(
+                            Gradient(stops: [
+                                .init(color: .white.opacity(isDark ? 0.22 : 0.30), location: 0),
+                                .init(color: .white.opacity(0), location: 0.35),
+                                .init(color: .black.opacity(0.10), location: 1),
+                            ]),
+                            startPoint: CGPoint(x: size.width / 2, y: sheenStartY),
+                            endPoint: CGPoint(x: size.width / 2, y: size.height)
+                        )
+                    )
+                }
+
+                let meniscusStroke = waveOpenPath(in: size, phase: 0.6, verticalOffset: 0)
+                context.stroke(
+                    meniscusStroke,
+                    with: .color(.white.opacity(reduceTransparency ? 0.55 : (isDark ? 0.68 : 0.84))),
+                    lineWidth: 3.5
                 )
             }
 
-            // Meniscus lens highlight at the top of the liquid.
-            let topColor = (showComposition ? mix.first?.color : nil) ?? accentColor
-            let lensHalfHeight: CGFloat = 4
-            var meniscusLine = Path()
-            meniscusLine.move(to: CGPoint(x: rect.minX, y: meniscusY + lensHalfHeight))
-            meniscusLine.addQuadCurve(
-                to: CGPoint(x: rect.maxX, y: meniscusY + lensHalfHeight),
-                control: CGPoint(x: rect.midX, y: controlY + lensHalfHeight)
-            )
-            clipped.stroke(meniscusLine, with: .color(topColor.opacity(0.55)), lineWidth: 2)
-
-            var meniscusLens = Path()
-            meniscusLens.move(to: CGPoint(x: rect.minX, y: meniscusY - lensHalfHeight))
-            meniscusLens.addQuadCurve(
-                to: CGPoint(x: rect.maxX, y: meniscusY - lensHalfHeight),
-                control: CGPoint(x: rect.midX, y: controlY - lensHalfHeight)
-            )
-            meniscusLens.addLine(to: CGPoint(x: rect.maxX, y: meniscusY + lensHalfHeight))
-            meniscusLens.addQuadCurve(
-                to: CGPoint(x: rect.minX, y: meniscusY + lensHalfHeight),
-                control: CGPoint(x: rect.midX, y: controlY + lensHalfHeight)
-            )
-            meniscusLens.closeSubpath()
-            clipped.fill(meniscusLens, with: .color(.white.opacity(0.55)))
-
-            // Left rim specular highlight.
+            // 4. Left glass vessel refraction highlight & inner rim.
             if !reduceTransparency {
-                let highlightRect = CGRect(
-                    x: rect.minX + 14,
-                    y: rect.minY + 12,
-                    width: 6,
-                    height: max(1, rect.height - 24)
+                let refractionRect = CGRect(
+                    x: 24,
+                    y: 52,
+                    width: 10,
+                    height: max(1, size.height - 104)
                 )
-                let highlight = RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .path(in: highlightRect)
-                clipped.fill(
-                    highlight,
+                let refractionPath = Capsule().path(in: refractionRect)
+                context.fill(
+                    refractionPath,
                     with: .linearGradient(
                         Gradient(stops: [
                             .init(color: .white.opacity(0), location: 0),
-                            .init(color: .white.opacity(0.45), location: 0.15),
-                            .init(color: .white.opacity(0.45), location: 0.85),
+                            .init(color: .white.opacity(isDark ? 0.20 : 0.44), location: 0.14),
+                            .init(color: .white.opacity(isDark ? 0.14 : 0.30), location: 0.86),
                             .init(color: .white.opacity(0), location: 1),
                         ]),
-                        startPoint: CGPoint(x: highlightRect.midX, y: highlightRect.minY),
-                        endPoint: CGPoint(x: highlightRect.midX, y: highlightRect.maxY)
+                        startPoint: CGPoint(x: refractionRect.midX, y: refractionRect.minY),
+                        endPoint: CGPoint(x: refractionRect.midX, y: refractionRect.maxY)
                     )
                 )
-            }
 
-            let rimColor = isDark ? Color.white.opacity(0.18) : Palette.ink1.opacity(0.12)
-            context.stroke(vesselShape, with: .color(rimColor), lineWidth: 2)
+                let rimRect = fullRect.insetBy(dx: 1.5, dy: 1.5)
+                context.stroke(
+                    Path(rimRect),
+                    with: .color(.white.opacity(isDark ? 0.14 : 0.65)),
+                    lineWidth: 3
+                )
+            } else {
+                let rimRect = fullRect.insetBy(dx: 1, dy: 1)
+                context.stroke(Path(rimRect), with: .color(Palette.hairline), lineWidth: 2)
+            }
         }
+    }
+
+    private func waveOpenPath(in size: CGSize, phase: CGFloat, verticalOffset: CGFloat) -> Path {
+        var path = Path()
+        let step: CGFloat = 12
+        var x: CGFloat = 0
+        var isFirst = true
+        while x <= size.width {
+            let y = geometry.waveY(at: x, phase: phase) + verticalOffset
+            if isFirst {
+                path.move(to: CGPoint(x: x, y: y))
+                isFirst = false
+            } else {
+                path.addLine(to: CGPoint(x: x, y: y))
+            }
+            x += step
+        }
+        let endY = geometry.waveY(at: size.width, phase: phase) + verticalOffset
+        path.addLine(to: CGPoint(x: size.width, y: endY))
+        return path
+    }
+
+    private func waveClosedPath(in size: CGSize, phase: CGFloat, verticalOffset: CGFloat) -> Path {
+        var path = waveOpenPath(in: size, phase: phase, verticalOffset: verticalOffset)
+        path.addLine(to: CGPoint(x: size.width, y: size.height))
+        path.addLine(to: CGPoint(x: 0, y: size.height))
+        path.closeSubpath()
+        return path
     }
 }
 

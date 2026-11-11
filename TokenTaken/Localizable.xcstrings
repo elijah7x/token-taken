@@ -329,12 +329,72 @@
         }
       }
     },
+    "All of this month %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本月全部 %@"
+          }
+        }
+      }
+    },
+    "All of this week %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周全部 %@"
+          }
+        }
+      }
+    },
+    "All of this year %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今年全部 %@"
+          }
+        }
+      }
+    },
+    "All of today %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天全部 %@"
+          }
+        }
+      }
+    },
+    "All sources" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部来源"
+          }
+        }
+      }
+    },
     "All time" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "全部"
+          }
+        }
+      }
+    },
+    "All time %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部时间 %@"
           }
         }
       }
@@ -1316,6 +1376,16 @@
         }
       }
     },
+    "Model · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型 · %@"
+          }
+        }
+      }
+    },
     "Models" : {
       "localizations" : {
         "en" : {
@@ -1538,6 +1608,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "数字单位"
+          }
+        }
+      }
+    },
+    "Of all time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占全部"
+          }
+        }
+      }
+    },
+    "Of this month" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占本月"
+          }
+        }
+      }
+    },
+    "Of this week" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占本周"
+          }
+        }
+      }
+    },
+    "Of this year" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占今年"
+          }
+        }
+      }
+    },
+    "Of today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占今天"
           }
         }
       }
@@ -2266,6 +2386,16 @@
         }
       }
     },
+    "Source · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源 · %@"
+          }
+        }
+      }
+    },
     "Sources" : {
       "localizations" : {
         "en" : {
@@ -2310,6 +2440,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "来源 · %lld"
+          }
+        }
+      }
+    },
+    "Sources · models" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源 · 模型"
           }
         }
       }

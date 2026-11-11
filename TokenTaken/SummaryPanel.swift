@@ -49,7 +49,7 @@ struct SummaryRail: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(TokenFormat.spoken(summary.total.total))
-                .padding(.top, 4)
+                .padding(.top, 6)
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(TokenFormat.usd(summary.cost.estimatedUSD))

@@ -261,10 +261,10 @@ private struct Tray: View {
             switch router.route {
             case .dashboard:
                 PeriodSlider()
-                    .padding(.top, 6)
+                    .padding(.top, 22)
 
                 SummaryRail(summary: model.summary, isCollecting: isFirstLaunchCollecting)
-                    .padding(.top, 22)
+                    .padding(.top, 28)
                     .padding(.horizontal, 4)
 
                 Spacer(minLength: 20)
@@ -281,7 +281,7 @@ private struct Tray: View {
                     .padding(.top, 10)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 20)
         .padding(.top, 8)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
@@ -711,18 +711,19 @@ extension AppModel {
     }
 }
 
-// MARK: - Liquid period slider
+// MARK: - Liquid fill period selector
 
-/// Five-detent horizontal period slider with a sky-blue water-drop thumb that stretches with motion.
+/// Five-detent liquid-filled selector whose leading meniscus replaces a separate thumb.
 private struct PeriodSlider: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var scheme
 
     private let periods = Period.allCases
-    private let thumbSize: CGFloat = 18
-    private let trackHeight: CGFloat = 4
-    private let horizontalInset: CGFloat = 18
+    private let controlWidth: CGFloat = 224
+    private let trackHeight: CGFloat = 8
+    private let trackTop: CGFloat = 6
+    private let horizontalInset: CGFloat = 10
 
     @State private var dragProgress: Double?
     @State private var stretchAmount: CGFloat = 0
@@ -742,105 +743,96 @@ private struct PeriodSlider: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            GeometryReader { proxy in
-                let width = max(proxy.size.width, horizontalInset * 2 + 1)
-                let span = width - horizontalInset * 2
-                let step = span / CGFloat(max(periods.count - 1, 1))
-                let centerY = proxy.size.height / 2
-                let thumbX = horizontalInset + CGFloat(currentProgress) * step
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let span = width - horizontalInset * 2
+            let step = span / CGFloat(max(periods.count - 1, 1))
+            let centerY = trackTop + trackHeight / 2
+            let liquidX = horizontalInset + CGFloat(currentProgress) * step
+            let fillWidth = liquidX + 2
 
-                ZStack {
-                    Capsule()
-                        .fill(Palette.barTrack)
-                        .overlay {
-                            if reduceTransparency {
-                                Capsule().strokeBorder(Palette.hairline, lineWidth: 1)
-                            }
-                        }
-                        .frame(width: span + 8, height: trackHeight)
-                        .position(x: width / 2, y: centerY)
+            ZStack {
+                PeriodGroove(isDark: scheme == .dark)
+                    .frame(width: width, height: trackHeight)
+                    .position(x: width / 2, y: centerY)
 
-                    ForEach(Array(periods.enumerated()), id: \.element.id) { index, _ in
-                        Circle()
-                            .fill(Palette.ink3.opacity(0.35))
-                            .frame(width: 4, height: 4)
-                            .position(x: horizontalInset + CGFloat(index) * step, y: centerY)
-                    }
+                LiquidPeriodFill(reduceMotion: reduceMotion)
+                    .frame(width: fillWidth, height: trackHeight)
+                    .position(x: fillWidth / 2, y: centerY)
 
-                    WaterDropThumb(reduceTransparency: reduceTransparency)
-                        .frame(width: thumbSize, height: thumbSize)
-                        .scaleEffect(
-                            x: reduceMotion ? 1 : (1 + 0.35 * stretchAmount),
-                            y: reduceMotion ? 1 : (1 - 0.15 * stretchAmount)
-                        )
-                        .position(x: thumbX, y: centerY)
+                ForEach(Array(periods.enumerated()), id: \.element.id) { index, _ in
+                    let detentX = horizontalInset + CGFloat(index) * step
+                    let isWet = detentX < liquidX - 5
+                    Circle()
+                        .fill(isWet ? Color.white.opacity(0.85) : Palette.ink3.opacity(0.5))
+                        .frame(width: 3, height: 3)
+                        .scaleEffect(isWet ? 0.8 : 1)
+                        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: isWet)
+                        .position(x: detentX, y: centerY)
                 }
-                .contentShape(Rectangle())
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { value in
-                            settleTask?.cancel()
-                            guard abs(value.translation.width) > 1.5 else { return }
-                            let clampedX = min(max(value.location.x, horizontalInset), horizontalInset + span)
-                            dragProgress = Double((clampedX - horizontalInset) / step)
-                            if !reduceMotion {
-                                let velocityRatio = min(abs(value.velocity.width) / 650, 1)
-                                withAnimation(.interactiveSpring(response: 0.14, dampingFraction: 0.78)) {
-                                    stretchAmount = velocityRatio
-                                }
-                            }
-                        }
-                        .onEnded { value in
-                            let clampedX = min(max(value.location.x, horizontalInset), horizontalInset + span)
-                            let rawProgress = Double((clampedX - horizontalInset) / step)
-                            let targetIndex = min(max(Int(rawProgress.rounded()), 0), periods.count - 1)
-                            let target = periods[targetIndex]
-                            let wasDragged = dragProgress != nil
 
-                            if wasDragged {
-                                let settle: Animation? = reduceMotion
-                                    ? nil
-                                    : .spring(response: 0.42, dampingFraction: 0.62)
-                                withAnimation(settle) {
-                                    dragProgress = nil
-                                    stretchAmount = 0
-                                    model.period = target
-                                }
-                            } else {
-                                select(target)
-                            }
-                        }
-                )
-            }
-            .frame(height: 24)
-
-            GeometryReader { proxy in
-                let width = max(proxy.size.width, horizontalInset * 2 + 1)
-                let span = width - horizontalInset * 2
-                let step = span / CGFloat(max(periods.count - 1, 1))
-                let centerY = proxy.size.height / 2
+                LiquidMeniscusHead()
+                    .frame(width: 16, height: 14)
+                    .scaleEffect(
+                        x: reduceMotion ? 1 : (1 + 0.35 * stretchAmount),
+                        y: reduceMotion ? 1 : (1 - 0.15 * stretchAmount)
+                    )
+                    .position(x: liquidX, y: centerY)
 
                 ForEach(Array(periods.enumerated()), id: \.element.id) { index, period in
                     let isSelected = activePeriod == period
-                    Button {
-                        select(period)
-                    } label: {
-                        Text(period.title)
-                            .font(.system(size: isSelected ? 13 : 11, weight: isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink3)
-                            .lineLimit(1)
-                            .fixedSize()
-                            .frame(minWidth: 36, minHeight: 18)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .focusable(false)
-                    .position(x: horizontalInset + CGFloat(index) * step, y: centerY)
+                    Text(period.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink3)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .scaleEffect(isSelected ? 1.14 : 1)
+                        .frame(minWidth: 36, minHeight: 20)
+                        .animation(
+                            reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.62),
+                            value: activePeriod
+                        )
+                        .position(x: horizontalInset + CGFloat(index) * step, y: 30)
                 }
             }
-            .frame(height: 18)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        settleTask?.cancel()
+                        guard abs(value.translation.width) > 1.5 else { return }
+                        let clampedX = min(max(value.location.x, horizontalInset), horizontalInset + span)
+                        dragProgress = Double((clampedX - horizontalInset) / step)
+                        if !reduceMotion {
+                            let velocityRatio = min(abs(value.velocity.width) / 650, 1)
+                            withAnimation(.interactiveSpring(response: 0.14, dampingFraction: 0.78)) {
+                                stretchAmount = velocityRatio
+                            }
+                        }
+                    }
+                    .onEnded { value in
+                        let clampedX = min(max(value.location.x, horizontalInset), horizontalInset + span)
+                        let rawProgress = Double((clampedX - horizontalInset) / step)
+                        let targetIndex = min(max(Int(rawProgress.rounded()), 0), periods.count - 1)
+                        let target = periods[targetIndex]
+                        let wasDragged = dragProgress != nil
+
+                        if wasDragged {
+                            let settle: Animation? = reduceMotion
+                                ? nil
+                                : .spring(response: 0.42, dampingFraction: 0.62)
+                            withAnimation(settle) {
+                                dragProgress = nil
+                                stretchAmount = 0
+                                model.period = target
+                            }
+                        } else {
+                            select(target)
+                        }
+                    }
+            )
         }
+        .frame(width: controlWidth, height: 42)
         // Focusable only with system keyboard navigation on, so launch shows no focus ring.
         .focusable(interactions: .activate)
         .onKeyPress(.leftArrow) {
@@ -920,6 +912,98 @@ private struct PeriodSlider: View {
     }
 }
 
+private struct PeriodGroove: View {
+    let isDark: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        shape
+            .fill(isDark ? Color.black.opacity(0.30) : Palette.barTrack)
+            .overlay {
+                shape
+                    .stroke(
+                        isDark ? Color.black.opacity(0.45) : Color(hex: "#0F172A").opacity(0.14),
+                        lineWidth: 1
+                    )
+                    .blur(radius: 0.75)
+                    .offset(y: 0.5)
+                    .mask(shape)
+            }
+            .shadow(
+                color: isDark ? Color.white.opacity(0.06) : Color.white.opacity(0.9),
+                radius: 0,
+                y: 1
+            )
+    }
+}
+
+private struct LiquidPeriodFill: View {
+    let reduceMotion: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
+        shape
+            .fill(
+                LinearGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color(hex: "#7CC8F2").opacity(0.55), location: 0),
+                        .init(color: Color(hex: "#7CC8F2"), location: 0.45),
+                        .init(color: Color(hex: "#3A9BE0"), location: 1),
+                    ]),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(Color.white.opacity(0.55))
+                    .frame(height: 1)
+                    .padding(.horizontal, 2)
+            }
+            .overlay(alignment: .leading) {
+                if !reduceMotion {
+                    TimelineView(.animation) { context in
+                        let phase = context.date.timeIntervalSinceReferenceDate
+                            .truncatingRemainder(dividingBy: 3.6) / 3.6
+                        let easedPhase = phase * phase * (3 - 2 * phase)
+                        Rectangle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [.clear, Color.white.opacity(0.45), .clear],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: 60, height: 8)
+                            .offset(x: CGFloat(-60 + 320 * easedPhase))
+                    }
+                }
+            }
+            .clipShape(shape)
+            .shadow(color: Color(hex: "#7CC8F2").opacity(0.35), radius: 5)
+    }
+}
+
+private struct LiquidMeniscusHead: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 7, style: .continuous)
+            .fill(
+                RadialGradient(
+                    gradient: Gradient(stops: [
+                        .init(color: Color(hex: "#E6F6FF"), location: 0),
+                        .init(color: Color(hex: "#E6F6FF"), location: 0.12),
+                        .init(color: Color(hex: "#7CC8F2"), location: 0.45),
+                        .init(color: Color(hex: "#3A9BE0"), location: 1),
+                    ]),
+                    center: UnitPoint(x: 0.38, y: 0.30),
+                    startRadius: 0,
+                    endRadius: 9
+                )
+            )
+            .shadow(color: Color(hex: "#3A9BE0").opacity(0.45), radius: 2, y: 1)
+    }
+}
+
 private extension Period {
     var shortcutKey: KeyEquivalent {
         switch self {
@@ -929,43 +1013,5 @@ private extension Period {
         case .year: "4"
         case .all: "5"
         }
-    }
-}
-
-private struct WaterDropThumb: View {
-    let reduceTransparency: Bool
-
-    var body: some View {
-        Circle()
-            .fill(
-                LinearGradient(
-                    colors: [Color(hex: "#7CC8F2"), Color(hex: "#3A9BE0")],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            )
-            .overlay {
-                Circle()
-                    .strokeBorder(
-                        LinearGradient(
-                            colors: [.white.opacity(0.90), .white.opacity(0.22), .clear],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-            }
-            .shadow(
-                color: Color(hex: "#3A9BE0").opacity(reduceTransparency ? 0 : 0.30),
-                radius: 4,
-                x: 0,
-                y: 2
-            )
-            .shadow(
-                color: .black.opacity(reduceTransparency ? 0 : 0.10),
-                radius: 1.5,
-                x: 0,
-                y: 1
-            )
     }
 }
