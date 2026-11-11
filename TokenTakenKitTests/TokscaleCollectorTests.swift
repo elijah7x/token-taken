@@ -55,6 +55,70 @@ final class TokscaleCollectorTests: XCTestCase {
             timeZone: TimeZone(identifier: "America/New_York")!, now: later).isEmpty)
     }
 
+    // Droid repeats an assistant line without id dedupe in tokscale 4.21.0, so events is 2 while token totals are unchanged.
+    func testGeminiAndDroidEngineOutputMatchesHandLedger() throws {
+        let bundle = Bundle(for: TokscaleFixtureBundleToken.self)
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        func fixture(_ name: String) throws -> Data {
+            let url = try XCTUnwrap(bundle.url(forResource: name, withExtension: "json"))
+            return try Data(contentsOf: url)
+        }
+
+        let daily = try TokscaleCollector.parse(data: fixture("tokscale-gemini-droid-graph"),
+            clients: ["gemini", "droid"], deviceID: "device-a", timeZone: zone)
+        let expectedDaily: [(day: String, sourceID: String, modelID: String, counts: TokenCounts, events: Int64)] = [
+            ("2026-11-09", "gemini", "gemini-2.5-pro",
+                TokenCounts(input: 1_000, cacheRead: 400, cacheWrite: 0, output: 250, reasoning: 80), 1),
+            ("2026-11-09", "gemini", "gemini-2.5-flash",
+                TokenCounts(input: 600, cacheRead: 150, cacheWrite: 0, output: 120, reasoning: 40), 1),
+            ("2026-11-10", "gemini", "gemini-2.5-pro",
+                TokenCounts(input: 1_500, cacheRead: 500, cacheWrite: 0, output: 320, reasoning: 110), 1),
+            ("2026-11-10", "gemini", "gemini-2.5-flash",
+                TokenCounts(input: 800, cacheRead: 200, cacheWrite: 0, output: 180, reasoning: 60), 1),
+            ("2026-11-09", "factory", "claude-sonnet-4-5",
+                TokenCounts(input: 2_100, cacheRead: 900, cacheWrite: 300, output: 480, reasoning: 120), 2),
+            ("2026-11-10", "factory", "claude-opus-4-5",
+                TokenCounts(input: 1_600, cacheRead: 700, cacheWrite: 250, output: 350, reasoning: 90), 1),
+        ]
+        XCTAssertEqual(daily.count, expectedDaily.count)
+        for expected in expectedDaily {
+            let matches = daily.filter {
+                $0.day == expected.day && $0.sourceID == expected.sourceID && $0.modelID == expected.modelID
+            }
+            XCTAssertEqual(matches.count, 1, "\(expected.day) \(expected.sourceID) \(expected.modelID)")
+            XCTAssertEqual(matches.first?.counts, expected.counts, "\(expected.day) \(expected.modelID)")
+            XCTAssertEqual(matches.first?.eventCount, expected.events, "\(expected.day) \(expected.modelID)")
+            XCTAssertEqual(matches.first?.timeZoneID, "Asia/Shanghai")
+        }
+
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-10T16:30:00Z"))
+        let geminiHourly = try TokscaleCollector.parseHourly(data: fixture("tokscale-gemini-droid-hourly-gemini"),
+            client: "gemini", deviceID: "device-a", timeZone: zone, now: now)
+        let droidHourly = try TokscaleCollector.parseHourly(data: fixture("tokscale-gemini-droid-hourly-droid"),
+            client: "droid", deviceID: "device-a", timeZone: zone, now: now)
+        let expectedHourly: [(rows: [HourlyUsage], sourceID: String, hours: [String], counts: [TokenCounts], events: [Int64])] = [
+            (geminiHourly, "gemini", ["2026-11-09T02:00:00Z", "2026-11-09T03:00:00Z", "2026-11-10T01:00:00Z", "2026-11-10T05:00:00Z"],
+                [TokenCounts(input: 1_000, cacheRead: 400, cacheWrite: 0, output: 250),
+                 TokenCounts(input: 600, cacheRead: 150, cacheWrite: 0, output: 120),
+                 TokenCounts(input: 1_500, cacheRead: 500, cacheWrite: 0, output: 320),
+                 TokenCounts(input: 800, cacheRead: 200, cacheWrite: 0, output: 180)],
+                [1, 1, 1, 1]),
+            (droidHourly, "factory", ["2026-11-09T06:00:00Z", "2026-11-10T07:00:00Z"],
+                [TokenCounts(input: 2_100, cacheRead: 900, cacheWrite: 300, output: 480),
+                 TokenCounts(input: 1_600, cacheRead: 700, cacheWrite: 250, output: 350)],
+                [2, 1]),
+        ]
+        for expected in expectedHourly {
+            let starts = expected.hours.compactMap { ISO8601DateFormatter().date(from: $0) }
+            XCTAssertEqual(expected.rows.map(\.hourStart), starts)
+            XCTAssertEqual(expected.rows.map(\.counts), expected.counts)
+            XCTAssertEqual(expected.rows.map(\.eventCount), expected.events)
+            XCTAssertTrue(expected.rows.allSatisfy {
+                $0.sourceID == expected.sourceID && $0.deviceID == "device-a" && !$0.reasoningKnown && $0.counts.reasoning == 0
+            })
+        }
+    }
+
     func testRejectsNonexistentDSTHour() throws {
         let data = Data(#"{"entries":[{"hour":"2026-03-08 02:00","input":1,"output":0,"cacheRead":0,"cacheWrite":0,"messageCount":1}]}"#.utf8)
         XCTAssertThrowsError(try TokscaleCollector.parseHourly(data: data, client: "claude", deviceID: "test",

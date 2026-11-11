@@ -1,0 +1,203 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-11T00:00:00+00:00",
+    "version": "4.21.0",
+    "dateRange": {
+      "start": "2026-11-09",
+      "end": "2026-11-10"
+    }
+  },
+  "summary": {
+    "totalTokens": 13200,
+    "totalCost": 0.0376075,
+    "totalDays": 2,
+    "activeDays": 2,
+    "averagePerDay": 0.01880375,
+    "maxCostInSingleDay": 0.020912500000000004,
+    "clients": [
+      "droid",
+      "gemini"
+    ],
+    "models": [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "gemini-2.5-flash",
+      "gemini-2.5-pro"
+    ],
+    "costProvenance": {
+      "kind": "mixed",
+      "estimateSource": "catalog"
+    }
+  },
+  "years": [
+    {
+      "year": "2026",
+      "totalTokens": 13200,
+      "totalCost": 0.0376075,
+      "range": {
+        "start": "2026-11-09",
+        "end": "2026-11-10"
+      },
+      "costProvenance": {
+        "kind": "mixed",
+        "estimateSource": "catalog"
+      }
+    }
+  ],
+  "contributions": [
+    {
+      "date": "2026-11-09",
+      "totals": {
+        "tokens": 6540,
+        "cost": 0.016695,
+        "messages": 4,
+        "costProvenance": {
+          "kind": "mixed",
+          "estimateSource": "catalog"
+        }
+      },
+      "intensity": 4,
+      "tokenBreakdown": {
+        "input": 3700,
+        "output": 850,
+        "cacheRead": 1450,
+        "cacheWrite": 300,
+        "reasoning": 240
+      },
+      "clients": [
+        {
+          "client": "droid",
+          "modelId": "claude-sonnet-4-5",
+          "providerId": "anthropic",
+          "tokens": {
+            "input": 2100,
+            "output": 480,
+            "cacheRead": 900,
+            "cacheWrite": 300,
+            "reasoning": 120
+          },
+          "cost": 0.016695,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "gemini",
+          "modelId": "gemini-2.5-pro",
+          "providerId": "google",
+          "tokens": {
+            "input": 1000,
+            "output": 250,
+            "cacheRead": 400,
+            "cacheWrite": 0,
+            "reasoning": 80
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "gemini",
+          "modelId": "gemini-2.5-flash",
+          "providerId": "google",
+          "tokens": {
+            "input": 600,
+            "output": 120,
+            "cacheRead": 150,
+            "cacheWrite": 0,
+            "reasoning": 40
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        }
+      ]
+    },
+    {
+      "date": "2026-11-10",
+      "totals": {
+        "tokens": 6660,
+        "cost": 0.020912500000000004,
+        "messages": 3,
+        "costProvenance": {
+          "kind": "mixed",
+          "estimateSource": "catalog"
+        }
+      },
+      "intensity": 4,
+      "tokenBreakdown": {
+        "input": 3900,
+        "output": 850,
+        "cacheRead": 1400,
+        "cacheWrite": 250,
+        "reasoning": 260
+      },
+      "clients": [
+        {
+          "client": "gemini",
+          "modelId": "gemini-2.5-pro",
+          "providerId": "google",
+          "tokens": {
+            "input": 1500,
+            "output": 320,
+            "cacheRead": 500,
+            "cacheWrite": 0,
+            "reasoning": 110
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "droid",
+          "modelId": "claude-opus-4-5",
+          "providerId": "anthropic",
+          "tokens": {
+            "input": 1600,
+            "output": 350,
+            "cacheRead": 700,
+            "cacheWrite": 250,
+            "reasoning": 90
+          },
+          "cost": 0.020912500000000004,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "gemini",
+          "modelId": "gemini-2.5-flash",
+          "providerId": "google",
+          "tokens": {
+            "input": 800,
+            "output": 180,
+            "cacheRead": 200,
+            "cacheWrite": 0,
+            "reasoning": 60
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        }
+      ]
+    }
+  ],
+  "timeMetrics": {
+    "totalActiveTimeMs": 0,
+    "longestContinuousMs": 0,
+    "maxConcurrentSessions": 1,
+    "sessionCount": 6
+  }
+}
