@@ -253,8 +253,14 @@ private struct LedgerSettingRow<Accessory: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .accessibilityHidden(true)
             Spacer(minLength: 12)
-            accessory
+            if let help {
+                accessory
+                    .accessibilityHint(Text(help))
+            } else {
+                accessory
+            }
         }
         .frame(minHeight: 42)
     }
@@ -313,6 +319,7 @@ private struct GeneralSettingsTab: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Main view")
                         .font(.system(size: 12, weight: .medium))
+                        .accessibilityHidden(true)
                     HStack(spacing: 12) {
                         ForEach(AppSettings.HeroStyle.allCases, id: \.self) { style in
                             PreviewSelectionTile(title: style.title, isSelected: settings.heroStyle == style) {
@@ -322,6 +329,8 @@ private struct GeneralSettingsTab: View {
                             }
                         }
                     }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Text("Main view"))
                 }
                 .padding(16)
 
@@ -349,7 +358,7 @@ private struct GeneralSettingsTab: View {
                     LedgerHairline()
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(SourceHealth.State.failed.dotColor)
                         .padding(16)
                 }
 
@@ -378,6 +387,7 @@ private struct GeneralSettingsTab: View {
                                 .foregroundStyle(Palette.muted)
                                 .monospacedDigit()
                         }
+                        .accessibilityElement(children: .combine)
                         Spacer(minLength: 12)
                         HStack(spacing: 8) {
                             Button {
@@ -387,7 +397,6 @@ private struct GeneralSettingsTab: View {
                             }
                             .controlSize(.small)
                             .disabled(refreshCoordinator == nil || refreshCoordinator?.isRefreshing == true)
-                            .keyboardShortcut("r", modifiers: .command)
                             .accessibilityLabel(Text("Refresh now"))
 
                             if refreshCoordinator?.isRefreshing == true {
@@ -406,7 +415,7 @@ private struct GeneralSettingsTab: View {
                     LedgerHairline()
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(SourceHealth.State.failed.dotColor)
                         .padding(16)
                 }
             }
@@ -451,6 +460,15 @@ private struct PreviewSelectionTile<Preview: View>: View {
                     .clipShape(shape)
                     .overlay {
                         shape.strokeBorder(isSelected ? Palette.accent : Palette.hairline, lineWidth: isSelected ? 2 : 1)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if isSelected {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .symbolRenderingMode(.palette)
+                                .foregroundStyle(Palette.solid, Palette.accent)
+                                .padding(6)
+                        }
                     }
                     .accessibilityHidden(true)
                 Text(title)
@@ -556,31 +574,43 @@ private struct HeroStyleThumbnail: View {
 
 private struct InterfaceTransparencySlider: View {
     @Binding var value: Double
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    private var reduceTransparencyHelp: LocalizedStringKey {
+        "Reduce Transparency is on in System Settings."
+    }
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "circle.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .help(Text("Solid"))
-                .accessibilityLabel(Text("Solid"))
+                .help(reduceTransparency ? Text(reduceTransparencyHelp) : Text("Solid"))
+                .accessibilityHidden(true)
             Slider(value: $value, in: 0...1)
                 .labelsHidden()
                 .controlSize(.small)
                 .frame(width: 140)
+                .disabled(reduceTransparency)
+                .help(reduceTransparency ? String(localized: "Reduce Transparency is on in System Settings.") : "")
                 .accessibilityLabel(Text("Interface transparency"))
+                .accessibilityHint(
+                    reduceTransparency
+                        ? Text(reduceTransparencyHelp)
+                        : Text("How much shows through the window")
+                )
             Image(systemName: "circle.dotted")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .help(Text("Transparent"))
-                .accessibilityLabel(Text("Transparent"))
+                .help(reduceTransparency ? Text(reduceTransparencyHelp) : Text("Transparent"))
+                .accessibilityHidden(true)
             Text(value, format: .percent.precision(.fractionLength(0)))
                 .font(.system(size: 10))
                 .foregroundStyle(Palette.muted)
                 .monospacedDigit()
                 .frame(width: 32, alignment: .trailing)
+                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .contain)
     }
 }
 
@@ -640,6 +670,7 @@ private struct SourcesSettingsTab: View {
                         .labelStyle(.titleAndIcon)
                 }
                 .frame(minHeight: 52)
+                .accessibilityElement(children: .combine)
 
                 VStack(spacing: 0) {
                     sourceColumns(count: ledger.installed.count)
@@ -683,7 +714,7 @@ private struct SourcesSettingsTab: View {
                         HStack(spacing: 8) {
                             Text("Not installed")
                             Text(ledger.notInstalled.count, format: .number)
-                                .font(.system(size: 9))
+                                .font(.system(size: 10))
                                 .monospacedDigit()
                                 .frame(minWidth: 18, minHeight: 18)
                                 .background {
@@ -702,8 +733,8 @@ private struct SourcesSettingsTab: View {
                         .frame(minHeight: 40)
                         .contentShape(Rectangle())
                     }
+                    .disclosureGroupStyle(NotInstalledDisclosureStyle(count: ledger.notInstalled.count))
                     .padding(.horizontal, 4)
-                    .accessibilityLabel(Text("Not installed"))
                     LedgerHairline()
                 }
 
@@ -767,7 +798,7 @@ private struct SourcesSettingsTab: View {
             Text("Last collected")
                 .frame(width: 88, alignment: .trailing)
         }
-        .font(.system(size: 9, weight: .semibold))
+        .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(Palette.muted)
         .padding(.horizontal, 12)
         .frame(height: 32)
@@ -822,6 +853,47 @@ private struct SourcesSettingsTab: View {
     }()
 }
 
+private struct NotInstalledDisclosureStyle: DisclosureGroupStyle {
+    let count: Int
+
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                configuration.isExpanded.toggle()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Palette.muted)
+                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
+                        .frame(width: 12)
+                        .accessibilityHidden(true)
+                    configuration.label
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onKeyPress(.leftArrow) {
+                guard configuration.isExpanded else { return .ignored }
+                configuration.isExpanded = false
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                guard !configuration.isExpanded else { return .ignored }
+                configuration.isExpanded = true
+                return .handled
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Not installed · \(count)"))
+            .accessibilityValue(configuration.isExpanded ? Text("Expanded") : Text("Collapsed"))
+
+            if configuration.isExpanded {
+                configuration.content
+            }
+        }
+    }
+}
+
 private struct SourceMonogram: View {
     let source: SourceInfo
 
@@ -829,7 +901,7 @@ private struct SourceMonogram: View {
 
     var body: some View {
         Text(verbatim: monogram)
-            .font(.system(size: 8, weight: .semibold, design: .monospaced))
+            .font(.system(size: 10, weight: .semibold, design: .monospaced))
             .foregroundStyle(.primary)
             .frame(width: 26, height: 26)
             .background {
@@ -927,6 +999,7 @@ private struct SyncSettingsTab: View {
                 }
             }
             .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
 
             VStack(spacing: 0) {
                 LedgerSettingRow(title: "iCloud sync", help: "Combine usage from your Macs through iCloud Drive. Only totals are shared.") {
@@ -1076,6 +1149,7 @@ private struct AboutSettingsTab: View {
                 }
             }
             .padding(.vertical, 4)
+            .accessibilityElement(children: .combine)
 
             HStack(alignment: .top, spacing: 16) {
                 VStack(spacing: 0) {
@@ -1099,6 +1173,7 @@ private struct AboutSettingsTab: View {
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .ledgerGlass()
+                .accessibilityElement(children: .combine)
             }
 
             VStack(spacing: 0) {
@@ -1113,7 +1188,7 @@ private struct AboutSettingsTab: View {
                     LedgerHairline()
                     Text(installationMessage)
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(installationFailed ? AnyShapeStyle(Color.red) : AnyShapeStyle(Palette.muted))
+                        .foregroundStyle(installationFailed ? SourceHealth.State.failed.dotColor : Palette.muted)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(16)
@@ -1152,5 +1227,6 @@ private struct AboutValueRow: View {
         }
         .padding(.horizontal, 12)
         .frame(minHeight: 40)
+        .accessibilityElement(children: .combine)
     }
 }

@@ -46,6 +46,13 @@ struct TokenTakenApp: App {
         .defaultSize(width: 1100, height: 720)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("Refresh Now") {
+                    Task { await refreshCoordinator?.refresh() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(refreshCoordinator == nil || refreshCoordinator?.isRefreshing == true)
+            }
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
                     router.route = .settings

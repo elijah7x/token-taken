@@ -16,7 +16,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ tokens"
+            "value" : "%@ Token"
           }
         }
       }
@@ -26,7 +26,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ tokens 暂无价格，未计入估算"
+            "value" : "%@ Token 暂无价格，未计入估算"
           }
         }
       }
@@ -36,7 +36,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ tokens，%2$@"
+            "value" : "%1$@ Token，%2$@"
           }
         }
       }
@@ -52,7 +52,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ tokens，占总量 %@"
+            "value" : "%@ Token，占总量 %@"
           }
         }
       }
@@ -94,13 +94,31 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@：%2$@ tokens"
+            "value" : "%1$@：%2$@ Token"
           }
         }
       }
     },
     "%lld agents" : {
       "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld agent"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld agents"
+                }
+              }
+            }
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -153,6 +171,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 个来源不可用"
+          }
+        }
+      }
+    },
+    "+%lld more" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld more"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另有 %lld 项"
           }
         }
       }
@@ -391,6 +425,22 @@
         }
       }
     },
+    "Collapsed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collapsed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已收起"
+          }
+        }
+      }
+    },
     "Collection engine" : {
       "localizations" : {
         "zh-Hans" : {
@@ -473,6 +523,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法打开本地用量数据库。"
+          }
+        }
+      }
+    },
+    "Expanded" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expanded"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展开"
+          }
+        }
+      }
+    },
+    "Not installed · %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not installed · %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未安装 · %lld"
+          }
+        }
+      }
+    },
+    "Reduce Transparency is on in System Settings." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reduce Transparency is on in System Settings."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在“系统设置”中开启“降低透明度”。"
           }
         }
       }
@@ -979,6 +1077,22 @@
         }
       }
     },
+    "Opens Settings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opens Settings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置"
+          }
+        }
+      }
+    },
     "Other" : {
       "localizations" : {
         "en" : {
@@ -1077,6 +1191,22 @@
         }
       }
     },
+    "Quit Token Taken" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quit Token Taken"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退出 Token Taken"
+          }
+        }
+      }
+    },
     "Rank %lld · %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1113,6 +1243,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "记录数：%lld"
+          }
+        }
+      }
+    },
+    "Refresh Now" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh Now"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即刷新"
           }
         }
       }
@@ -1582,9 +1728,21 @@
     "%lld installed sources · Last updated %@" : {
       "localizations" : {
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$lld installed sources · Last updated %2$@"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld installed source · Last updated %2$@"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%1$lld installed sources · Last updated %2$@"
+                }
+              }
+            }
           }
         },
         "zh-Hans" : {
@@ -1598,9 +1756,21 @@
     "%lld installed sources · Not updated yet" : {
       "localizations" : {
         "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld installed sources · Not updated yet"
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld installed source · Not updated yet"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld installed sources · Not updated yet"
+                }
+              }
+            }
           }
         },
         "zh-Hans" : {

@@ -70,47 +70,65 @@ struct MenuBarContent: View {
                                 .foregroundStyle(hasIssue ? AppModel.statusIssueTextColor : Palette.muted)
                                 .lineLimit(1)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(tooltip)
+                    .accessibilityHint(Text("Opens Settings"))
 
                     RefreshNowButton(refreshCoordinator: refreshCoordinator)
-                        .keyboardShortcut("r", modifiers: .command)
                 }
             }
 
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(TokenFormat.usd(today.cost.estimatedUSD))
-                        .font(.system(size: 13, weight: .semibold))
-                        .monospacedDigit()
-                    Text("Estimate, not a bill")
-                        .font(.system(size: 10))
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(TokenFormat.usd(today.cost.estimatedUSD))
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+                Text("Estimate, not a bill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.muted)
+            }
+            .accessibilityElement(children: .combine)
+
+            HStack(spacing: 6) {
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Text("Quit Token Taken")
+                        .font(.system(size: 11))
                         .foregroundStyle(Palette.muted)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .frame(minHeight: 24)
+                        .contentShape(Rectangle())
                 }
-                Spacer(minLength: 12)
-                HStack(spacing: 6) {
-                    Button {
-                        router.route = .settings
-                        openWindow(id: MainWindowView.windowID)
-                        NSApplication.shared.activate()
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
-                    .help(Text("Settings"))
-                    .accessibilityLabel(Text("Settings"))
-                    Button("Open Token Taken") {
-                        openWindow(id: MainWindowView.windowID)
-                        NSApplication.shared.activate()
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.small)
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
+                Button {
+                    router.route = .settings
+                    openWindow(id: MainWindowView.windowID)
+                    NSApplication.shared.activate()
+                } label: {
+                    Label("Settings", systemImage: "gearshape")
                 }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .help(Text("Settings"))
+                .accessibilityLabel(Text("Settings"))
+
+                Button("Open Token Taken") {
+                    router.route = .dashboard
+                    openWindow(id: MainWindowView.windowID)
+                    NSApplication.shared.activate()
+                }
+                .buttonStyle(.glass)
+                .controlSize(.small)
+                .lineLimit(1)
+                .fixedSize()
             }
         }
         .padding(14)

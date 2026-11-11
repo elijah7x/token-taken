@@ -14,6 +14,7 @@ struct CondensationView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
     @State private var hover: FieldHover?
+    @FocusState private var focused: FieldTarget?
     @State private var epoch = Date.now
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -21,24 +22,29 @@ struct CondensationView: View {
     var body: some View {
         GeometryReader { proxy in
             let layout = CondensationLayout(summary: summary, size: proxy.size)
+            let activeTarget = hover?.target ?? focused
+            let tooltip = hover ?? focused.flatMap { target in
+                layout.anchor(for: target).map { FieldHover(target: target, location: $0) }
+            }
             ZStack(alignment: .topLeading) {
                 TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion || !appearsActive)) { timeline in
                     let time = reduceMotion ? 0 : timeline.date.timeIntervalSince(epoch)
                     Canvas { context, _ in
-                        CondensationRenderer(layout: layout, time: time, hover: hover?.target, isDark: scheme == .dark)
+                        CondensationRenderer(layout: layout, time: time, hover: activeTarget, isDark: scheme == .dark)
                             .draw(in: &context)
                     }
                 }
                 .accessibilityHidden(true)
 
-                DewDrops(layout: layout, namespace: dropSpace, total: summary.total.total)
-                FieldAccessibility(layout: layout, total: summary.total.total)
+                DewDrops(layout: layout, namespace: dropSpace, total: summary.total.total, focused: $focused)
+                FieldAccessibility(layout: layout, total: summary.total.total, period: summary.period, focused: $focused)
                 FieldCaptions(layout: layout)
+                    .accessibilityHidden(true)
 
-                if let hover {
-                    FieldTooltip(target: hover.target, layout: layout, summary: summary)
+                if let tooltip {
+                    FieldTooltip(target: tooltip.target, layout: layout, summary: summary)
                         .fixedSize()
-                        .offset(tooltipOffset(for: hover.location, in: proxy.size))
+                        .offset(tooltipOffset(for: tooltip.location, in: proxy.size))
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                         .transition(.opacity)
@@ -101,7 +107,7 @@ struct FieldHover: Equatable {
     var location: CGPoint
 }
 
-enum FieldTarget: Equatable {
+enum FieldTarget: Hashable {
     case drop(String)
     case fog(String)
     case trail(Int)
@@ -116,8 +122,10 @@ private struct DewDrops: View {
     let layout: CondensationLayout
     let namespace: Namespace.ID
     let total: Int64
+    var focused: FocusState<FieldTarget?>.Binding
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -152,34 +160,41 @@ private struct DewDrops: View {
                     Text(TokenFormat.short(drop.value))
                         .font(.system(size: 11, weight: .semibold))
                         .monospacedDigit()
-                        .contentTransition(.numericText())
+                        .contentTransition(reduceMotion ? .identity : .numericText())
                 }
                 .lineLimit(1)
                 .fixedSize()
+                .focusable(interactions: .activate)
+                .focused(focused, equals: .drop(drop.id))
                 .position(x: drop.center.x, y: drop.center.y + drop.radius + 17)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(verbatim: drop.name))
-                .accessibilityValue(Text("\(TokenFormat.short(drop.value)) tokens, \(Share.percent(drop.value, of: total)) of total"))
+                .accessibilityValue(Text("\(TokenFormat.spoken(drop.value)) tokens, \(Share.percent(drop.value, of: total)) of total"))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
+/// Invisible VoiceOver and keyboard targets over the fog and rain; focus drives the tooltip like hover.
 private struct FieldAccessibility: View {
     let layout: CondensationLayout
     let total: Int64
+    let period: Period
+    var focused: FocusState<FieldTarget?>.Binding
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             ForEach(layout.fog) { fog in
                 Color.clear
                     .frame(width: fog.radii.width * 2, height: fog.radii.height * 2)
+                    .focusable(interactions: .activate)
+                    .focused(focused, equals: .fog(fog.id))
                     .position(fog.center)
                     .accessibilityElement()
                     .accessibilityLabel(Text(verbatim: fog.name))
                     .accessibilityValue(
-                        Text("\(TokenFormat.short(fog.value)) tokens")
+                        Text("\(TokenFormat.spoken(fog.value)) tokens")
                         + Text(verbatim: " · ")
                         + Text("Rank \(fog.rank + 1) · \(Share.percent(fog.value, of: total))")
                     )
@@ -187,9 +202,11 @@ private struct FieldAccessibility: View {
             ForEach(layout.trails) { trail in
                 Color.clear
                     .frame(width: 12, height: trail.length + 12)
+                    .focusable(interactions: .activate)
+                    .focused(focused, equals: .trail(trail.id))
                     .position(x: trail.x, y: trail.top + trail.length / 2)
                     .accessibilityElement()
-                    .accessibilityLabel(Text(verbatim: trail.point.label))
+                    .accessibilityLabel(Text(verbatim: spokenDate(trail.point.start)))
                     .accessibilityValue(trailValue(trail))
             }
         }
@@ -198,9 +215,18 @@ private struct FieldAccessibility: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// Bucket labels are bare numbers ("11"); speak the bucket's start as a localized date or hour.
+    private func spokenDate(_ start: Date) -> String {
+        switch period {
+        case .day: start.formatted(.dateTime.hour())
+        case .week, .month: start.formatted(.dateTime.weekday(.wide).month(.wide).day())
+        case .year, .all: start.formatted(.dateTime.month(.wide).year())
+        }
+    }
+
     private func trailValue(_ trail: CondensationLayout.Trail) -> Text {
         guard trail.point.isKnown else { return Text("Unavailable") }
-        let value = Text("\(TokenFormat.short(trail.point.total)) tokens")
+        let value = Text("\(TokenFormat.spoken(trail.point.total)) tokens")
         guard let top = trail.point.bySource.max(by: { $0.value < $1.value }), top.value > 0 else {
             return value
         }
@@ -257,12 +283,7 @@ private struct FieldTooltip: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
         .frame(maxWidth: 220, alignment: .leading)
-        .background {
-            if reduceTransparency {
-                RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Palette.solid)
-            }
-        }
-        .glassEffect(.regular, in: .rect(cornerRadius: 11))
+        .tooltipSurface(reduceTransparency: reduceTransparency)
     }
 
     @ViewBuilder private var content: some View {
@@ -422,6 +443,18 @@ struct CondensationLayout {
         lastLabel = series.last?.label ?? ""
     }
 
+    /// Where a keyboard-focused target's tooltip is anchored, standing in for the pointer location.
+    func anchor(for target: FieldTarget) -> CGPoint? {
+        switch target {
+        case .drop(let id):
+            drops.first { $0.id == id }.map { CGPoint(x: $0.center.x + $0.radius, y: $0.center.y) }
+        case .fog(let id):
+            fog.first { $0.id == id }.map { CGPoint(x: $0.center.x + $0.radii.width / 2, y: $0.center.y) }
+        case .trail(let id):
+            trails.first { $0.id == id }.map { CGPoint(x: $0.x, y: $0.top + $0.length / 2) }
+        }
+    }
+
     func hitTest(_ p: CGPoint) -> FieldTarget? {
         if let drop = drops.first(where: { hypot(p.x - $0.center.x, p.y - $0.center.y) <= $0.radius + 2 }) {
             return .drop(drop.id)
@@ -455,30 +488,36 @@ private struct CondensationRenderer {
         for trail in layout.trails { drawTrail(trail, in: &context) }
     }
 
+    /// The soft edge that a 14 pt blur used to add is baked into the gradient stops, so fog draws
+    /// straight into the context each frame instead of through an offscreen blurred layer.
     private func drawFog(in context: inout GraphicsContext) {
-        context.drawLayer { layer in
-            layer.addFilter(.blur(radius: 14))
-            for (i, patch) in layout.fog.enumerated() {
-                let phase = Double(i)
-                let drift = CGSize(width: sin(time * 0.11 + phase * 1.7) * 6, height: cos(time * 0.08 + phase * 0.9) * 3.5)
-                let boost = hover == .fog(patch.id) ? 1.45 : 1
-                let alpha = min(patch.opacity * boost * (isDark ? 0.85 : 1), 0.9)
-                let r = patch.radii.width
-                var g = layer
-                g.translateBy(x: patch.center.x + drift.width, y: patch.center.y + drift.height)
-                g.scaleBy(x: 1, y: patch.radii.height / r)
-                g.fill(
-                    Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)),
-                    with: .radialGradient(
-                        Gradient(stops: [
-                            .init(color: patch.color.opacity(alpha), location: 0),
-                            .init(color: patch.color.opacity(alpha * 0.5), location: 0.55),
-                            .init(color: patch.color.opacity(0), location: 1),
-                        ]),
-                        center: .zero, startRadius: 0, endRadius: r
-                    )
+        let spread: CGFloat = 14
+        for (i, patch) in layout.fog.enumerated() {
+            let phase = Double(i)
+            let drift = CGSize(width: sin(time * 0.11 + phase * 1.7) * 6, height: cos(time * 0.08 + phase * 0.9) * 3.5)
+            let boost = hover == .fog(patch.id) ? 1.45 : 1
+            let alpha = min(patch.opacity * boost * (isDark ? 0.85 : 1), 0.9)
+            let r = patch.radii.width
+            let outer = r + spread
+            let edge = r / outer
+            var g = context
+            g.translateBy(x: patch.center.x + drift.width, y: patch.center.y + drift.height)
+            g.scaleBy(x: 1, y: patch.radii.height / r)
+            g.fill(
+                Path(ellipseIn: CGRect(x: -outer, y: -outer, width: outer * 2, height: outer * 2)),
+                with: .radialGradient(
+                    Gradient(stops: [
+                        .init(color: patch.color.opacity(alpha * 0.92), location: 0),
+                        .init(color: patch.color.opacity(alpha * 0.78), location: 0.3 * edge),
+                        .init(color: patch.color.opacity(alpha * 0.5), location: 0.55 * edge),
+                        .init(color: patch.color.opacity(alpha * 0.24), location: 0.8 * edge),
+                        .init(color: patch.color.opacity(alpha * 0.09), location: edge),
+                        .init(color: patch.color.opacity(alpha * 0.02), location: edge + (1 - edge) * 0.6),
+                        .init(color: patch.color.opacity(0), location: 1),
+                    ]),
+                    center: .zero, startRadius: 0, endRadius: outer
                 )
-            }
+            )
         }
     }
 
@@ -513,6 +552,8 @@ private struct CondensationRenderer {
         )
 
         var ripple = t.ripple
+        // White heads vanish on the light pastel field; use a darker tone of the water there.
+        let headColor: Color = isDark ? .white : water.mix(with: .black, by: 0.3)
         if let head = t.head {
             let s = isStatic ? 0.72 : (time * head.speed + head.phase).truncatingRemainder(dividingBy: 1)
             let alpha = isStatic ? 0.85 : sin(s * .pi) * 0.9
@@ -523,7 +564,7 @@ private struct CondensationRenderer {
             tail.addLine(to: at)
             context.stroke(
                 tail,
-                with: .linearGradient(Gradient(colors: [.white.opacity(0), .white.opacity(alpha * 0.8)]),
+                with: .linearGradient(Gradient(colors: [headColor.opacity(0), headColor.opacity(alpha * 0.8)]),
                                       startPoint: point(on: t, at: max(0, s - 0.14)), endPoint: at),
                 style: StrokeStyle(lineWidth: layout.trailWidth * 1.6, lineCap: .round)
             )
@@ -531,7 +572,7 @@ private struct CondensationRenderer {
             context.fill(Path(ellipseIn: CGRect(x: at.x - r * 2, y: at.y - r * 2, width: r * 4, height: r * 4)),
                          with: .color(water.opacity(alpha * 0.22)))
             context.fill(Path(ellipseIn: CGRect(x: at.x - r, y: at.y - r, width: r * 2, height: r * 2)),
-                         with: .color(.white.opacity(alpha)))
+                         with: .color(headColor.opacity(alpha)))
             if !isStatic, s > 0.85 { ripple *= 1 + 0.3 * (s - 0.85) / 0.15 }
         }
         context.stroke(

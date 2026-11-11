@@ -16,6 +16,8 @@ struct ConfluenceView: View {
     @State private var hover: ConfluenceHover?
     /// Particles follow the final geometry, so they are hidden while the ribbons spring to new values.
     @State private var particlesSettled = true
+    /// Values the scene last settled on; nil until the first mount has run.
+    @State private var settledValues: ConfluenceValues?
     @FocusState private var focused: ConfluenceTarget?
 
     private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -24,23 +26,30 @@ struct ConfluenceView: View {
         GeometryReader { proxy in
             let layout = ConfluenceLayout(summary: summary, size: proxy.size)
             let activeTarget = hover?.target ?? focused
+            let values = layout.animationValues
             let particleTracks = layout.particleTracks(
                 activeTarget: activeTarget,
-                reduceTransparency: reduceTransparency
+                reduceTransparency: reduceTransparency,
+                isDark: scheme == .dark
             )
+            let tooltip = hover.map { ($0.target, $0.location) }
+                ?? focused.flatMap { target in
+                    layout.stream(for: target).map { (target, focusAnchor(for: $0)) }
+                }
 
             ZStack(alignment: .topLeading) {
                 ConfluenceScene(
                     layout: layout,
-                    values: layout.animationValues,
+                    values: values,
                     activeTarget: activeTarget,
                     isDark: scheme == .dark,
                     reduceTransparency: reduceTransparency,
                     focused: $focused
                 )
+                // A refresh that leaves the displayed values unchanged gets no spring.
                 .animation(
-                    reduceMotion ? nil : .spring(response: 0.55, dampingFraction: 0.8),
-                    value: layout.animationValues
+                    reduceMotion || values == settledValues ? nil : .spring(response: 0.55, dampingFraction: 0.8),
+                    value: values
                 )
 
                 if !reduceMotion {
@@ -49,21 +58,30 @@ struct ConfluenceView: View {
                         .animation(.easeInOut(duration: 0.2), value: particlesSettled)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
-                        .task(id: layout.animationValues) {
-                            particlesSettled = false
-                            try? await Task.sleep(for: .milliseconds(650))
-                            particlesSettled = true
-                        }
                 }
 
-                if let hover, let stream = layout.stream(for: hover.target) {
+                if let tooltip, let stream = layout.stream(for: tooltip.0) {
                     ConfluenceTooltip(stream: stream, total: layout.totalTokens)
                         .fixedSize()
-                        .offset(tooltipOffset(for: hover.location, in: proxy.size))
+                        .offset(tooltipOffset(for: tooltip.1, in: proxy.size))
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                         .transition(.opacity)
                 }
+            }
+            // Particles follow the final geometry, so hide them only while a real value change springs.
+            // First mount and unchanged refreshes keep them visible (no fade, no group-opacity pass).
+            .task(id: values) {
+                guard !reduceMotion, let previous = settledValues, previous != values else {
+                    settledValues = values
+                    particlesSettled = true
+                    return
+                }
+                particlesSettled = false
+                try? await Task.sleep(for: .milliseconds(650))
+                guard !Task.isCancelled else { return }
+                settledValues = values
+                particlesSettled = true
             }
             .contentShape(shape)
             .onContinuousHover { phase in
@@ -108,8 +126,18 @@ struct ConfluenceView: View {
         }
     }
 
+    /// Keyboard focus has no pointer location; anchor the tooltip beside the focused label, toward the chart.
+    private func focusAnchor(for stream: ConfluenceLayout.Stream) -> CGPoint {
+        let frame = stream.labelFrame
+        return stream.side == .source
+            ? CGPoint(x: frame.maxX, y: frame.minY)
+            : CGPoint(x: frame.minX - Self.tooltipWidth - 28, y: frame.minY)
+    }
+
+    private static let tooltipWidth: CGFloat = 210
+
     private func tooltipOffset(for point: CGPoint, in size: CGSize) -> CGSize {
-        let width: CGFloat = 210, height: CGFloat = 66
+        let width = Self.tooltipWidth, height: CGFloat = 66
         let x = min(point.x + 14, size.width - width - 8)
         let y = point.y + 16 + height > size.height ? point.y - height - 10 : point.y + 16
         return CGSize(width: max(8, x), height: max(8, y))
@@ -143,6 +171,8 @@ private struct ConfluenceScene: View, @MainActor Animatable {
     let reduceTransparency: Bool
     var focused: FocusState<ConfluenceTarget?>.Binding
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var animatableData: ConfluenceValues {
         get { values }
         set { values = newValue }
@@ -163,27 +193,11 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
             .accessibilityHidden(true)
 
-            ConfluenceHeadings(layout: current)
             ConfluenceReservoir(layout: current, reduceTransparency: reduceTransparency)
+                .accessibilityHidden(current.isEmpty)
 
-            ForEach(current.sources) { stream in
-                ConfluenceStreamLabel(
-                    stream: stream,
-                    total: current.totalTokens,
-                    activeTarget: activeTarget,
-                    compact: current.compact,
-                    focused: focused
-                )
-            }
-            ForEach(current.categories) { stream in
-                ConfluenceStreamLabel(
-                    stream: stream,
-                    total: current.totalTokens,
-                    activeTarget: activeTarget,
-                    compact: current.compact,
-                    focused: focused
-                )
-            }
+            streamGroup(.source, streams: current.sources, in: current)
+            streamGroup(.category, streams: current.categories, in: current)
 
             if current.isEmpty {
                 Text("No usage in this period")
@@ -192,7 +206,30 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     .position(x: current.reservoir.midX, y: current.flowBottom - 2)
             }
         }
-        .animation(.easeOut(duration: 0.16), value: activeTarget)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activeTarget)
+    }
+
+    /// One VoiceOver group per side, named by its heading; chart chrome is hidden when the period is empty.
+    private func streamGroup(
+        _ side: ConfluenceLayout.Side,
+        streams: [ConfluenceLayout.Stream],
+        in current: ConfluenceLayout
+    ) -> some View {
+        ZStack(alignment: .topLeading) {
+            ConfluenceHeading(layout: current, side: side)
+            ForEach(streams) { stream in
+                ConfluenceStreamLabel(
+                    stream: stream,
+                    total: current.totalTokens,
+                    activeTarget: activeTarget,
+                    compact: current.compact,
+                    focused: focused
+                )
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(side == .source ? Text("Sources") : Text("Categories"))
+        .accessibilityHidden(current.isEmpty)
     }
 }
 
@@ -251,6 +288,9 @@ private final class ConfluenceParticleView: NSView {
         wantsLayer = true
         layer?.isGeometryFlipped = true
         layer?.masksToBounds = true
+        // Particles barely overlap, so per-particle opacity looks the same as group opacity
+        // and avoids an offscreen pass over ~140 sublayers whenever the host fades.
+        layer?.allowsGroupOpacity = false
         updateContentsScale()
         updatePlayback()
     }
@@ -301,12 +341,17 @@ private final class ConfluenceParticleView: NSView {
         }
 
         for track in tracks {
-            if let existing = trackLayers[track.id], let old = previous[track.id],
-               old.samples == track.samples, old.speed == track.speed, old.radius == track.radius {
-                applyAppearance(track, to: existing, animated: true)
-                continue
+            if let existing = trackLayers[track.id], let old = previous[track.id] {
+                let geometryChanged = old.samples != track.samples
+                    || old.speed != track.speed || old.radius != track.radius
+                // Reuse the track's layers; only retarget their paths when the geometry moved.
+                if !geometryChanged || configureParticles(of: existing, for: track) {
+                    applyAppearance(track, to: existing, animated: !geometryChanged)
+                    continue
+                }
             }
             trackLayers[track.id]?.removeFromSuperlayer()
+            trackLayers.removeValue(forKey: track.id)
             guard let trackLayer = makeTrackLayer(for: track) else { continue }
             trackLayers[track.id] = trackLayer
             applyAppearance(track, to: trackLayer, animated: false)
@@ -315,31 +360,46 @@ private final class ConfluenceParticleView: NSView {
     }
 
     private func makeTrackLayer(for track: ConfluenceParticleTrack) -> CALayer? {
-        guard let root = layer, let first = track.samples.first, track.length > 0, track.speed > 0 else {
-            return nil
-        }
+        guard let root = layer else { return nil }
+        let trackLayer = CALayer()
+        trackLayer.frame = root.bounds
+        trackLayer.contentsScale = backingScale
+        trackLayer.allowsGroupOpacity = false
+        guard configureParticles(of: trackLayer, for: track) else { return nil }
+        root.addSublayer(trackLayer)
+        return trackLayer
+    }
+
+    /// Sizes the track's particle sublayers to the track, reusing existing ones; false when the track cannot animate.
+    private func configureParticles(of trackLayer: CALayer, for track: ConfluenceParticleTrack) -> Bool {
+        guard let first = track.samples.first, track.length > 0, track.speed > 0 else { return false }
         let path = CGMutablePath()
         path.move(to: first.point)
         for sample in track.samples.dropFirst() {
             path.addLine(to: sample.point)
         }
 
-        let trackLayer = CALayer()
-        trackLayer.frame = root.bounds
-        trackLayer.contentsScale = backingScale
-        root.addSublayer(trackLayer)
-
         let count = max(1, Int((track.length / particleSpacing).rounded()))
         let spacing = track.length / CGFloat(count)
         let duration = Double(track.length) / track.speed
         let diameter = track.radius * 2
 
-        for index in 0..<count {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        var particles = trackLayer.sublayers ?? []
+        while particles.count > count {
+            particles.removeLast().removeFromSuperlayer()
+        }
+        while particles.count < count {
             let particle = CALayer()
+            particle.contentsScale = backingScale
+            trackLayer.addSublayer(particle)
+            particles.append(particle)
+        }
+        for (index, particle) in particles.enumerated() {
             particle.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
             particle.position = first.point
             particle.cornerRadius = track.radius
-            particle.contentsScale = backingScale
 
             let animation = CAKeyframeAnimation(keyPath: "position")
             animation.path = path
@@ -348,9 +408,9 @@ private final class ConfluenceParticleView: NSView {
             animation.duration = duration
             animation.timeOffset = Double(index) * Double(spacing) / track.speed
             particle.add(animation, forKey: "confluence.flow")
-            trackLayer.addSublayer(particle)
         }
-        return trackLayer
+        CATransaction.commit()
+        return true
     }
 
     private func applyAppearance(_ track: ConfluenceParticleTrack, to trackLayer: CALayer, animated: Bool) {
@@ -402,23 +462,28 @@ private final class ConfluenceParticleView: NSView {
 
 // MARK: - Native labels and glass
 
-private struct ConfluenceHeadings: View {
+/// The visible heading; VoiceOver hears it as the label of the enclosing stream group instead.
+private struct ConfluenceHeading: View {
     let layout: ConfluenceLayout
+    let side: ConfluenceLayout.Side
 
     var body: some View {
-        Text("Sources")
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(Palette.muted)
-            .frame(width: layout.leftLabelWidth, alignment: .leading)
-            .position(x: layout.leftLabelX + layout.leftLabelWidth / 2, y: layout.headerY)
-            .accessibilityAddTraits(.isHeader)
-
-        Text("Categories")
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(Palette.muted)
-            .frame(width: layout.rightLabelWidth, alignment: .trailing)
-            .position(x: layout.rightLabelX + layout.rightLabelWidth / 2, y: layout.headerY)
-            .accessibilityAddTraits(.isHeader)
+        switch side {
+        case .source:
+            Text("Sources")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .frame(width: layout.leftLabelWidth, alignment: .leading)
+                .position(x: layout.leftLabelX + layout.leftLabelWidth / 2, y: layout.headerY)
+                .accessibilityHidden(true)
+        case .category:
+            Text("Categories")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Palette.muted)
+                .frame(width: layout.rightLabelWidth, alignment: .trailing)
+                .position(x: layout.rightLabelX + layout.rightLabelWidth / 2, y: layout.headerY)
+                .accessibilityHidden(true)
+        }
     }
 }
 
@@ -426,13 +491,15 @@ private struct ConfluenceReservoir: View {
     let layout: ConfluenceLayout
     let reduceTransparency: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         VStack(spacing: 1) {
             Text(TokenFormat.short(layout.totalTokens))
                 .font(.system(size: layout.compact ? 18 : 22, weight: .semibold))
                 .tracking(-0.5)
                 .monospacedDigit()
-                .contentTransition(.numericText())
+                .contentTransition(reduceMotion ? .identity : .numericText())
             Text("Reservoir")
                 .font(.system(size: 9))
                 .foregroundStyle(Palette.muted)
@@ -441,7 +508,7 @@ private struct ConfluenceReservoir: View {
         .position(x: layout.reservoir.midX, y: layout.headerY)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Reservoir"))
-        .accessibilityValue(Text("\(TokenFormat.short(layout.totalTokens)) tokens"))
+        .accessibilityValue(Text("\(TokenFormat.spoken(layout.totalTokens)) tokens"))
 
         Group {
             if reduceTransparency {
@@ -485,14 +552,12 @@ private struct ConfluenceStreamLabel: View {
         .frame(width: stream.labelFrame.width, height: stream.labelFrame.height)
         .contentShape(Rectangle())
         .position(x: stream.labelFrame.midX, y: stream.labelFrame.midY)
-        // Like other non-control content on macOS, join the Tab loop only with Full Keyboard Access;
-        // otherwise the window would focus (and highlight) the first stream at launch.
-        .focusable(NSApplication.shared.isFullKeyboardAccessEnabled)
+        // Keyboard focus shows the system focus ring and the same tooltip as hover.
+        .focusable(interactions: .activate)
         .focused(focused, equals: stream.target)
-        .focusEffectDisabled()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(confluenceName(stream))
-        .accessibilityValue(Text("\(TokenFormat.short(stream.tokens)) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
+        .accessibilityValue(Text("\(TokenFormat.spoken(stream.tokens)) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
     }
 
     private var valueText: Text {
@@ -534,12 +599,7 @@ private struct ConfluenceTooltip: View {
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
         .frame(maxWidth: 210, alignment: .leading)
-        .background {
-            if reduceTransparency {
-                RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Palette.solid)
-            }
-        }
-        .glassEffect(.regular, in: .rect(cornerRadius: 11))
+        .tooltipSurface(reduceTransparency: reduceTransparency)
     }
 }
 
@@ -794,18 +854,27 @@ private struct ConfluenceLayout {
 
     func particleTracks(
         activeTarget: ConfluenceTarget?,
-        reduceTransparency: Bool
+        reduceTransparency: Bool,
+        isDark: Bool
     ) -> [ConfluenceParticleTrack] {
         (sources + categories).compactMap { stream in
             guard stream.value > 0 else { return nil }
             let highlighted = activeTarget == stream.target
+            // White particles vanish on the light pastel field; use a darker tone of the stream there.
+            let color: Color = if isDark {
+                reduceTransparency ? .white : .white.opacity(highlighted ? 0.82 : 0.48)
+            } else {
+                reduceTransparency
+                    ? stream.color.mix(with: .black, by: 0.45)
+                    : stream.color.mix(with: .black, by: 0.35).opacity(highlighted ? 0.85 : 0.6)
+            }
             return ConfluenceParticleTrack(
                 id: stream.target.id,
                 samples: stream.centerSamples,
                 length: stream.centerSamples.last?.distance ?? 0,
                 speed: 36 * stream.value / flowBasis,
                 radius: max(0.65, min(4, stream.innerHeight * 0.16)) * 0.5,
-                color: reduceTransparency ? .white : .white.opacity(highlighted ? 0.82 : 0.48),
+                color: color,
                 isDimmed: activeTarget != nil && !highlighted
             )
         }
@@ -1092,24 +1161,24 @@ private struct ConfluenceRenderer {
 
     private func drawReservoir(in context: inout GraphicsContext) {
         let shape = Path(roundedRect: layout.reservoir, cornerRadius: layout.reservoirCorner)
-        context.drawLayer { layer in
-            layer.clip(to: shape)
-            layer.fill(
-                shape,
-                with: .color(reduceTransparency ? Palette.solid : Palette.accent.opacity(isDark ? 0.12 : 0.08))
+        // A clipped copy of the context clips without the offscreen layer drawLayer allocates.
+        var clipped = context
+        clipped.clip(to: shape)
+        clipped.fill(
+            shape,
+            with: .color(reduceTransparency ? Palette.solid : Palette.accent.opacity(isDark ? 0.12 : 0.08))
+        )
+        for source in layout.sources {
+            let rect = CGRect(
+                x: layout.reservoir.minX,
+                y: source.innerTop,
+                width: layout.reservoir.width,
+                height: source.innerHeight
             )
-            for source in layout.sources {
-                let rect = CGRect(
-                    x: layout.reservoir.minX,
-                    y: source.innerTop,
-                    width: layout.reservoir.width,
-                    height: source.innerHeight
-                )
-                layer.fill(
-                    Path(rect),
-                    with: .color(reduceTransparency ? source.color : source.color.opacity(isDark ? 0.5 : 0.4))
-                )
-            }
+            clipped.fill(
+                Path(rect),
+                with: .color(reduceTransparency ? source.color : source.color.opacity(isDark ? 0.5 : 0.4))
+            )
         }
     }
 

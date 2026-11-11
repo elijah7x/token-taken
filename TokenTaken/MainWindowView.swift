@@ -141,15 +141,18 @@ private struct PeriodBar: View {
     @Environment(AppModel.self) private var model
     @Environment(MainWindowRouter.self) private var router
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 16) {
             PeriodPicker()
+                .layoutPriority(2)
             Text(rangeTitle)
                 .font(.system(size: 12))
                 .foregroundStyle(Palette.muted)
                 .monospacedDigit()
-                .contentTransition(.numericText())
+                .lineLimit(1)
+                .contentTransition(reduceMotion ? .identity : .numericText())
             Spacer(minLength: 12)
             HStack(spacing: 8) {
                 // Relative time ("5 min ago") and staleness must re-render as the clock advances.
@@ -169,15 +172,19 @@ private struct PeriodBar: View {
                                 .foregroundStyle(hasIssue ? AppModel.statusIssueTextColor : Palette.muted)
                                 .lineLimit(1)
                         }
+                        .frame(minHeight: 24)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help(tooltip)
+                    .accessibilityHint(Text("Opens Settings"))
                 }
+                .fixedSize(horizontal: true, vertical: false)
 
                 RefreshNowButton(refreshCoordinator: refreshCoordinator)
-                    .keyboardShortcut("r", modifiers: .command)
             }
+            .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(1)
         }
         .padding(.horizontal, 22)
         .frame(height: 50)
@@ -206,7 +213,7 @@ private struct PeriodBar: View {
         case .year:
             return "This year · \(start.formatted(.dateTime.year()))"
         case .all:
-            return "All time · since \(start.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)))"
+            return "All time · since \(start.formatted(.dateTime.year().month(.abbreviated).day()))"
         }
     }
 }
@@ -239,7 +246,7 @@ struct RefreshNowButton: View {
                         )
                 }
             }
-            .frame(width: 18, height: 18)
+            .frame(minWidth: 24, minHeight: 24)
             .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -341,6 +348,7 @@ private struct PeriodPicker: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Namespace private var selection
+    @FocusState private var focusedPeriod: Period?
 
     var body: some View {
         GlassEffectContainer(spacing: 0) {
@@ -351,6 +359,7 @@ private struct PeriodPicker: View {
             }
             .padding(3)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .background(Capsule().fill(Palette.hairline.opacity(0.55)))
         .overlay(Capsule().strokeBorder(Palette.hairline))
         .accessibilityElement(children: .contain)
@@ -360,13 +369,13 @@ private struct PeriodPicker: View {
     private func segment(_ period: Period) -> some View {
         let isSelected = model.period == period
         return Button {
-            withAnimation(reduceMotion ? nil : .smooth(duration: 0.45)) {
-                model.period = period
-            }
+            select(period)
         } label: {
             Text(period.title)
                 .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? AnyShapeStyle(HierarchicalShapeStyle.primary) : AnyShapeStyle(Palette.muted))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 30)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 5)
@@ -375,7 +384,44 @@ private struct PeriodPicker: View {
                 .modifier(SelectedGlass(isSelected: isSelected, namespace: selection))
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(period.shortcutKey, modifiers: .command)
+        .focused($focusedPeriod, equals: period)
+        .onKeyPress(.leftArrow) {
+            moveSelection(by: -1)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            moveSelection(by: 1)
+            return .handled
+        }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func select(_ period: Period) {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.45)) {
+            model.period = period
+        }
+    }
+
+    private func moveSelection(by offset: Int) {
+        let periods = Period.allCases
+        guard let index = periods.firstIndex(of: model.period) else { return }
+        let newIndex = min(max(index + offset, 0), periods.count - 1)
+        let target = periods[newIndex]
+        select(target)
+        focusedPeriod = target
+    }
+}
+
+private extension Period {
+    var shortcutKey: KeyEquivalent {
+        switch self {
+        case .day: "1"
+        case .week: "2"
+        case .month: "3"
+        case .year: "4"
+        case .all: "5"
+        }
     }
 }
 

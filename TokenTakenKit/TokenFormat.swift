@@ -12,8 +12,50 @@ public enum TokenFormat {
         return String(n)
     }
 
-    /// `$132.26`.
+    /// `$10,705.76`. Grouped and rounded in a fixed POSIX form, so the text is the same in
+    /// every locale.
     public static func usd(_ v: Double) -> String {
-        String(format: "$%.2f", v)
+        // A binary double puts 10705.755 a hair below the half cent, so round the decimal
+        // spelling instead of the double. `.plain` is half away from zero, matching how the
+        // price table's estimates are quoted.
+        guard v.isFinite, var value = Decimal(string: String(v), locale: nil) else {
+            return String(format: "$%.2f", v)
+        }
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &value, 2, .plain)
+        // Rounding a tiny negative amount must not leave `-$0.00`.
+        if rounded == 0 { rounded = 0 }
+
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.groupingSeparator = ","
+        formatter.groupingSize = 3
+        formatter.decimalSeparator = "."
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        guard let text = formatter.string(from: NSDecimalNumber(decimal: rounded)) else {
+            return String(format: "$%.2f", v)
+        }
+        // The sign sits outside the currency mark so a negative total reads `-$4.20`.
+        return text.hasPrefix("-") ? "-$" + String(text.dropFirst()) : "$" + text
+    }
+
+    /// VoiceOver-sized magnitude in the current locale: `4.3 billion`, `43亿`.
+    public static func spoken(_ n: Int64) -> String {
+        spoken(n, locale: .current)
+    }
+
+    static func spoken(_ n: Int64, locale: Locale) -> String {
+        let compact = n.formatted(.number.notation(.compactName).locale(locale))
+        // English compact notation abbreviates the magnitude (`4.3B`), which VoiceOver reads
+        // letter by letter; spell it out. Other locales already use spoken unit words.
+        guard locale.language.languageCode?.identifier == "en" else { return compact }
+        for (suffix, word) in [("T", " trillion"), ("B", " billion"), ("M", " million"), ("K", " thousand")]
+        where compact.hasSuffix(suffix) {
+            return String(compact.dropLast()) + word
+        }
+        return compact
     }
 }

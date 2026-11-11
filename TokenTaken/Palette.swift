@@ -128,17 +128,8 @@ struct WindowBackdrop: View {
                     shape
                         .fill(.clear)
                         .glassEffect(in: shape)
-                    MeshGradient(
-                        width: 3,
-                        height: 3,
-                        points: [
-                            [0, 0], [0.55, 0], [1, 0],
-                            [0, 0.5], [0.45, 0.55], [1, 0.45],
-                            [0, 1], [0.5, 1], [1, 1],
-                        ],
-                        colors: Palette.meshColors(scheme)
-                    )
-                    .opacity(opacity)
+                    MeshBackdrop.view(for: scheme)
+                        .opacity(opacity)
                     shape
                         .fill(scheme == .dark ? Color.black : Color.white)
                         .opacity(Self.scrim(for: opacity, isDark: scheme == .dark))
@@ -147,6 +138,63 @@ struct WindowBackdrop: View {
         }
         .ignoresSafeArea()
         .background { BackdropWindowConfigurator(isTransparent: isTransparent) }
+    }
+}
+
+/// The mesh is static and low-frequency, so it is rasterized once per scheme into a small image
+/// and stretched to fill (as the mesh itself stretches), instead of a window-sized drawable.
+@MainActor
+private enum MeshBackdrop {
+    private static let renderSize = CGSize(width: 96, height: 64)
+    private static var images: [ColorScheme: Image] = [:]
+
+    static func view(for scheme: ColorScheme) -> AnyView {
+        if let image = image(for: scheme) {
+            return AnyView(image.resizable().interpolation(.high))
+        }
+        return AnyView(mesh(scheme))
+    }
+
+    private static func image(for scheme: ColorScheme) -> Image? {
+        if let image = images[scheme] { return image }
+        let renderer = ImageRenderer(content: mesh(scheme).frame(width: renderSize.width, height: renderSize.height))
+        renderer.scale = 1
+        guard let cgImage = renderer.cgImage else { return nil }
+        let image = Image(decorative: cgImage, scale: 1)
+        images[scheme] = image
+        return image
+    }
+
+    private static func mesh(_ scheme: ColorScheme) -> MeshGradient {
+        MeshGradient(
+            width: 3,
+            height: 3,
+            points: [
+                [0, 0], [0.55, 0], [1, 0],
+                [0, 0.5], [0.45, 0.55], [1, 0.45],
+                [0, 1], [0.5, 1], [1, 1],
+            ],
+            colors: Palette.meshColors(scheme)
+        )
+    }
+}
+
+extension View {
+    /// Floating tooltip surface: glass normally, an opaque Palette surface with a hairline under Reduce Transparency.
+    @ViewBuilder
+    func tooltipSurface(reduceTransparency: Bool, cornerRadius: CGFloat = 11) -> some View {
+        if reduceTransparency {
+            background {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Palette.solid)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                            .strokeBorder(Palette.hairline)
+                    }
+            }
+        } else {
+            glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+        }
     }
 }
 
@@ -210,9 +258,13 @@ extension Period {
 }
 
 enum Share {
-    /// One decimal, as in the reference (`12.3%`). Zero total renders `0.0%`.
+    /// One decimal, as in the reference (`12.3%`). Zero total renders `0.0%`;
+    /// a non-zero part that would round to `0.0%` renders `<0.1%`.
     static func percent(_ part: Int64, of total: Int64) -> String {
         let ratio = total > 0 ? Double(part) / Double(total) : 0
+        if part > 0, ratio < 0.0005 {
+            return "<" + 0.001.formatted(.percent.precision(.fractionLength(1)))
+        }
         return ratio.formatted(.percent.precision(.fractionLength(1)))
     }
 

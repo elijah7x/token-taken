@@ -9,6 +9,7 @@ struct SummaryRail: View {
 
     @Environment(AppModel.self) private var model
     @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -18,12 +19,13 @@ struct SummaryRail: View {
                     .font(.system(size: 46, weight: .semibold))
                     .tracking(-1.6)
                     .monospacedDigit()
-                    .contentTransition(.numericText())
+                    .contentTransition(reduceMotion ? .identity : .numericText())
                 Text("tokens")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(Palette.muted)
             }
             .accessibilityElement(children: .combine)
+            .accessibilityValue(TokenFormat.spoken(summary.total.total))
             .padding(.top, 6)
             .padding(.bottom, 8)
 
@@ -31,7 +33,7 @@ struct SummaryRail: View {
                 Text(TokenFormat.usd(summary.cost.estimatedUSD))
                     .font(.system(size: 17, weight: .semibold))
                     .monospacedDigit()
-                    .contentTransition(.numericText())
+                    .contentTransition(reduceMotion ? .identity : .numericText())
                 Text("Estimate, not a bill")
                     .font(.system(size: 11))
                     .foregroundStyle(Palette.muted)
@@ -45,6 +47,7 @@ struct SummaryRail: View {
                     .foregroundStyle(Palette.muted)
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityValue(TokenFormat.spoken(summary.cost.unpricedTokens))
                     .padding(.top, 4)
             }
 
@@ -81,6 +84,7 @@ struct SummaryRail: View {
                         }
                         .font(.system(size: 12))
                         .accessibilityElement(children: .combine)
+                        .accessibilityValue(TokenFormat.spoken(device.counts.total))
                     }
                     // A remote Mac whose snapshot could not be read adds no rows; keep it visible, not silently absent.
                     ForEach(missingRemoteDevices, id: \.deviceID) { remote in
@@ -94,6 +98,7 @@ struct SummaryRail: View {
                                 .fixedSize()
                             Spacer(minLength: 8)
                             Text(verbatim: "–").foregroundStyle(Palette.muted)
+                                .accessibilityHidden(true)
                         }
                         .font(.system(size: 12))
                         .accessibilityElement(children: .combine)
@@ -148,18 +153,8 @@ private struct CategoryRow: View {
         }
         .font(.system(size: 12))
         .monospacedDigit()
-        // Cache reads dominate real usage; the reference sets that row on a faint pane.
-        .padding(.vertical, category == .cacheRead ? 7 : 0)
-        .padding(.horizontal, category == .cacheRead ? 8 : 0)
-        .background {
-            if category == .cacheRead {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.white.opacity(0.18))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Palette.hairline))
-            }
-        }
-        .padding(.horizontal, category == .cacheRead ? -8 : 0)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(TokenFormat.spoken(value))
     }
 }
 
@@ -208,6 +203,7 @@ struct Eyebrow: View {
             .font(.system(size: 10, weight: .medium))
             .tracking(1.3)
             .foregroundStyle(Palette.muted)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -226,7 +222,7 @@ struct BreakdownColumns: View {
             }
             VStack(alignment: .leading, spacing: 8) {
                 SectionHead(title: "Models", note: "By tokens, descending")
-                rows(summary.byModel) { rank, _ in Palette.color(forModelRank: rank) }
+                rows(summary.byModel) { _, item in modelColor(for: item.id) }
             }
         }
         .frame(maxWidth: .infinity)
@@ -244,6 +240,13 @@ struct BreakdownColumns: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 5)
             }
+            if items.count > limit {
+                Text("+\(items.count - limit) more")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 5)
+            }
         }
     }
 
@@ -252,6 +255,7 @@ struct BreakdownColumns: View {
             Circle().fill(color).frame(width: 6, height: 6)
                 .accessibilityHidden(true)
             Text(verbatim: item.name).lineLimit(1).truncationMode(.tail)
+                .accessibilityLabel(Text(verbatim: item.name))
             Spacer(minLength: 8)
             Text(TokenFormat.short(item.counts.total)).fontWeight(.medium)
             Text(Share.percent(item.counts.total, of: summary.total.total))
@@ -263,6 +267,18 @@ struct BreakdownColumns: View {
         .monospacedDigit()
         .padding(.vertical, 5)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.hairline).frame(height: 1) }
+        .help(item.name)
         .accessibilityElement(children: .combine)
+        .accessibilityValue(TokenFormat.spoken(item.counts.total))
+    }
+
+    private func modelColor(for id: String) -> Color {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in id.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        let categories = TokenCategory.allCases
+        return Palette.color(for: categories[Int(hash % UInt64(categories.count))])
     }
 }
