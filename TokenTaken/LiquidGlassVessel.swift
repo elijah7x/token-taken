@@ -22,8 +22,8 @@ struct LiquidGlassVessel: Sendable {
 
     static func wallThickness(for rect: CGRect) -> CGFloat {
         let minor = min(rect.width, rect.height)
-        guard minor > 12 else { return max(1, minor * 0.12) }
-        return min(24, min(max(4, minor * 0.04), minor * 0.20))
+        guard minor > 12 else { return max(1, minor * 0.10) }
+        return min(14, min(max(3, minor * 0.03), minor * 0.18))
     }
 
     /// Computes the `fillLevel` (`0...1`) that places `meniscusCenterY` at `surfaceY`.
@@ -52,7 +52,7 @@ struct LiquidGlassVessel: Sendable {
         let lipClimb = min(2.5 * unitScale, max(1.5, innerRect.height * 0.035))
         let meniscusHeight = min(
             max(5.0, innerRect.width * 0.10),
-            min(max(6.0, innerRect.height * 0.12), 42.0)
+            min(max(6.0, innerRect.height * 0.10), 26.0)
         )
 
         let topClearance = max(meniscusHeight * 0.5, lipClimb) + 2.0 * unitScale
@@ -211,8 +211,8 @@ struct LiquidGlassVessel: Sendable {
                     width: bandWidth,
                     height: inflow.height
                 )
-                let outerStop = inflow.color.opacity(0.35)
-                let innerStop = inflow.color.opacity(0.28)
+                let outerStop = inflow.color.opacity(0.32)
+                let innerStop = inflow.color.opacity(0.24)
                 wallContext.fill(
                     Path(passRect),
                     with: .linearGradient(
@@ -223,14 +223,16 @@ struct LiquidGlassVessel: Sendable {
                 )
             }
 
-            let wallBase = isDark ? 0.07 : 0.16
+            let wallTop = isDark ? 0.05 : 0.08
+            let wallMid = isDark ? 0.032 : 0.05
+            let wallBottom = isDark ? 0.018 : 0.03
             wallContext.fill(
                 Path(rect),
                 with: .linearGradient(
                     Gradient(stops: [
-                        .init(color: .white.opacity(wallBase * 1.48), location: 0),
-                        .init(color: .white.opacity(wallBase), location: 0.46),
-                        .init(color: .white.opacity(wallBase * 0.68), location: 1),
+                        .init(color: .white.opacity(wallTop), location: 0),
+                        .init(color: .white.opacity(wallMid), location: 0.46),
+                        .init(color: .white.opacity(wallBottom), location: 1),
                     ]),
                     startPoint: CGPoint(x: rect.midX, y: rect.minY),
                     endPoint: CGPoint(x: rect.midX, y: rect.maxY)
@@ -238,7 +240,7 @@ struct LiquidGlassVessel: Sendable {
             )
         }
 
-        // 3. Inner chamber: frosted air headspace, stratified liquid, plumes, cylindrical shading & meniscus.
+        // 3. Inner chamber: clear headspace, luminous liquid, plumes, cylindrical shading & meniscus.
         var chamberContext = context
         chamberContext.clip(to: innerPath)
 
@@ -252,22 +254,18 @@ struct LiquidGlassVessel: Sendable {
                 tilt: wobbleTilt
             )
 
-            // Faint frosted tint in the empty air headspace above the meniscus.
+            // Very faint tint in the empty air headspace so the backdrop shows through.
             if !reduceTransparency, m.meniscusCenterY > innerRect.minY + 1 {
                 chamberContext.fill(
                     meniscusCurves.airHeadspace,
                     with: .linearGradient(
                         Gradient(stops: [
-                            .init(color: .white.opacity(isDark ? 0.055 : 0.15), location: 0),
-                            .init(color: .white.opacity(isDark ? 0.024 : 0.07), location: 1),
+                            .init(color: .white.opacity(isDark ? 0.03 : 0.045), location: 0),
+                            .init(color: .white.opacity(isDark ? 0.01 : 0.015), location: 1),
                         ]),
                         startPoint: CGPoint(x: innerRect.midX, y: innerRect.minY),
                         endPoint: CGPoint(x: innerRect.midX, y: m.meniscusCenterY)
                     )
-                )
-                chamberContext.fill(
-                    meniscusCurves.airHeadspace,
-                    with: .color(Palette.ink3.opacity(isDark ? 0.02 : 0.026))
                 )
             }
 
@@ -294,16 +292,21 @@ struct LiquidGlassVessel: Sendable {
             )
 
             if !reduceTransparency {
+                let singleBodyLayer = layers.filter { $0.fraction > 0 }.count == 1
                 // Inflow & outflow diffusion plumes inside the liquid near each stream's entry height.
                 for inflow in inflows where inflow.height > 0 {
+                    // When the body already carries the dominant outflow tint, skip redundant full-height self-plume.
+                    if !inflow.fromLeft, singleBodyLayer, inflow.height >= innerRect.height * 0.45 {
+                        continue
+                    }
                     let entryMidY = inflow.y + inflow.height * 0.5
                     let radiusX = min(
-                        innerRect.width * (inflow.fromLeft ? 0.56 : 0.42),
-                        max(18 * unitScale, inflow.height * 1.4 + innerRect.width * 0.26)
+                        innerRect.width * (inflow.fromLeft ? 0.56 : 0.48),
+                        max(18 * unitScale, inflow.height * 1.5 + innerRect.width * 0.30)
                     )
                     let radiusY = max(
                         inflow.height * 0.85,
-                        min(innerRect.height * 0.26, inflow.height * 0.60 + 12 * unitScale)
+                        min(innerRect.height * 0.24, inflow.height * 0.65 + 13 * unitScale)
                     )
                     let plumeCenter = CGPoint(
                         x: inflow.fromLeft
@@ -311,7 +314,7 @@ struct LiquidGlassVessel: Sendable {
                             : innerRect.maxX - radiusX * 0.10,
                         y: entryMidY
                     )
-                    let peak = inflow.fromLeft ? 0.24 : 0.18
+                    let peak = 0.23
                     fillEllipticalGradient(
                         in: &liquidContext,
                         center: plumeCenter,
@@ -319,40 +322,41 @@ struct LiquidGlassVessel: Sendable {
                         radiusY: radiusY,
                         gradient: Gradient(stops: [
                             .init(color: inflow.color.opacity(peak), location: 0),
-                            .init(color: inflow.color.opacity(peak * 0.38), location: 0.52),
+                            .init(color: inflow.color.opacity(peak * 0.40), location: 0.54),
                             .init(color: .clear, location: 1),
                         ])
                     )
                 }
 
-                // Overall vertical depth pass (subtle top lift, deeper base).
+                // Overall vertical depth pass (luminous top lift, gentle base depth).
                 liquidContext.fill(
                     Path(innerRect),
                     with: .linearGradient(
                         Gradient(stops: [
-                            .init(color: .white.opacity(isDark ? 0.05 : 0.08), location: 0),
-                            .init(color: .clear, location: 0.36),
-                            .init(color: .black.opacity(isDark ? 0.18 : 0.12), location: 1),
+                            .init(color: .white.opacity(isDark ? 0.08 : 0.14), location: 0),
+                            .init(color: .clear, location: 0.42),
+                            .init(color: .black.opacity(isDark ? 0.08 : 0.04), location: 1),
                         ]),
                         startPoint: CGPoint(x: innerRect.midX, y: m.meniscusCenterY),
                         endPoint: CGPoint(x: innerRect.midX, y: innerRect.maxY)
                     )
                 )
 
-                // Cylindrical shading across the width: ~0.22 black multiply at 0 and 1,
-                // highlight lift around 0.32, true base in the middle.
+                // Light cylindrical shading across the width: <=0.08 black multiply at 0 and 1,
+                // gentle highlight lift around 0.32, luminous base in the middle.
+                let edgeShade = isDark ? 0.08 : 0.07
                 var cylinderMultiply = liquidContext
                 cylinderMultiply.blendMode = .multiply
                 cylinderMultiply.fill(
                     Path(innerRect),
                     with: .linearGradient(
                         Gradient(stops: [
-                            .init(color: .black.opacity(0.22), location: 0),
-                            .init(color: .black.opacity(0.05), location: 0.16),
-                            .init(color: .clear, location: 0.30),
-                            .init(color: .clear, location: 0.66),
-                            .init(color: .black.opacity(0.06), location: 0.84),
-                            .init(color: .black.opacity(0.22), location: 1),
+                            .init(color: .black.opacity(edgeShade), location: 0),
+                            .init(color: .black.opacity(edgeShade * 0.25), location: 0.14),
+                            .init(color: .clear, location: 0.28),
+                            .init(color: .clear, location: 0.70),
+                            .init(color: .black.opacity(edgeShade * 0.28), location: 0.86),
+                            .init(color: .black.opacity(edgeShade), location: 1),
                         ]),
                         startPoint: CGPoint(x: innerRect.minX, y: innerRect.midY),
                         endPoint: CGPoint(x: innerRect.maxX, y: innerRect.midY)
@@ -363,9 +367,9 @@ struct LiquidGlassVessel: Sendable {
                     Path(innerRect),
                     with: .linearGradient(
                         Gradient(stops: [
-                            .init(color: .clear, location: 0.10),
-                            .init(color: .white.opacity(isDark ? 0.13 : 0.17), location: 0.32),
-                            .init(color: .clear, location: 0.54),
+                            .init(color: .clear, location: 0.08),
+                            .init(color: .white.opacity(isDark ? 0.14 : 0.18), location: 0.32),
+                            .init(color: .clear, location: 0.58),
                         ]),
                         startPoint: CGPoint(x: innerRect.minX, y: innerRect.midY),
                         endPoint: CGPoint(x: innerRect.maxX, y: innerRect.midY)
@@ -443,21 +447,17 @@ struct LiquidGlassVessel: Sendable {
                 style: StrokeStyle(lineWidth: 1.15 * unitScale, lineCap: .round)
             )
         } else if !reduceTransparency {
-            // Empty glass chamber: subtle frosted tint throughout.
+            // Empty glass chamber: minimal tint so the backdrop shows through.
             chamberContext.fill(
                 Path(innerRect),
                 with: .linearGradient(
                     Gradient(stops: [
-                        .init(color: .white.opacity(isDark ? 0.05 : 0.14), location: 0),
-                        .init(color: .white.opacity(isDark ? 0.02 : 0.06), location: 1),
+                        .init(color: .white.opacity(isDark ? 0.03 : 0.045), location: 0),
+                        .init(color: .white.opacity(isDark ? 0.01 : 0.015), location: 1),
                     ]),
                     startPoint: CGPoint(x: innerRect.midX, y: innerRect.minY),
                     endPoint: CGPoint(x: innerRect.midX, y: innerRect.maxY)
                 )
-            )
-            chamberContext.fill(
-                Path(innerRect),
-                with: .color(Palette.ink3.opacity(isDark ? 0.02 : 0.025))
             )
         }
 
@@ -482,36 +482,36 @@ struct LiquidGlassVessel: Sendable {
             )
         }
 
-        // 5. Specular highlights (clipped to outer vessel):
+        // 5. Specular highlights:
         //    broad left vertical highlight (18% width, white 0.35->0), sharp narrow streak (2-3pt, white 0.7),
         //    faint right-edge rim light (all fading over top/bottom 15%), plus curved top-left shoulder catchlight.
         if !reduceTransparency {
-            var specularContext = context
-            specularContext.clip(to: outerPath)
+            var chamberSpecular = context
+            chamberSpecular.clip(to: innerPath)
 
             let broadX = innerRect.minX + rect.width * 0.008
             let broadWidth = max(6, rect.width * 0.18)
             let broadRect = CGRect(x: broadX, y: rect.minY, width: broadWidth, height: rect.height)
 
-            let streakWidth = 2.5 * unitScale
+            let streakWidth = 2.4 * unitScale
             let streakX = innerRect.minX + max(2 * unitScale, broadWidth * 0.18)
             let streakRect = CGRect(x: streakX, y: rect.minY, width: streakWidth, height: rect.height)
 
-            let rightRimWidth = max(3 * unitScale, rect.width * 0.055)
+            let rightRimWidth = max(3 * unitScale, innerRect.width * 0.05)
             let rightRimRect = CGRect(
-                x: innerRect.maxX - rightRimWidth * 0.65,
+                x: innerRect.maxX - rightRimWidth,
                 y: rect.minY,
                 width: rightRimWidth,
                 height: rect.height
             )
 
-            specularContext.drawLayer { layer in
+            chamberSpecular.drawLayer { layer in
                 layer.fill(
                     Path(broadRect),
                     with: .linearGradient(
                         Gradient(stops: [
-                            .init(color: .white.opacity(isDark ? 0.30 : 0.35), location: 0),
-                            .init(color: .white.opacity(isDark ? 0.12 : 0.15), location: 0.46),
+                            .init(color: .white.opacity(isDark ? 0.28 : 0.32), location: 0),
+                            .init(color: .white.opacity(isDark ? 0.10 : 0.13), location: 0.46),
                             .init(color: .clear, location: 1),
                         ]),
                         startPoint: CGPoint(x: broadRect.minX, y: broadRect.midY),
@@ -522,7 +522,7 @@ struct LiquidGlassVessel: Sendable {
                 let streakPath = Capsule().path(in: streakRect)
                 layer.fill(
                     streakPath,
-                    with: .color(.white.opacity(isDark ? 0.62 : 0.70))
+                    with: .color(.white.opacity(isDark ? 0.58 : 0.66))
                 )
 
                 layer.fill(
@@ -530,7 +530,7 @@ struct LiquidGlassVessel: Sendable {
                     with: .linearGradient(
                         Gradient(stops: [
                             .init(color: .clear, location: 0),
-                            .init(color: .white.opacity(isDark ? 0.14 : 0.22), location: 1),
+                            .init(color: .white.opacity(isDark ? 0.12 : 0.16), location: 1),
                         ]),
                         startPoint: CGPoint(x: rightRimRect.minX, y: rightRimRect.midY),
                         endPoint: CGPoint(x: rightRimRect.maxX, y: rightRimRect.midY)
@@ -555,15 +555,17 @@ struct LiquidGlassVessel: Sendable {
             }
 
             // Small curved highlight on the top-left shoulder.
+            var shoulderContext = context
+            shoulderContext.clip(to: outerPath)
             let shoulderInset = m.wallThickness * 0.50
             let shoulderRect = rect.insetBy(dx: shoulderInset, dy: shoulderInset)
             let shoulderRadius = max(4, min(m.outerCornerRadius - shoulderInset, min(shoulderRect.width, shoulderRect.height) * 0.42))
             let shoulderStart = CGPoint(
                 x: shoulderRect.minX,
-                y: shoulderRect.minY + shoulderRadius * 0.95
+                y: shoulderRect.minY + shoulderRadius * 0.90
             )
             let shoulderEnd = CGPoint(
-                x: shoulderRect.minX + shoulderRadius * 0.95,
+                x: shoulderRect.minX + shoulderRadius * 0.90,
                 y: shoulderRect.minY
             )
             var shoulderArc = Path()
@@ -575,38 +577,24 @@ struct LiquidGlassVessel: Sendable {
                     y: shoulderRect.minY + shoulderRadius * 0.10
                 )
             )
-            specularContext.stroke(
+            shoulderContext.stroke(
                 shoulderArc,
                 with: .linearGradient(
                     Gradient(stops: [
-                        .init(color: .white.opacity(0.06), location: 0),
-                        .init(color: .white.opacity(isDark ? 0.58 : 0.76), location: 0.45),
-                        .init(color: .white.opacity(0.08), location: 1),
+                        .init(color: .white.opacity(0.04), location: 0),
+                        .init(color: .white.opacity(isDark ? 0.48 : 0.60), location: 0.45),
+                        .init(color: .white.opacity(0.05), location: 1),
                     ]),
                     startPoint: shoulderStart,
                     endPoint: shoulderEnd
                 ),
-                style: StrokeStyle(lineWidth: 1.7 * unitScale, lineCap: .round)
+                style: StrokeStyle(lineWidth: 1.3 * unitScale, lineCap: .round)
             )
         }
 
-        // 6. Faint inner rim & crisp 1pt outer rim (ink 0.12 light / white 0.16 dark).
+        // 6. Crisp 1pt outer rim only (inner hairline reserved for Reduce Transparency).
         if reduceTransparency {
             context.stroke(innerPath, with: .color(Palette.hairline), lineWidth: 1.0 * unitScale)
-        } else {
-            context.stroke(
-                innerPath,
-                with: .linearGradient(
-                    Gradient(stops: [
-                        .init(color: .white.opacity(isDark ? 0.16 : 0.28), location: 0),
-                        .init(color: .white.opacity(isDark ? 0.06 : 0.12), location: 0.5),
-                        .init(color: Palette.ink1.opacity(isDark ? 0.08 : 0.06), location: 1),
-                    ]),
-                    startPoint: CGPoint(x: innerRect.midX, y: innerRect.minY),
-                    endPoint: CGPoint(x: innerRect.midX, y: innerRect.maxY)
-                ),
-                lineWidth: 0.75 * unitScale
-            )
         }
 
         let outerStrokeWidth = 1.0 * unitScale
@@ -781,15 +769,18 @@ struct LiquidGlassVessel: Sendable {
     ) -> Color {
         let d = min(max(depth, 0), 1)
         if reduceTransparency {
-            let darken = (isDark ? 0.14 : 0.08) + d * 0.10
-            return base.mix(with: .black, by: darken)
+            let lift = (1 - d) * (isDark ? 0.06 : 0.10)
+            let deepen = d * (isDark ? 0.08 : 0.05)
+            return base
+                .mix(with: .white, by: lift)
+                .mix(with: .black, by: deepen)
         }
-        let lift = (1 - d) * (isDark ? 0.06 : 0.10)
-        let deepen = d * (isDark ? 0.18 : 0.12)
+        let lift = (1 - d) * (isDark ? 0.10 : 0.16)
+        let deepen = d * (isDark ? 0.06 : 0.02)
         let pigmented = base
             .mix(with: .white, by: lift)
             .mix(with: .black, by: deepen)
-        let alpha = (isDark ? 0.76 : 0.78) + d * (isDark ? 0.12 : 0.10)
+        let alpha = (isDark ? 0.64 : 0.62) + d * 0.12
         return pigmented.opacity(alpha)
     }
 

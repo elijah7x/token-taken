@@ -710,7 +710,7 @@ struct ShareCardData {
     let estimatedUSD: Double
 
     private static let overallSkyColor = Color(light: "#3A9BE0", dark: "#5BB2F0")
-    private static let mergedStratumColor = Color(light: "#6E7D92", dark: "#8494AB")
+    fileprivate static let mergedStratumColor = Color(light: "#6E7D92", dark: "#8494AB")
 
     init(summary: UsageSummary, scope: ShareScope, scopedSummary: UsageSummary? = nil) {
         self.summary = summary
@@ -797,11 +797,11 @@ struct ShareCardData {
         }
     }
 
-    /// Stratified layers sorted descending by token count (index 0 is thickest at the bottom).
-    var strata: [Stratum] {
+    /// All positive strata sorted descending by token count before any tail merging.
+    fileprivate var unmergedStrata: [Stratum] {
         switch kind {
         case .overall:
-            let items = activeSources.map { source in
+            return activeSources.map { source in
                 Stratum(
                     id: source.id,
                     label: .verbatim(source.name, monospaced: false),
@@ -809,7 +809,6 @@ struct ShareCardData {
                     color: Palette.color(forSource: source.id)
                 )
             }
-            return Self.mergeTail(items, limit: 5)
 
         case .source:
             let models = resolvedModelsForSource
@@ -817,7 +816,7 @@ struct ShareCardData {
                 return categoryStrata
             }
             let palette = Palette.modelColors(for: summary.byModel.map(\.id) + models.map(\.id))
-            let items = models.map { item in
+            return models.map { item in
                 Stratum(
                     id: item.id,
                     label: .verbatim(item.name, monospaced: true),
@@ -825,14 +824,13 @@ struct ShareCardData {
                     color: palette[item.id] ?? Palette.color(for: .output)
                 )
             }
-            return Self.mergeTail(items, limit: 4)
 
         case .model:
             let sources = resolvedSourcesForModel
             guard !sources.isEmpty else {
                 return categoryStrata
             }
-            let items = sources.map { source in
+            return sources.map { source in
                 Stratum(
                     id: source.id,
                     label: .verbatim(source.name, monospaced: false),
@@ -840,8 +838,16 @@ struct ShareCardData {
                     color: Palette.color(forSource: source.id)
                 )
             }
-            return Self.mergeTail(items, limit: 4)
         }
+    }
+
+    /// Stratified layers sorted descending by token count (index 0 is thickest at the bottom).
+    var strata: [Stratum] {
+        let limit = switch kind {
+        case .overall: 5
+        case .source, .model: 4
+        }
+        return Self.mergeTail(unmergedStrata, limit: limit)
     }
 
     /// Exactly 3 supporting facts matching the Tide Line mockup for each scope.
@@ -1025,15 +1031,16 @@ private struct TideGeometry {
         let stratum: ShareCardData.Stratum
         let minY: CGFloat
         let maxY: CGFloat
-        let anchorY: CGFloat
         let inlineMidY: CGFloat?
-        let externalMidY: CGFloat?
-        let leaderPath: Path?
+        let nameFontSize: CGFloat
+        let valueFontSize: CGFloat
     }
 
     let canvasSize: CGSize
     let horizontalMargin: CGFloat
     let verticalMargin: CGFloat
+    let footerBottomPadding: CGFloat
+    let leftColumnWidth: CGFloat
     let vesselRect: CGRect
     let vesselCornerRadius: CGFloat
     let innerRect: CGRect
@@ -1044,48 +1051,58 @@ private struct TideGeometry {
     let meniscusHeight: CGFloat
     let strataTotalTokens: Int64
     let bands: [Band]
-    let hasExternalLabels: Bool
-    let calloutX: CGFloat
-    let calloutWidth: CGFloat
-    let footerSubmerged: Bool
 
     private static let inlineMinLayerHeight: CGFloat = 44
+    private static let minCardLabelSize: CGFloat = 22
 
     init(data: ShareCardData, aspect: ShareAspect, showComposition: Bool) {
         let size = aspect.canvasSize
         self.canvasSize = size
 
-        let hMargin: CGFloat
-        let vMargin: CGFloat
-        let vesselTopY: CGFloat
-        let vesselBottomY: CGFloat
+        let hMargin: CGFloat = 76
+        let vMargin: CGFloat = 72
+        let footerPad: CGFloat = 24
         let cornerRadius: CGFloat
-        let reservedCalloutWidth: CGFloat
-        let leaderGap: CGFloat
+        let resolvedVesselRect: CGRect
+        let leftColWidth: CGFloat
 
         switch aspect {
         case .portrait:
-            hMargin = 84
-            vMargin = 76
-            vesselTopY = 716
-            vesselBottomY = size.height - vMargin - 52
-            cornerRadius = 46
-            reservedCalloutWidth = 296
-            leaderGap = 32
+            let contentWidth = size.width - hMargin * 2
+            let topY: CGFloat = 636
+            let bottomY: CGFloat = size.height - 76
+            cornerRadius = 44
+            resolvedVesselRect = CGRect(
+                x: hMargin,
+                y: topY,
+                width: contentWidth,
+                height: max(80, bottomY - topY)
+            )
+            leftColWidth = contentWidth
+
         case .landscape:
-            hMargin = 80
-            vMargin = 72
-            vesselTopY = 516
-            vesselBottomY = size.height - vMargin - 46
+            let contentWidth = size.width - hMargin * 2
+            let vesselWidth = (contentWidth * 0.55).rounded()
+            let vesselX = size.width - hMargin - vesselWidth
+            let topY: CGFloat = data.isPartialScope ? (vMargin + 44) : vMargin
+            let bottomY: CGFloat = size.height - 76
+            let columnGap: CGFloat = 52
             cornerRadius = 42
-            reservedCalloutWidth = 384
-            leaderGap = 36
+            resolvedVesselRect = CGRect(
+                x: vesselX,
+                y: topY,
+                width: vesselWidth,
+                height: max(80, bottomY - topY)
+            )
+            leftColWidth = max(320, vesselX - hMargin - columnGap)
         }
 
         self.horizontalMargin = hMargin
         self.verticalMargin = vMargin
+        self.footerBottomPadding = footerPad
+        self.leftColumnWidth = leftColWidth
         self.vesselCornerRadius = cornerRadius
-        self.footerSubmerged = false
+        self.vesselRect = resolvedVesselRect
 
         let effectiveFill: Double
         if data.counts.total <= 0 {
@@ -1097,15 +1114,58 @@ private struct TideGeometry {
         }
         self.fillLevel = effectiveFill
 
-        let strata = data.strata
-        let sum = strata.reduce(Int64(0)) { $0 + $1.tokens }
-        self.strataTotalTokens = max(sum, data.counts.total)
+        let rawItems = data.unmergedStrata
+        let rawSum = rawItems.reduce(Int64(0)) { $0 + $1.tokens }
+        self.strataTotalTokens = max(rawSum, data.counts.total)
 
+        let baseMetrics = LiquidGlassVessel.metrics(
+            for: resolvedVesselRect,
+            cornerRadius: cornerRadius,
+            layers: effectiveFill > 0
+                ? [LiquidGlassVessel.Layer(color: data.accentColor, fraction: effectiveFill)]
+                : [],
+            fillLevel: effectiveFill
+        )
+        let liquidTotalHeight = max(0, baseMetrics.innerRect.maxY - baseMetrics.meniscusCenterY)
+
+        // Merge strata shorter than 44pt into a single "Other N" layer so no external micro labels remain.
+        let resolvedStrata: [ShareCardData.Stratum]
+        if showComposition, effectiveFill > 0, !rawItems.isEmpty, rawSum > 0, liquidTotalHeight > 0 {
+            var tall: [ShareCardData.Stratum] = []
+            var thin: [ShareCardData.Stratum] = []
+            for item in rawItems {
+                let proposedHeight = liquidTotalHeight * CGFloat(item.tokens) / CGFloat(rawSum)
+                if proposedHeight >= Self.inlineMinLayerHeight {
+                    tall.append(item)
+                } else {
+                    thin.append(item)
+                }
+            }
+            if thin.count >= 2 {
+                let mergedTokens = thin.reduce(Int64(0)) { $0 + $1.tokens }
+                var combined = tall
+                if mergedTokens > 0 {
+                    combined.append(ShareCardData.Stratum(
+                        id: "others",
+                        label: .localized("Other \(thin.count)"),
+                        tokens: mergedTokens,
+                        color: ShareCardData.mergedStratumColor
+                    ))
+                }
+                resolvedStrata = combined
+            } else {
+                resolvedStrata = rawItems
+            }
+        } else {
+            resolvedStrata = rawItems
+        }
+
+        let sum = resolvedStrata.reduce(Int64(0)) { $0 + $1.tokens }
         let layers: [LiquidGlassVessel.Layer]
         if effectiveFill <= 0 {
             layers = []
-        } else if showComposition, !strata.isEmpty, sum > 0 {
-            layers = strata.map { item in
+        } else if showComposition, !resolvedStrata.isEmpty, sum > 0 {
+            layers = resolvedStrata.map { item in
                 LiquidGlassVessel.Layer(
                     color: item.color,
                     fraction: (Double(item.tokens) / Double(sum)) * effectiveFill
@@ -1116,185 +1176,75 @@ private struct TideGeometry {
         }
         self.vesselLayers = layers
 
-        let fullContentWidth = size.width - hMargin * 2
-        let vesselHeight = max(80, vesselBottomY - vesselTopY)
-        let fullVesselRect = CGRect(
-            x: hMargin,
-            y: vesselTopY,
-            width: fullContentWidth,
-            height: vesselHeight
-        )
-        let probeMetrics = LiquidGlassVessel.metrics(
-            for: fullVesselRect,
+        let finalMetrics = LiquidGlassVessel.metrics(
+            for: resolvedVesselRect,
             cornerRadius: cornerRadius,
             layers: layers,
             fillLevel: effectiveFill
         )
-
-        let needsExternal: Bool
-        if showComposition, effectiveFill > 0, !strata.isEmpty, sum > 0 {
-            needsExternal = probeMetrics.layerRanges.contains { range in
-                (range.upperBound - range.lowerBound) < Self.inlineMinLayerHeight
-            }
-        } else {
-            needsExternal = false
-        }
-        self.hasExternalLabels = needsExternal
-
-        let resolvedVesselRect: CGRect
-        if needsExternal {
-            let narrowedWidth = max(320, fullContentWidth - reservedCalloutWidth - leaderGap)
-            resolvedVesselRect = CGRect(
-                x: hMargin,
-                y: vesselTopY,
-                width: narrowedWidth,
-                height: vesselHeight
-            )
-            self.calloutX = resolvedVesselRect.maxX + leaderGap
-            self.calloutWidth = max(160, size.width - hMargin - (resolvedVesselRect.maxX + leaderGap))
-        } else {
-            resolvedVesselRect = fullVesselRect
-            self.calloutX = fullVesselRect.maxX
-            self.calloutWidth = 0
-        }
-        self.vesselRect = resolvedVesselRect
-
-        let finalMetrics = needsExternal
-            ? LiquidGlassVessel.metrics(
-                for: resolvedVesselRect,
-                cornerRadius: cornerRadius,
-                layers: layers,
-                fillLevel: effectiveFill
-            )
-            : probeMetrics
 
         self.innerRect = finalMetrics.innerRect
         self.brimY = finalMetrics.brimCenterY
         self.meniscusY = finalMetrics.meniscusCenterY
         self.meniscusHeight = finalMetrics.meniscusHeight
 
-        guard showComposition, effectiveFill > 0, !strata.isEmpty, sum > 0 else {
+        guard showComposition, effectiveFill > 0, !resolvedStrata.isEmpty, sum > 0 else {
             self.bands = []
             return
         }
 
-        struct RawBand {
-            let index: Int
-            let item: ShareCardData.Stratum
-            let minY: CGFloat
-            let maxY: CGFloat
-            let anchorY: CGFloat
-            let inlineMidY: CGFloat?
-        }
+        let maxNameSize: CGFloat = aspect == .portrait ? 33 : 31
+        var computedBands: [Band] = []
+        computedBands.reserveCapacity(resolvedStrata.count)
 
-        var rawBands: [RawBand] = []
-        rawBands.reserveCapacity(strata.count)
-
-        for (index, item) in strata.enumerated() {
+        for (index, item) in resolvedStrata.enumerated() {
             let range = index < finalMetrics.layerRanges.count
                 ? finalMetrics.layerRanges[index]
                 : finalMetrics.meniscusCenterY...finalMetrics.meniscusCenterY
             let bandMinY = range.lowerBound
             let bandMaxY = range.upperBound
             let bandHeight = bandMaxY - bandMinY
-            let anchorY = (bandMinY + bandMaxY) * 0.5
 
             let inlineMidY: CGFloat?
+            let nameSize: CGFloat
+            let valueSize: CGFloat
+
             if bandHeight >= Self.inlineMinLayerHeight {
-                if index == strata.count - 1 {
+                if index == resolvedStrata.count - 1 {
                     let topClear = min(
-                        finalMetrics.meniscusHeight * 0.42,
-                        max(0, bandHeight - 42) * 0.5
+                        finalMetrics.meniscusHeight * 0.24,
+                        max(0, bandHeight - 34) * 0.45
                     )
                     inlineMidY = (bandMinY + topClear + bandMaxY) * 0.5
                 } else {
-                    inlineMidY = anchorY
+                    inlineMidY = (bandMinY + bandMaxY) * 0.5
                 }
+
+                if bandHeight >= 84 {
+                    nameSize = maxNameSize
+                } else {
+                    let t = min(max((bandHeight - Self.inlineMinLayerHeight) / 40, 0), 1)
+                    nameSize = (24 + t * (maxNameSize - 24)).rounded()
+                }
+                valueSize = max(Self.minCardLabelSize, nameSize - 2)
             } else {
                 inlineMidY = nil
+                nameSize = 24
+                valueSize = Self.minCardLabelSize
             }
 
-            rawBands.append(RawBand(
-                index: index,
-                item: item,
+            computedBands.append(Band(
+                id: item.id,
+                stratum: item,
                 minY: bandMinY,
                 maxY: bandMaxY,
-                anchorY: anchorY,
-                inlineMidY: inlineMidY
+                inlineMidY: inlineMidY,
+                nameFontSize: nameSize,
+                valueFontSize: valueSize
             ))
         }
 
-        let externalSorted = rawBands
-            .filter { $0.inlineMidY == nil }
-            .sorted { $0.anchorY < $1.anchorY }
-
-        var externalCentersByIndex: [Int: CGFloat] = [:]
-        if !externalSorted.isEmpty {
-            let rowPitch: CGFloat = aspect == .portrait ? 58 : 52
-            let minCenter = resolvedVesselRect.minY + 28
-            let maxCenter = resolvedVesselRect.maxY - 28
-            let spreadCenters = Self.spread(
-                externalSorted.map(\.anchorY),
-                minimum: minCenter,
-                maximum: max(minCenter, maxCenter),
-                gap: rowPitch
-            )
-            for (offset, entry) in externalSorted.enumerated() {
-                externalCentersByIndex[entry.index] = spreadCenters[offset]
-            }
-        }
-
-        let resolvedCalloutX = self.calloutX
-        self.bands = rawBands.map { raw in
-            let extY = externalCentersByIndex[raw.index]
-            var leader: Path?
-            if let extY {
-                var path = Path()
-                path.move(to: CGPoint(x: resolvedVesselRect.maxX + 4, y: raw.anchorY))
-                path.addLine(to: CGPoint(x: resolvedCalloutX - 10, y: extY))
-                leader = path
-            }
-            return Band(
-                id: raw.item.id,
-                stratum: raw.item,
-                minY: raw.minY,
-                maxY: raw.maxY,
-                anchorY: raw.anchorY,
-                inlineMidY: raw.inlineMidY,
-                externalMidY: extY,
-                leaderPath: leader
-            )
-        }
-    }
-
-    private static func spread(
-        _ proposed: [CGFloat],
-        minimum: CGFloat,
-        maximum: CGFloat,
-        gap: CGFloat
-    ) -> [CGFloat] {
-        guard !proposed.isEmpty else { return [] }
-        if proposed.count == 1 {
-            return [min(max(proposed[0], minimum), max(minimum, maximum))]
-        }
-        var result = proposed
-        result[0] = max(result[0], minimum)
-        for index in 1..<result.count {
-            result[index] = max(result[index], result[index - 1] + gap)
-        }
-        if let last = result.indices.last, result[last] > maximum {
-            result[last] = max(minimum, maximum)
-            for index in stride(from: result.count - 2, through: 0, by: -1) {
-                result[index] = min(result[index], result[index + 1] - gap)
-            }
-        }
-        if result[0] < minimum {
-            let shift = minimum - result[0]
-            for index in result.indices {
-                result[index] += shift
-            }
-        }
-        return result
+        self.bands = computedBands
     }
 }
 
@@ -1326,7 +1276,7 @@ struct ShareCardView: View {
             case .portrait:
                 portraitTopContent(geometry: geometry)
             case .landscape:
-                landscapeTopContent(geometry: geometry)
+                landscapeLeftColumn(geometry: geometry)
             }
 
             if data.isPartialScope {
@@ -1342,74 +1292,81 @@ struct ShareCardView: View {
         .frame(width: aspect.canvasSize.width, height: aspect.canvasSize.height)
     }
 
-    // MARK: - Top content layouts
+    // MARK: - Top & side content layouts
 
     private func portraitTopContent(geometry: TideGeometry) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             cardHeader
 
             scopeRow
-                .padding(.top, 64)
+                .padding(.top, 44)
 
-            heroBlock(numberSize: 180, unitSize: 90, tokenLabelSize: 42)
-                .padding(.top, 20)
+            heroBlock(numberSize: 172, unitSize: 86, tokenLabelSize: 40)
+                .padding(.top, 16)
 
             if showCost {
-                costRow(amountSize: 40, noteSize: 33)
-                    .padding(.top, 16)
+                costRow(amountSize: 38, noteSize: 32)
+                    .padding(.top, 12)
             }
 
             portraitSupportingFacts
-                .padding(.top, 40)
+                .padding(.top, 30)
         }
         .padding(.horizontal, geometry.horizontalMargin)
         .padding(.top, geometry.verticalMargin)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    private func landscapeTopContent(geometry: TideGeometry) -> some View {
+    private func landscapeLeftColumn(geometry: TideGeometry) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            cardHeader
+            landscapeHeader
 
-            HStack(alignment: .top, spacing: 56) {
-                VStack(alignment: .leading, spacing: 0) {
-                    scopeRow
+            scopeRow
+                .padding(.top, 46)
 
-                    heroBlock(numberSize: 148, unitSize: 74, tokenLabelSize: 38)
-                        .padding(.top, 18)
+            heroBlock(numberSize: 144, unitSize: 72, tokenLabelSize: 36)
+                .padding(.top, 18)
 
-                    if showCost {
-                        costRow(amountSize: 36, noteSize: 30)
-                            .padding(.top, 14)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                landscapeSupportingFacts
-                    .frame(width: 480)
-                    .padding(.top, 4)
+            if showCost {
+                costRow(amountSize: 36, noteSize: 30)
+                    .padding(.top, 14)
             }
-            .padding(.top, 46)
+
+            Spacer(minLength: 24)
+
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 2)
+
+            landscapeSupportingFacts
+                .padding(.top, 24)
         }
-        .padding(.horizontal, geometry.horizontalMargin)
-        .padding(.top, geometry.verticalMargin)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(
+            width: geometry.leftColumnWidth,
+            height: max(320, geometry.vesselRect.maxY - geometry.verticalMargin),
+            alignment: .topLeading
+        )
+        .offset(x: geometry.horizontalMargin, y: geometry.verticalMargin)
     }
 
     // MARK: - Header, Scope, Hero, Cost, Supporting Facts
 
+    private var wordmarkRow: some View {
+        HStack(alignment: .center, spacing: 15) {
+            ShareDropGlyph()
+                .frame(width: 36, height: 42)
+                .accessibilityHidden(true)
+
+            Text(verbatim: "Token Taken")
+                .font(.system(size: 35, weight: .semibold))
+                .tracking(-0.4)
+                .foregroundStyle(Palette.ink1)
+        }
+    }
+
     private var cardHeader: some View {
         HStack(alignment: .center, spacing: 24) {
-            HStack(alignment: .center, spacing: 15) {
-                ShareDropGlyph()
-                    .frame(width: 36, height: 42)
-                    .accessibilityHidden(true)
-
-                Text(verbatim: "Token Taken")
-                    .font(.system(size: 35, weight: .semibold))
-                    .tracking(-0.4)
-                    .foregroundStyle(Palette.ink1)
-            }
+            wordmarkRow
 
             Spacer(minLength: 20)
 
@@ -1418,6 +1375,19 @@ struct ShareCardView: View {
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .lineLimit(1)
+        }
+    }
+
+    private var landscapeHeader: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            wordmarkRow
+
+            Text(periodDescription)
+                .font(.system(size: 31, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.80)
         }
     }
 
@@ -1497,14 +1467,14 @@ struct ShareCardView: View {
             ForEach(data.supportingFacts) { fact in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(fact.label)
-                        .font(.system(size: 29, weight: .medium))
+                        .font(.system(size: 28, weight: .medium))
                         .foregroundStyle(Palette.ink2)
                         .lineLimit(1)
 
                     Text(verbatim: fact.value)
                         .font(fact.isMonospacedValue
-                            ? .system(size: 38, weight: .semibold, design: .monospaced)
-                            : .system(size: 42, weight: .semibold))
+                            ? .system(size: 37, weight: .semibold, design: .monospaced)
+                            : .system(size: 40, weight: .semibold))
                         .foregroundStyle(Palette.ink1)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -1545,8 +1515,8 @@ struct ShareCardView: View {
 
     @ViewBuilder
     private func brimAndShareCallouts(geometry: TideGeometry) -> some View {
-        let labelHeight: CGFloat = 38
-        let topCalloutBottomY = geometry.vesselRect.minY - 12
+        let labelHeight: CGFloat = 36
+        let topCalloutBottomY = geometry.vesselRect.minY - 10
         let shareText = Share.percent(data.counts.total, of: data.summary.total.total)
         let meniscusTopY = geometry.meniscusY - geometry.meniscusHeight * 0.5
         let insideHeadspaceClear = meniscusTopY - geometry.brimY >= 68
@@ -1554,14 +1524,14 @@ struct ShareCardView: View {
             ? min(meniscusTopY - 12, geometry.innerRect.maxY - 24)
             : topCalloutBottomY
         let shareX: CGFloat = insideHeadspaceClear
-            ? geometry.innerRect.minX + 28
+            ? geometry.innerRect.minX + 30
             : geometry.vesselRect.minX
 
         ZStack(alignment: .topLeading) {
             HStack {
                 Spacer(minLength: 0)
                 brimPeriodTotalText
-                    .font(.system(size: 29, weight: .medium))
+                    .font(.system(size: 28, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -1570,7 +1540,7 @@ struct ShareCardView: View {
             .offset(x: geometry.vesselRect.minX, y: topCalloutBottomY - labelHeight)
 
             Text(verbatim: shareText)
-                .font(.system(size: 29, weight: .semibold))
+                .font(.system(size: 28, weight: .semibold))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -1580,65 +1550,32 @@ struct ShareCardView: View {
     }
 
     private func inlineStrataLabels(geometry: TideGeometry) -> some View {
-        let inlineInsetX: CGFloat = 30
+        let inlineInsetX: CGFloat = 32
         let inlineWidth = max(120, geometry.innerRect.width - inlineInsetX * 2)
-        let inlineNameSize: CGFloat = switch (aspect, geometry.hasExternalLabels) {
-        case (.portrait, true): 29
-        case (.portrait, false): 33
-        case (.landscape, _): 31
-        }
-        let inlineValueSize: CGFloat = inlineNameSize - 3
-        let inlineRowHeight: CGFloat = 42
-
-        let externalNameSize: CGFloat = aspect == .portrait ? 25 : 26
-        let externalValueSize: CGFloat = aspect == .portrait ? 22 : 23
-        let externalRowHeight: CGFloat = 54
 
         return ZStack(alignment: .topLeading) {
             ForEach(geometry.bands) { band in
                 if let midY = band.inlineMidY {
+                    let rowHeight = max(32, min(44, band.maxY - band.minY - 4))
                     HStack(alignment: .firstTextBaseline, spacing: 20) {
-                        stratumNameText(band.stratum.label, size: inlineNameSize)
+                        stratumNameText(band.stratum.label, size: band.nameFontSize)
                             .foregroundStyle(Color.white)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.82)
+                            .minimumScaleFactor(0.85)
                             .truncationMode(.middle)
 
                         Spacer(minLength: 14)
 
                         Text(verbatim: "\(Share.percent(band.stratum.tokens, of: geometry.strataTotalTokens)) · \(TokenFormat.short(band.stratum.tokens))")
-                            .font(.system(size: inlineValueSize, weight: .semibold))
-                            .foregroundStyle(Color.white.opacity(0.92))
+                            .font(.system(size: band.valueFontSize, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.95))
                             .monospacedDigit()
                             .lineLimit(1)
                             .fixedSize()
                     }
-                    .shadow(color: .black.opacity(reduceTransparency ? 0 : 0.28), radius: 4, x: 0, y: 1.5)
-                    .frame(width: inlineWidth, height: inlineRowHeight, alignment: .center)
-                    .offset(x: geometry.innerRect.minX + inlineInsetX, y: midY - inlineRowHeight / 2)
-                } else if let extMidY = band.externalMidY, geometry.calloutWidth > 0 {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .center, spacing: 10) {
-                            Circle()
-                                .fill(band.stratum.color)
-                                .frame(width: 12, height: 12)
-
-                            stratumNameText(band.stratum.label, size: externalNameSize)
-                                .foregroundStyle(Palette.ink1)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.82)
-                                .truncationMode(.middle)
-                        }
-
-                        Text(verbatim: "\(Share.percent(band.stratum.tokens, of: geometry.strataTotalTokens)) · \(TokenFormat.short(band.stratum.tokens))")
-                            .font(.system(size: externalValueSize, weight: .medium))
-                            .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .padding(.leading, 22)
-                    }
-                    .frame(width: geometry.calloutWidth, height: externalRowHeight, alignment: .leading)
-                    .offset(x: geometry.calloutX, y: extMidY - externalRowHeight / 2)
+                    .shadow(color: .black.opacity(reduceTransparency ? 0 : 0.34), radius: 5, x: 0, y: 1.5)
+                    .frame(width: inlineWidth, height: rowHeight, alignment: .center)
+                    .offset(x: geometry.innerRect.minX + inlineInsetX, y: midY - rowHeight / 2)
                 }
             }
         }
@@ -1650,37 +1587,28 @@ struct ShareCardView: View {
         case .verbatim(let text, let monospaced):
             Text(verbatim: text)
                 .font(monospaced
-                    ? .system(size: size - 1, weight: .semibold, design: .monospaced)
-                    : .system(size: size, weight: .semibold))
+                    ? .system(size: max(22, size - 1), weight: .semibold, design: .monospaced)
+                    : .system(size: max(22, size), weight: .semibold))
         case .localized(let key):
             Text(key)
-                .font(.system(size: size, weight: .semibold))
+                .font(.system(size: max(22, size), weight: .semibold))
         }
     }
 
     private func footerDateOverlay(geometry: TideGeometry) -> some View {
         let dateText = Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day())
-        let inkColor: Color = geometry.footerSubmerged
-            ? Color.white.opacity(isDark ? 0.78 : 0.86)
-            : Palette.ink3
 
         return VStack {
             Spacer(minLength: 0)
             HStack {
                 Spacer(minLength: 0)
                 Text(verbatim: dateText)
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(inkColor)
+                    .font(.system(size: 25, weight: .medium))
+                    .foregroundStyle(Palette.ink3)
                     .monospacedDigit()
-                    .shadow(
-                        color: .black.opacity(geometry.footerSubmerged && !reduceTransparency ? 0.16 : 0),
-                        radius: 2,
-                        x: 0,
-                        y: 1
-                    )
             }
             .padding(.horizontal, geometry.horizontalMargin)
-            .padding(.bottom, geometry.verticalMargin)
+            .padding(.bottom, geometry.footerBottomPadding)
         }
         .frame(width: geometry.canvasSize.width, height: geometry.canvasSize.height)
     }
@@ -1894,29 +1822,7 @@ private struct ShareTideVesselCanvas: View {
                 )
             }
 
-            // 4. Leader lines to beside-vessel callouts for layers shorter than 44pt.
-            if showComposition {
-                for band in geometry.bands {
-                    guard let leader = band.leaderPath else { continue }
-                    let anchorDot = CGRect(
-                        x: geometry.vesselRect.maxX + 1,
-                        y: band.anchorY - 3,
-                        width: 6,
-                        height: 6
-                    )
-                    context.fill(
-                        Path(ellipseIn: anchorDot),
-                        with: .color(band.stratum.color.opacity(isDark ? 0.85 : 0.78))
-                    )
-                    context.stroke(
-                        leader,
-                        with: .color(band.stratum.color.opacity(isDark ? 0.72 : 0.62)),
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 6])
-                    )
-                }
-            }
-
-            // 5. Outer card border rim.
+            // 4. Outer card border rim.
             if !reduceTransparency {
                 let rimRect = fullRect.insetBy(dx: 1.5, dy: 1.5)
                 context.stroke(

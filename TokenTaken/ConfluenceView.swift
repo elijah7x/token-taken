@@ -191,17 +191,6 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
             .accessibilityHidden(true)
 
-            if !reduceTransparency {
-                let glassShape = RoundedRectangle(cornerRadius: current.reservoirCorner, style: .continuous)
-                glassShape
-                    .fill(.clear)
-                    .frame(width: current.reservoir.width, height: current.reservoir.height)
-                    .glassEffect(.clear, in: glassShape)
-                    .position(x: current.reservoir.midX, y: current.reservoir.midY)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-
             if wobbleActive {
                 TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
                     vesselCanvas(
@@ -966,31 +955,24 @@ private struct ConfluenceLayout {
         if isEmpty || fill <= 0 {
             vesselLayers = []
         } else {
-            let weightedCategories = categoryDescriptors.enumerated().compactMap { offset, desc -> (String, Color, Double)? in
-                let value = Self.animatedValue(for: desc, at: offset, in: values)
-                guard value > 0 else { return nil }
-                return (desc.target.id, desc.color, value)
-            }
-            .sorted { lhs, rhs in
-                lhs.2 == rhs.2 ? lhs.0 < rhs.0 : lhs.2 > rhs.2
-            }
-
-            if !weightedCategories.isEmpty {
-                let sum = weightedCategories.reduce(0.0) { $0 + $1.2 }
-                vesselLayers = weightedCategories.map { item in
-                    LiquidGlassVessel.Layer(
-                        color: item.1,
-                        fraction: (item.2 / max(1e-9, sum)) * fill
-                    )
+            let dominantColor = categoryDescriptors
+                .enumerated()
+                .compactMap { offset, desc -> (String, Color, Double)? in
+                    let value = Self.animatedValue(for: desc, at: offset, in: values)
+                    guard value > 0 else { return nil }
+                    return (desc.target.id, desc.color, value)
                 }
-            } else {
-                vesselLayers = [
-                    LiquidGlassVessel.Layer(
-                        color: Palette.color(for: .cacheRead),
-                        fraction: fill
-                    ),
-                ]
-            }
+                .max { lhs, rhs in
+                    lhs.2 == rhs.2 ? lhs.0 > rhs.0 : lhs.2 < rhs.2
+                }?
+                .1 ?? Palette.color(for: .cacheRead)
+
+            vesselLayers = [
+                LiquidGlassVessel.Layer(
+                    color: dominantColor,
+                    fraction: fill
+                ),
+            ]
         }
 
         sources = Self.makeStreams(
