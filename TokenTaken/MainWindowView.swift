@@ -67,6 +67,7 @@ struct MainWindowView: View {
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dimension: BreakdownDimension = .sources
+    @State private var isPresentingShare = false
 
     private var isFirstLaunchCollecting: Bool {
         model.isEmpty && refreshCoordinator?.isRefreshing == true
@@ -93,6 +94,9 @@ struct MainWindowView: View {
         .background { WindowBackdrop(theme: settings.theme, transparency: settings.interfaceTransparency) }
         .ignoresSafeArea(.container, edges: .top)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: router.route)
+        .sheet(isPresented: $isPresentingShare) {
+            ShareExportSheet()
+        }
     }
 
     @ViewBuilder
@@ -105,10 +109,14 @@ struct MainWindowView: View {
                 .padding(28)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                DimensionSwitchRow(summary: model.summary, dimension: $dimension)
-                    .padding(.horizontal, 28)
-                    .padding(.top, 18)
-                    .padding(.bottom, 6)
+                DimensionSwitchRow(
+                    summary: model.summary,
+                    dimension: $dimension,
+                    isPresentingShare: $isPresentingShare
+                )
+                .padding(.horizontal, 28)
+                .padding(.top, 18)
+                .padding(.bottom, 6)
 
                 ConfluenceView(summary: model.summary, dimension: dimension)
                     .padding(.horizontal, 8)
@@ -129,6 +137,7 @@ struct MainWindowView: View {
 private struct DimensionSwitchRow: View {
     let summary: UsageSummary
     @Binding var dimension: BreakdownDimension
+    @Binding var isPresentingShare: Bool
 
     @Namespace private var switchNamespace
     @FocusState private var focusedDimension: BreakdownDimension?
@@ -152,10 +161,20 @@ private struct DimensionSwitchRow: View {
 
             Spacer(minLength: 12)
 
-            Text("By tokens, descending")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.ink3)
-                .lineLimit(1)
+            Button {
+                isPresentingShare = true
+            } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .frame(width: 28, height: 28)
+                    .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("s", modifiers: [.command, .shift])
+            .help(Text("Share"))
+            .accessibilityLabel(Text("Share"))
         }
     }
 

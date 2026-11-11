@@ -118,7 +118,7 @@ struct TrayDevices: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .center, spacing: 6) {
                         Text(verbatim: Host.current().localizedName ?? "Mac")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Palette.ink1)
                             .lineLimit(1)
                         ThisMacBadge()
@@ -151,7 +151,7 @@ struct TrayDevices: View {
                                     .accessibilityHidden(true)
                                 // An unreadable identity leaves only the device ID, which the CLI also names "Unknown Mac".
                                 (remote.displayName == remote.deviceID ? Text("Unknown Mac") : Text(verbatim: remote.displayName))
-                                    .font(.system(size: 13, weight: .medium))
+                                    .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(Palette.healthWarn)
                                     .lineLimit(1)
                             }
@@ -173,7 +173,7 @@ struct TrayDevices: View {
         return VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .center, spacing: 6) {
                 Text(verbatim: device.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
                 if isLocal {

@@ -184,9 +184,6 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
             .accessibilityHidden(true)
 
-            ConfluenceReservoirHeader(layout: current)
-                .accessibilityHidden(current.isEmpty)
-
             streamGroup(.source, streams: current.sources, in: current)
             streamGroup(.category, streams: current.categories, in: current)
 
@@ -207,7 +204,6 @@ private struct ConfluenceScene: View, @MainActor Animatable {
         in current: ConfluenceLayout
     ) -> some View {
         ZStack(alignment: .topLeading) {
-            ConfluenceHeading(layout: current, side: side)
             ForEach(streams) { stream in
                 ConfluenceStreamLabel(
                     stream: stream,
@@ -461,55 +457,6 @@ private final class ConfluenceParticleView: NSView {
 
 // MARK: - Native labels and glass
 
-/// The visible heading; VoiceOver hears it as the label of the enclosing stream group instead.
-private struct ConfluenceHeading: View {
-    let layout: ConfluenceLayout
-    let side: ConfluenceLayout.Side
-
-    var body: some View {
-        switch side {
-        case .source:
-            Text(layout.dimension == .sources ? "Sources" : "Models")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.ink3)
-                .frame(width: layout.leftLabelWidth, alignment: .leading)
-                .position(x: layout.leftLabelX + layout.leftLabelWidth / 2, y: layout.headerY)
-                .accessibilityHidden(true)
-        case .category:
-            Text("Categories")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.ink3)
-                .frame(width: layout.rightLabelWidth, alignment: .trailing)
-                .position(x: layout.rightLabelX + layout.rightLabelWidth / 2, y: layout.headerY)
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-private struct ConfluenceReservoirHeader: View {
-    let layout: ConfluenceLayout
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(TokenFormat.short(layout.totalTokens))
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Palette.ink1)
-                .monospacedDigit()
-                .contentTransition(reduceMotion ? .identity : .numericText())
-            Text("Confluence")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Palette.ink3)
-        }
-        .fixedSize()
-        .position(x: layout.reservoir.midX, y: layout.headerY)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Confluence"))
-        .accessibilityValue(Text("\(TokenFormat.spoken(layout.totalTokens)) tokens"))
-    }
-}
-
 private struct ConfluenceStreamLabel: View {
     let stream: ConfluenceLayout.Stream
     let total: Int64
@@ -720,7 +667,6 @@ private struct ConfluenceLayout {
     let flowBasis: Double
     let compact: Bool
     let isEmpty: Bool
-    let headerY: CGFloat
     let leftLabelX: CGFloat
     let leftLabelWidth: CGFloat
     let rightLabelX: CGFloat
@@ -889,7 +835,6 @@ private struct ConfluenceLayout {
         let top = bounds.top, bottom = bounds.bottom
         flowBottom = bottom
         let flowHeight = max(1, bottom - top)
-        headerY = Self.pad + 8
 
         leftLabelX = Self.pad
         leftLabelWidth = min(188, max(140, ((w * 0.22) / 4).rounded() * 4))
@@ -1072,7 +1017,7 @@ private struct ConfluenceLayout {
 
     private static func flowBounds(for size: CGSize) -> (top: CGFloat, bottom: CGFloat) {
         let h = max(size.height, 1)
-        let top: CGFloat = 56
+        let top: CGFloat = pad
         let bottom = max(top + 64, h - pad)
         return (top, min(h - pad, bottom))
     }

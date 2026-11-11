@@ -2,6 +2,67 @@ import XCTest
 @testable import TokenTakenKit
 
 final class TokenFormatTests: XCTestCase {
+    override func tearDown() {
+        TokenFormat.unitStyle = .international
+        super.tearDown()
+    }
+
+    func testInternationalShortIsUnchanged() {
+        TokenFormat.unitStyle = .international
+        XCTAssertEqual(TokenFormat.short(0), "0")
+        XCTAssertEqual(TokenFormat.short(980), "980")
+        XCTAssertEqual(TokenFormat.short(-980), "-980")
+        XCTAssertEqual(TokenFormat.short(1_000), "1.0K")
+        XCTAssertEqual(TokenFormat.short(9_999), "10.0K")
+        XCTAssertEqual(TokenFormat.short(99_950), "100.0K")
+        XCTAssertEqual(TokenFormat.short(412_500), "412.5K")
+        XCTAssertEqual(TokenFormat.short(999_960), "1.0M")
+        XCTAssertEqual(TokenFormat.short(58_300_000), "58.3M")
+        XCTAssertEqual(TokenFormat.short(1_240_000_000), "1.24B")
+        XCTAssertEqual(TokenFormat.short(-1_240_000_000), "-1.24B")
+    }
+
+    func testChineseShortBandBoundariesAndRounding() {
+        TokenFormat.unitStyle = .chinese
+
+        XCTAssertEqual(TokenFormat.short(0), "0")
+        XCTAssertEqual(TokenFormat.short(980), "980")
+        XCTAssertEqual(TokenFormat.short(9_876), "9,876")
+        XCTAssertEqual(TokenFormat.short(9_999), "9,999")
+        XCTAssertEqual(TokenFormat.short(-9_876), "-9,876")
+
+        XCTAssertEqual(TokenFormat.short(10_000), "1万")
+        XCTAssertEqual(TokenFormat.short(10_500), "1.05万")
+        XCTAssertEqual(TokenFormat.short(35_000), "3.5万")
+        XCTAssertEqual(TokenFormat.short(99_949), "9.99万")
+        XCTAssertEqual(TokenFormat.short(99_950), "10万")
+        XCTAssertEqual(TokenFormat.short(356_000), "35.6万")
+        XCTAssertEqual(TokenFormat.short(3_560_000), "356万")
+        XCTAssertEqual(TokenFormat.short(35_600_000), "3,560万")
+        XCTAssertEqual(TokenFormat.short(99_949_999), "9,990万")
+        XCTAssertEqual(TokenFormat.short(99_950_000), "1亿")
+        XCTAssertEqual(TokenFormat.short(-35_000), "-3.5万")
+
+        XCTAssertEqual(TokenFormat.short(100_000_000), "1亿")
+        XCTAssertEqual(TokenFormat.short(165_000_000), "1.65亿")
+        XCTAssertEqual(TokenFormat.short(1_650_000_000), "16.5亿")
+        XCTAssertEqual(TokenFormat.short(16_500_000_000), "165亿")
+        XCTAssertEqual(TokenFormat.short(165_000_000_000), "1,650亿")
+        XCTAssertEqual(TokenFormat.short(999_500_000_000), "1万亿")
+        XCTAssertEqual(TokenFormat.short(-165_000_000), "-1.65亿")
+
+        XCTAssertEqual(TokenFormat.short(1_000_000_000_000), "1万亿")
+        XCTAssertEqual(TokenFormat.short(1_600_000_000_000), "1.6万亿")
+    }
+
+    func testChineseSpokenUsesChineseUnits() {
+        TokenFormat.unitStyle = .chinese
+        XCTAssertEqual(TokenFormat.spoken(165_000_000), "1.65亿")
+        XCTAssertEqual(TokenFormat.spoken(35_000), "3.5万")
+        XCTAssertEqual(TokenFormat.spoken(9_876), "9,876")
+        XCTAssertEqual(TokenFormat.spoken(0), "0")
+    }
+
     func testUSDGroupsThousandsAndKeepsTwoDecimals() {
         XCTAssertEqual(TokenFormat.usd(10705.755), "$10,705.76")
         XCTAssertEqual(TokenFormat.usd(1_234.5), "$1,234.50")

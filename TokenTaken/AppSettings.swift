@@ -38,6 +38,22 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+enum NumberUnits: String, CaseIterable, Identifiable {
+    case automatic
+    case international
+    case chinese
+
+    var id: Self { self }
+
+    var title: Text {
+        switch self {
+        case .automatic: Text("Automatic")
+        case .international: Text(verbatim: "K · M · B")
+        case .chinese: Text(verbatim: "万 · 亿")
+        }
+    }
+}
+
 @Observable
 @MainActor
 final class AppSettings {
@@ -66,6 +82,31 @@ final class AppSettings {
             } else {
                 UserDefaults.standard.removeObject(forKey: Keys.appleLanguages)
             }
+            languageChangedThisSession = true
+            applyUnitStyle(bumpRevision: true)
+        }
+    }
+
+    var numberUnits: NumberUnits {
+        didSet {
+            guard numberUnits != oldValue else { return }
+            defaults.set(numberUnits.rawValue, forKey: Keys.numberUnits)
+            applyUnitStyle(bumpRevision: true)
+        }
+    }
+
+    private(set) var formatRevision = 0
+    private(set) var languageChangedThisSession = false
+
+    var effectiveUnitStyle: TokenFormat.UnitStyle {
+        switch numberUnits {
+        case .international:
+            return .international
+        case .chinese:
+            return .chinese
+        case .automatic:
+            let effectiveLanguage = language.languageCode ?? Self.systemPreferredLanguageCode
+            return effectiveLanguage.lowercased().hasPrefix("zh") ? .chinese : .international
         }
     }
 
@@ -133,21 +174,44 @@ final class AppSettings {
             Keys.theme: AppTheme.liquidGlass.rawValue,
             Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
             Keys.language: AppLanguage.system.rawValue,
+            Keys.numberUnits: NumberUnits.automatic.rawValue,
             Keys.syncEnabled: false,
         ])
 
         theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
         language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .system
+        numberUnits = NumberUnits(rawValue: defaults.string(forKey: Keys.numberUnits) ?? "") ?? .automatic
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
         launchAtLoginStatus = SMAppService.mainApp.status
+        applyUnitStyle(bumpRevision: false)
+    }
+
+    private func applyUnitStyle(bumpRevision: Bool) {
+        TokenFormat.unitStyle = effectiveUnitStyle
+        if bumpRevision {
+            formatRevision &+= 1
+        }
+    }
+
+    private static var systemPreferredLanguageCode: String {
+        if let global = CFPreferencesCopyValue(
+            Keys.appleLanguages as CFString,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? [String], let first = global.first, !first.isEmpty {
+            return first
+        }
+        return Locale.preferredLanguages.first ?? Locale.current.identifier
     }
 
     private enum Keys {
         static let theme = "theme"
         static let interfaceTransparency = "interfaceTransparency"
         static let language = "appLanguage"
+        static let numberUnits = "numberUnits"
         static let appleLanguages = "AppleLanguages"
         static let refreshIntervalMinutes = "refreshIntervalMinutes"
         static let tokscalePathOverride = "tokscalePathOverride"

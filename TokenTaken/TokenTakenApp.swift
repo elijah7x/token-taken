@@ -36,7 +36,7 @@ struct TokenTakenApp: App {
     var body: some Scene {
         // A single-instance Window, so openWindow from the menu bar focuses it instead of adding another.
         Window(Text(verbatim: "Token Taken"), id: MainWindowView.windowID) {
-            withEnvironment(MainWindowView())
+            withEnvironment(MainWindowView().id(settings.formatRevision))
                 .frame(minWidth: 900, minHeight: 620)
                 .task { refreshCoordinator?.start() }
         }
@@ -58,10 +58,11 @@ struct TokenTakenApp: App {
         }
 
         MenuBarExtra {
-            withEnvironment(MenuBarContent())
+            withEnvironment(MenuBarContent().id(settings.formatRevision))
                 .onAppear { refreshCoordinator?.start() }
         } label: {
             Label(TokenFormat.short(model.todaySummary.total.total), image: "MenuBarGlyph")
+                .id(settings.formatRevision)
                 .labelStyle(.titleAndIcon)
                 .monospacedDigit()
         }

@@ -7,6 +7,7 @@ import TokenTakenKit
 struct SettingsView: View {
     @Environment(MainWindowRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var updateChecker = UpdateChecker()
 
     var body: some View {
         ScrollView {
@@ -33,7 +34,7 @@ struct SettingsView: View {
         case .sync:
             SyncSettingsTab()
         case .about:
-            AboutSettingsTab()
+            AboutSettingsTab(updateChecker: updateChecker)
         }
     }
 }
@@ -161,6 +162,133 @@ private struct SettingsNavigationButton: View {
     }
 }
 
+// MARK: - Liquid Glass controls
+
+struct GlassToggleStyle: ToggleStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let spring: Animation? = reduceMotion ? nil : .spring(duration: 0.24, bounce: 0.15)
+        Button {
+            if let spring {
+                withAnimation(spring) {
+                    configuration.isOn.toggle()
+                }
+            } else {
+                configuration.isOn.toggle()
+            }
+        } label: {
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                track(isOn: configuration.isOn)
+                knob
+                    .padding(2)
+            }
+            .frame(width: 40, height: 24)
+            .contentShape(Capsule())
+            .animation(spring, value: configuration.isOn)
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityRepresentation {
+            Toggle(configuration)
+                .toggleStyle(.switch)
+        }
+    }
+
+    @ViewBuilder
+    private func track(isOn: Bool) -> some View {
+        if reduceTransparency {
+            Capsule()
+                .fill(isOn ? Palette.roleAccent : Palette.sidebarSurface)
+                .overlay {
+                    if !isOn {
+                        Capsule().strokeBorder(Palette.hairline, lineWidth: 1)
+                    }
+                }
+        } else {
+            ZStack {
+                Capsule()
+                    .fill(Palette.barTrack)
+                    .glassEffect(.regular, in: .capsule)
+                    .opacity(isOn ? 0 : 1)
+                Capsule()
+                    .fill(Palette.roleAccent)
+                    .opacity(isOn ? 1 : 0)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var knob: some View {
+        if reduceTransparency {
+            Circle()
+                .fill(Color.white)
+                .frame(width: 20, height: 20)
+                .overlay {
+                    Circle().strokeBorder(Palette.hairline, lineWidth: 0.5)
+                }
+        } else {
+            Circle()
+                .fill(Color.white.opacity(0.85))
+                .frame(width: 20, height: 20)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+    }
+}
+
+private struct GlassMenuPicker<SelectionValue: Hashable, CurrentLabel: View, Options: View>: View {
+    let title: LocalizedStringKey
+    @Binding var selection: SelectionValue
+    let currentLabel: CurrentLabel
+    let options: Options
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    init(
+        _ title: LocalizedStringKey,
+        selection: Binding<SelectionValue>,
+        @ViewBuilder currentLabel: () -> CurrentLabel,
+        @ViewBuilder options: () -> Options
+    ) {
+        self.title = title
+        self._selection = selection
+        self.currentLabel = currentLabel()
+        self.options = options()
+    }
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                options
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 6) {
+                currentLabel
+                    .font(.system(size: 13))
+                    .foregroundStyle(Palette.ink1)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.ink2)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 28)
+            .modifier(SettingsActionPillSurface(reduceTransparency: reduceTransparency))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(Text(title))
+    }
+}
+
 // MARK: - Shared group captions & rows
 
 private struct SettingsGroupCaption<Trailing: View>: View {
@@ -180,9 +308,9 @@ private struct SettingsGroupCaption<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Palette.ink1)
                 if let description {
                     Text(description)
@@ -216,12 +344,20 @@ private struct SettingsRowsGroup<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
-            SettingsHairline()
             content
         }
+        .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(reduceTransparency ? Palette.solid : .clear)
+        .background {
+            shape.fill(reduceTransparency ? Palette.cardSurface : Palette.ink1.opacity(0.025))
+        }
+        .overlay {
+            if reduceTransparency {
+                shape.strokeBorder(Palette.hairline, lineWidth: 1)
+            }
+        }
     }
 }
 
@@ -303,12 +439,12 @@ private struct SettingsControlRow<Accessory: View>: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(Palette.ink1)
                 if let help {
                     Text(help)
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.ink2)
+                        .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -322,7 +458,7 @@ private struct SettingsControlRow<Accessory: View>: View {
             }
         }
         .padding(.vertical, 8)
-        .frame(minHeight: 52)
+        .frame(minHeight: 48)
     }
 }
 
@@ -338,32 +474,30 @@ private struct SettingsHairline: View {
 // MARK: - General
 
 private struct GeneralSettingsTab: View {
-    private static var languageChangedThisSession = false
-
     @Environment(AppSettings.self) private var settings
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @State private var showsRelaunchNote = false
 
     var body: some View {
         @Bindable var settings = settings
-        VStack(alignment: .leading, spacing: 32) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 36) {
+            VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
                     title: "Appearance",
-                    description: "Theme and how much of the desktop shows through."
+                    description: "Theme, transparency, language, and number units."
                 )
 
                 SettingsRowsGroup {
                     SettingsControlRow(title: "Theme") {
-                        Picker("Theme", selection: $settings.theme) {
+                        GlassMenuPicker("Theme", selection: $settings.theme) {
+                            switch settings.theme {
+                            case .liquidGlass:
+                                Text("Liquid Glass")
+                            }
+                        } options: {
                             Text("Liquid Glass").tag(AppTheme.liquidGlass)
                         }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(minWidth: 132)
-                        .accessibilityLabel(Text("Theme"))
                     }
 
                     if settings.theme == .liquidGlass {
@@ -372,34 +506,24 @@ private struct GeneralSettingsTab: View {
                             InterfaceTransparencySlider(value: $settings.interfaceTransparency)
                         }
                     }
-                }
-            }
 
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsGroupCaption(title: "Language", description: "Applies to the app window and menu bar.")
-
-                SettingsRowsGroup {
-                    SettingsControlRow(title: "Interface language") {
-                        Picker("Language", selection: $settings.language) {
-                            Text(AppLanguage.system.title)
-                                .tag(AppLanguage.system)
-                            Text(AppLanguage.english.title)
-                                .tag(AppLanguage.english)
-                            Text(AppLanguage.simplifiedChinese.title)
-                                .tag(AppLanguage.simplifiedChinese)
+                    SettingsHairline()
+                    SettingsControlRow(title: "Language") {
+                        GlassMenuPicker("Language", selection: $settings.language) {
+                            Text(settings.language.title)
+                        } options: {
+                            ForEach(AppLanguage.allCases) { language in
+                                Text(language.title).tag(language)
+                            }
                         }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .frame(minWidth: 132)
-                        .accessibilityLabel(Text("Language"))
                     }
 
-                    if showsRelaunchNote {
+                    if settings.languageChangedThisSession {
                         SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Some text changes language after relaunch.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Palette.ink2)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.ink3)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 12)
                             if reduceTransparency {
@@ -413,14 +537,25 @@ private struct GeneralSettingsTab: View {
                             }
                         }
                         .padding(.vertical, 8)
-                        .frame(minHeight: 52)
+                        .frame(minHeight: 48)
+                    }
+
+                    SettingsHairline()
+                    SettingsControlRow(title: "Number units") {
+                        GlassMenuPicker("Number units", selection: $settings.numberUnits) {
+                            settings.numberUnits.title
+                        } options: {
+                            ForEach(NumberUnits.allCases) { unit in
+                                unit.title.tag(unit)
+                            }
+                        }
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
-                    title: "Startup",
+                    title: "Data collection",
                     description: "Launch and background collection."
                 )
 
@@ -428,31 +563,38 @@ private struct GeneralSettingsTab: View {
                     SettingsControlRow(title: "Launch at login") {
                         Toggle("Launch at login", isOn: $settings.launchAtLogin)
                             .labelsHidden()
-                            .toggleStyle(.switch)
+                            .toggleStyle(GlassToggleStyle())
                             .accessibilityLabel(Text("Launch at login"))
                     }
 
                     if let error = settings.launchAtLoginError {
                         SettingsHairline()
                         Text(error)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
                             .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
 
                     if settings.launchAtLoginNeedsApproval {
                         SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Allow Token Taken in System Settings › Login Items to finish.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Palette.ink2)
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.ink3)
                             Spacer(minLength: 12)
-                            Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                                .controlSize(.small)
+                            if reduceTransparency {
+                                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                            } else {
+                                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                                    .buttonStyle(.glass)
+                                    .controlSize(.small)
+                            }
                         }
                         .padding(.vertical, 8)
-                        .frame(minHeight: 52)
+                        .frame(minHeight: 48)
                     }
 
                     SettingsHairline()
@@ -460,40 +602,32 @@ private struct GeneralSettingsTab: View {
                     TimelineView(.everyMinute) { _ in
                         HStack(spacing: 16) {
                             Text("Last updated")
-                                .font(.system(size: 13, weight: .medium))
+                                .font(.system(size: 13, weight: .regular))
                                 .foregroundStyle(Palette.ink1)
                             Spacer(minLength: 12)
                             lastUpdatedText
-                                .font(.system(size: 12.5))
+                                .font(.system(size: 13))
                                 .foregroundStyle(Palette.ink2)
                                 .monospacedDigit()
                         }
                         .padding(.vertical, 8)
-                        .frame(minHeight: 52)
+                        .frame(minHeight: 48)
                         .accessibilityElement(children: .combine)
                     }
 
                     if let error = model.storageError {
                         SettingsHairline()
                         Text(error)
-                            .font(.system(size: 12))
+                            .font(.system(size: 11.5))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
                             .padding(.vertical, 8)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
                 }
             }
         }
         .onAppear {
             settings.refreshLaunchAtLoginStatus()
-            if Self.languageChangedThisSession {
-                showsRelaunchNote = true
-            }
-        }
-        .onChange(of: settings.language) { oldValue, newValue in
-            guard oldValue != newValue else { return }
-            Self.languageChangedThisSession = true
-            showsRelaunchNote = true
         }
     }
 
@@ -550,10 +684,10 @@ private struct InterfaceTransparencySlider: View {
                 .help(reduceTransparency ? Text(reduceTransparencyHelp) : Text("Transparent"))
                 .accessibilityHidden(true)
             Text(value, format: .percent.precision(.fractionLength(0)))
-                .font(.system(size: 11.5))
+                .font(.system(size: 13))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 40, alignment: .trailing)
                 .accessibilityHidden(true)
         }
     }
@@ -591,8 +725,8 @@ private struct SourcesSettingsTab: View {
     var body: some View {
         TimelineView(.everyMinute) { context in
             let ledger = makeLedger(now: context.date)
-            VStack(alignment: .leading, spacing: 32) {
-                VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 36) {
+                VStack(alignment: .leading, spacing: 10) {
                     SettingsGroupCaption(
                         title: "Installed sources",
                         description: "Agents on this Mac whose logs are read."
@@ -603,9 +737,9 @@ private struct SourcesSettingsTab: View {
                     SettingsRowsGroup {
                         if ledger.installed.isEmpty {
                             Text("No installed sources found")
-                                .font(.system(size: 12.5))
+                                .font(.system(size: 13))
                                 .foregroundStyle(Palette.ink3)
-                                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                         } else {
                             ForEach(Array(ledger.installed.enumerated()), id: \.element.id) { item in
                                 if item.offset > 0 {
@@ -622,7 +756,7 @@ private struct SourcesSettingsTab: View {
                 }
 
                 Text("Sources are identified automatically from local logs; no manual setup is needed.")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -707,7 +841,7 @@ private struct SourcesSettingsTab: View {
             HStack(spacing: 9) {
                 SourceMonogramBadge(sourceID: entry.source.id, name: entry.source.name)
                 Text(verbatim: entry.source.name)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
             }
@@ -716,12 +850,12 @@ private struct SourcesSettingsTab: View {
             Group {
                 if monthTokens > 0 {
                     Text("\(TokenFormat.short(monthTokens)) tokens")
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 13))
                         .foregroundStyle(Palette.ink2)
                         .monospacedDigit()
                 } else {
                     Text("No usage this month")
-                        .font(.system(size: 12.5))
+                        .font(.system(size: 11.5))
                         .foregroundStyle(Palette.ink3)
                 }
             }
@@ -731,20 +865,20 @@ private struct SourcesSettingsTab: View {
             HStack(spacing: 8) {
                 SourceHealthLabel(state: entry.health.state)
                 Text(verbatim: entry.health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
-                    .font(.system(size: 12))
+                    .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
                     .monospacedDigit()
                     .lineLimit(1)
             }
             .frame(width: 192, alignment: .trailing)
         }
-        .frame(minHeight: 52)
+        .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
         .help(entry.health.errorMessage ?? "")
     }
 
     private func notInstalledGroup(_ sources: [SourceInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             SettingsGroupCaption(title: "Not installed")
 
             SettingsRowsGroup {
@@ -760,7 +894,7 @@ private struct SourcesSettingsTab: View {
                             .accessibilityHidden(true)
 
                         Text("Not installed (\(sources.count))")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: 13, weight: .regular))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
 
@@ -768,13 +902,13 @@ private struct SourcesSettingsTab: View {
 
                         if !showsNotInstalled {
                             Text(verbatim: sources.map(\.name).joined(separator: " · "))
-                                .font(.system(size: 12))
+                                .font(.system(size: 11.5))
                                 .foregroundStyle(Palette.ink3)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
                     }
-                    .frame(minHeight: 52)
+                    .frame(minHeight: 48)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -804,14 +938,14 @@ private struct SourcesSettingsTab: View {
                                 SourceMonogramBadge(sourceID: source.id, name: source.name, size: 20)
                                     .opacity(0.65)
                                 Text(verbatim: source.name)
-                                    .font(.system(size: 12.5))
+                                    .font(.system(size: 13))
                                     .foregroundStyle(Palette.ink2)
                                     .lineLimit(1)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .padding(.vertical, 14)
+                    .padding(.vertical, 12)
                 }
             }
         }
@@ -852,7 +986,7 @@ private struct SourceHealthLabel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
         }
-        .font(.system(size: 12, weight: state == .ok || state == .failed ? .semibold : .medium))
+        .font(.system(size: 11.5, weight: state == .ok || state == .failed ? .semibold : .medium))
         .foregroundStyle(state.textColor)
         .accessibilityElement(children: .combine)
     }
@@ -905,8 +1039,8 @@ private struct SyncSettingsTab: View {
 
     var body: some View {
         @Bindable var settings = settings
-        VStack(alignment: .leading, spacing: 32) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 36) {
+            VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
                     title: "iCloud sync",
                     description: "Share totals between your Macs through iCloud Drive."
@@ -919,7 +1053,7 @@ private struct SyncSettingsTab: View {
                     ) {
                         Toggle("iCloud sync", isOn: $settings.syncEnabled)
                             .labelsHidden()
-                            .toggleStyle(.switch)
+                            .toggleStyle(GlassToggleStyle())
                             .accessibilityLabel(Text("iCloud sync"))
                     }
 
@@ -931,11 +1065,11 @@ private struct SyncSettingsTab: View {
                                 .foregroundStyle(Palette.healthWarn)
                                 .accessibilityHidden(true)
                             Text("iCloud Drive is not available on this Mac.")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11.5))
                                 .foregroundStyle(Palette.healthWarn)
                         }
                         .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if settings.syncEnabled && refreshCoordinator?.syncFailed == true {
                         SettingsHairline()
                         HStack(spacing: 6) {
@@ -944,29 +1078,29 @@ private struct SyncSettingsTab: View {
                                 .foregroundStyle(Palette.healthWarn)
                                 .accessibilityHidden(true)
                             Text("Unavailable")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11.5))
                                 .foregroundStyle(Palette.healthWarn)
                         }
                         .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(title: "Devices")
 
                 SettingsRowsGroup {
                     if !settings.syncEnabled {
                         Text("Turn on sync to see your other Macs here.")
-                            .font(.system(size: 12.5))
+                            .font(.system(size: 11.5))
                             .foregroundStyle(Palette.ink3)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if model.remoteDevices.isEmpty {
                         Text("No other Macs yet")
-                            .font(.system(size: 12.5))
+                            .font(.system(size: 11.5))
                             .foregroundStyle(Palette.ink3)
-                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else {
                         TimelineView(.everyMinute) { _ in
                             VStack(spacing: 0) {
@@ -988,12 +1122,12 @@ private struct SyncSettingsTab: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 (device.displayName == device.deviceID ? Text("Unknown Mac") : Text(verbatim: device.displayName))
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 13, weight: .regular))
                     .foregroundStyle(Palette.ink1)
                 if let lastWrite = device.lastWrite {
                     Text("Last synced \(Self.relativeFormatter.localizedString(for: lastWrite, relativeTo: .now))")
                         .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.ink2)
+                        .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
                 }
             }
@@ -1003,7 +1137,7 @@ private struct SyncSettingsTab: View {
                 ? .stale : device.state)
         }
         .padding(.vertical, 8)
-        .frame(minHeight: 52)
+        .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
     }
 
@@ -1040,7 +1174,7 @@ private struct RemoteStatusLabel: View {
                 .accessibilityHidden(true)
             Text(title)
         }
-        .font(.system(size: 12, weight: state == .ok ? .semibold : .medium))
+        .font(.system(size: 11.5, weight: state == .ok ? .semibold : .medium))
         .foregroundStyle(color)
         .accessibilityElement(children: .combine)
     }
@@ -1049,6 +1183,8 @@ private struct RemoteStatusLabel: View {
 // MARK: - About
 
 private struct AboutSettingsTab: View {
+    let updateChecker: UpdateChecker
+
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var installationMessage: String?
     @State private var installationFailed = false
@@ -1060,7 +1196,7 @@ private struct AboutSettingsTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 32) {
+        VStack(alignment: .leading, spacing: 36) {
             HStack(spacing: 14) {
                 Image(nsImage: NSApplication.shared.applicationIconImage)
                     .resizable()
@@ -1068,21 +1204,31 @@ private struct AboutSettingsTab: View {
                     .frame(width: 52, height: 52)
                     .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: "Token Taken")
                         .font(.system(size: 19, weight: .bold))
                         .tracking(-0.2)
                         .foregroundStyle(Palette.ink1)
-                    Text("Local Agent token usage")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.ink2)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Local Agent token usage")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.ink3)
+                        Text(verbatim: "·")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.ink3)
+                            .accessibilityHidden(true)
+                        Text(verbatim: version)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Palette.ink2)
+                            .monospacedDigit()
+                    }
                 }
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
 
             SettingsRowsGroup {
-                AboutValueRow(label: "Version", value: Text(verbatim: version))
+                updateRow
                 SettingsHairline()
                 AboutValueRow(label: "License", value: Text(verbatim: "MIT"))
                 SettingsHairline()
@@ -1112,9 +1258,97 @@ private struct AboutSettingsTab: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 }
             }
+        }
+    }
+
+    private var updateRow: some View {
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Version")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Palette.ink1)
+                    Text(verbatim: version)
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.ink2)
+                        .monospacedDigit()
+                }
+                updateStateLabel
+            }
+
+            Spacer(minLength: 12)
+
+            HStack(spacing: 8) {
+                if case .available(_, let url) = updateChecker.state {
+                    if reduceTransparency {
+                        Link("Download", destination: url)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    } else {
+                        Link("Download", destination: url)
+                            .buttonStyle(.glass)
+                            .controlSize(.small)
+                    }
+                }
+
+                if reduceTransparency {
+                    Button("Check for Updates") {
+                        Task { await updateChecker.check() }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(updateChecker.isChecking)
+                } else {
+                    Button("Check for Updates") {
+                        Task { await updateChecker.check() }
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                    .disabled(updateChecker.isChecking)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
+    }
+
+    @ViewBuilder
+    private var updateStateLabel: some View {
+        switch updateChecker.state {
+        case .idle:
+            EmptyView()
+        case .checking:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Checking…")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.ink3)
+            }
+        case .upToDate:
+            Text("Up to date")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
+        case .available(let latestVersion, _):
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Update available")
+                Text(verbatim: "· \(latestVersion)")
+                    .monospacedDigit()
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(Palette.roleAccent)
+        case .noRelease:
+            Text("No published release yet")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
+        case .failed(let message):
+            Text(message)
+                .font(.system(size: 11.5))
+                .foregroundStyle(SourceHealth.State.failed.dotColor)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -1138,17 +1372,17 @@ private struct AboutValueRow: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(label)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(Palette.ink1)
             Spacer(minLength: 12)
             value
-                .font(.system(size: 12.5))
+                .font(.system(size: 13))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         }
         .padding(.vertical, 8)
-        .frame(minHeight: 52)
+        .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
     }
 }
