@@ -9,7 +9,7 @@ A small, beautiful token-usage dashboard for macOS with native Liquid Glass.
 ## v1 features
 
 - Day, week (Monday start), month, year, and all-time totals, with per-model and per-source breakdowns.
-- One combined total across several Macs, with per-device breakdowns when iCloud Drive sync is on.
+- One combined total across several Macs, with per-device breakdowns when iCloud Drive sync is on. Each Mac's daily records use that Mac's local calendar day, so a merged day can mix time zones.
 - A minimal menu bar extra showing today's token total and a quick glance.
 - A native Liquid Glass theme, with a theme system designed for later Geek and Sketchbook themes.
 - A `token-taken` CLI with JSON output and JSON/CSV data export.
@@ -49,7 +49,7 @@ The [CLI contract](docs/contracts/cli.md) defines the output schema, filters, wa
 
 - [Product specification](docs/product.md)
 - [Architecture](docs/architecture.md)
-- Decisions: [native macOS app](docs/decisions/0001-native-macos-app.md), [iCloud Drive sync](docs/decisions/0002-icloud-drive-sync.md), [usage engine](docs/decisions/0003-usage-engine.md), [Developer ID distribution](docs/decisions/0004-distribution.md), [collection granularity](docs/decisions/0005-collection-granularity.md)
+- Decisions: [native macOS app](docs/decisions/0001-native-macos-app.md), [iCloud Drive sync](docs/decisions/0002-icloud-drive-sync.md), [usage engine](docs/decisions/0003-usage-engine.md), [Developer ID distribution](docs/decisions/0004-distribution.md), [collection granularity](docs/decisions/0005-collection-granularity.md), [incremental collection](docs/decisions/0006-incremental-collection.md)
 - [Contracts index](docs/contracts/README.md)
 - Contract details: [statistics](docs/contracts/statistics.md), [CLI](docs/contracts/cli.md), [sync](docs/contracts/sync.md), [privacy](docs/contracts/privacy.md), [upstream reuse](docs/contracts/upstream.md), [themes](docs/contracts/themes.md)
 - [Changelog](CHANGELOG.md)

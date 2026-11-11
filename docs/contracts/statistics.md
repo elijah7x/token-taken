@@ -1,4 +1,4 @@
-Status: Draft v1 (2026-11-10)
+Status: Implemented v1 (2026-11-11)
 
 # Statistics contract
 
@@ -42,7 +42,7 @@ These rules describe the collection design, not acceptance of every source as re
 
 - `day` is a `YYYY-MM-DD` label in the collecting device's zone, not a UTC timestamp. Every daily record MUST retain its IANA `timeZoneID`. Explicitly pass that identifier as `TZ` to tokscale subprocesses.
 - `UsageDay.string(from:in:)` labels native timestamped events in the collecting zone. `UsageRecord.dayInterval` resolves start and exclusive end in that zone, including DST.
-- Day, week, month, year, and all-time boundaries use the viewer's calendar and time zone. Week runs from Monday `00:00` through the end of today regardless of locale `firstWeekday`. Place daily rows on their original calendar-date labels without shifting dates. This is exact only when collection and viewer zones match. Cross-zone aggregates cannot reconstruct exact viewer-local period boundaries; this limitation MUST be disclosed for synced or moved-device data.
+- Day, week, month, year, and all-time boundaries use the viewer's calendar and time zone. Week runs from Monday `00:00` through the end of today regardless of locale `firstWeekday`. Place daily rows on their original calendar-date labels without shifting dates. This is exact only when collection and viewer zones match: each Mac's daily records use that Mac's local calendar day, so a merged day can mix zones. This limitation is documented in `README.md` and `README.zh-CN.md`, and CLI JSON output MUST report the viewer `timeZone`.
 - v1 has day, week (Monday start, 7 daily buckets Monday–Sunday with future days marked), month, year, and all-time views.
 - Model IDs are trimmed and lowercased without guessing aliases. Retain the raw exported model ID; for tokscale, the pre-engine original ID is not recoverable from the export. Further aliases require versioned mappings and MUST NOT discard the retained raw ID. A collapsed key retains a deterministic representative raw spelling.
 - The Day summary's totals, categories, costs, and breakdowns use daily records. Its chart uses actual hourly rows, never a synthetic redistribution of daily totals. The chart may omit reasoning for tokscale sources and differ from the daily total; never rescale it to hide that difference.
@@ -79,10 +79,10 @@ These rules describe the collection design, not acceptance of every source as re
 ## Reconciliation and source health
 
 - Every supported source MUST be reconciled on sanitized samples against the selected engine and native ledger where applicable. Record intentional deviations and evidence; unexplained mismatches block support.
-- `SourceHealth` exposes `lastAttempt`, `lastSuccess`, `recordCount` (daily rows), `skippedRecords`, `errorMessage`, and state `ok`, `unavailable`, `failed`, or `stale`.
+- `SourceHealth` exposes `lastAttempt`, `lastSuccess`, `recordCount` (daily rows), `skippedRecords`, `errorMessage`, and state `ok`, `unavailable`, `notInstalled`, `failed`, or `stale`.
 - Missing source locations throw `CollectorError.sourceUnavailable`. Failed or unavailable collectors MUST preserve both cached tables and the previous last-success timestamp. Only a successful collection replaces snapshots. Skipped records are a partial-data condition even when state is `ok`.
 - The default stale threshold is 24 hours since last success. Preserve unavailable/failed states rather than overwriting them with stale. Surface database and health-write errors through collection results; health reads throw rather than masquerading as an empty health list.
-- `AppModel.dataIssues` exposes failed/unavailable/stale source counts, skipped records, and `isPartial` for presentation. Storage/read errors also make that summary partial.
+- `AppModel.dataIssues` exposes `failed`, `unavailable`, and `stale` source counts, `skippedRecords`, `devices`, `count`, and `isPartial` for presentation. Storage/read errors also make that summary partial.
 - Missing intervals MUST NOT be interpolated or silently converted to zero.
 
 ## Open questions

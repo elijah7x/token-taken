@@ -102,6 +102,12 @@ codesign --force --options runtime --timestamp \
     --entitlements "$root/TokenTaken/TokenTaken.entitlements" \
     --sign "$identity" "$app"
 
+app_kb="$(du -sk "$app" | awk '{print $1}')"
+if [[ "$app_kb" -gt 102400 ]]; then
+    echo "App bundle exceeds 100 MB limit (${app_kb} KB): $app" >&2
+    exit 1
+fi
+
 rm -rf "$stage"
 mkdir -p "$stage"
 ditto "$app" "$stage/Token Taken.app"

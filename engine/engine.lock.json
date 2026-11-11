@@ -1,6 +1,7 @@
 {
   "engine": "tokscale",
   "version": "4.21.0",
+  "commit": "b26c433d03f23a2255ad9f212512ce83ede83da3",
   "source": "npm @tokscale/cli-darwin-arm64 and -x64",
   "platforms": {
     "darwin-arm64": {

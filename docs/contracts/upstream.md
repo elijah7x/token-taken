@@ -1,4 +1,4 @@
-Status: Draft v0 (2026-11-09)
+Status: Implemented v1 (2026-11-11)
 
 # Upstream engine contract
 
@@ -10,7 +10,7 @@ Status: Draft v0 (2026-11-09)
 
 ## Pinning and adapter isolation
 
-- An engine lock file MUST record the exact version, full commit, and distribution checksum. Its path is TBD after engine spike (ADR-0003).
+- The engine lock file (`engine/engine.lock.json`) MUST record the exact version, full commit, and distribution checksum.
 - Release builds MUST resolve the locked artifact and verify its checksum. Mutable branches, floating tags, and unrecorded local overrides are prohibited.
 - The thin adapter is the only product code allowed to know engine-specific output schemas, field meanings, invocation details, and quirks.
 - `TokenTakenKit`, the app, and the CLI consume the normalized semantics in [statistics.md](statistics.md); they MUST NOT parse raw engine output independently.
@@ -41,9 +41,8 @@ Status: Draft v0 (2026-11-09)
 
 ## Current pin
 
-The tokscale distribution is pinned in `engine/engine.lock.json`. `scripts/fetch-engine.sh` verifies the per-architecture archives and assembles the universal binary under `Vendor/engine/`.
+The tokscale v4.21.0 distribution (tag commit `b26c433d03f23a2255ad9f212512ce83ede83da3`) is pinned in `engine/engine.lock.json`. `scripts/fetch-engine.sh` verifies the per-architecture archives and assembles the universal binary under `Vendor/engine/`.
 
 ## Open questions
 
-- Engine selection and packaging mechanism: TBD after engine spike (ADR-0003).
-- Engine lock-file path and patch-record location: TBD after engine spike (ADR-0003).
+- None.

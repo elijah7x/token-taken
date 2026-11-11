@@ -32,5 +32,5 @@
 - `TokenTakenKit` contains shared models, store, sync, and contracts. It depends on nothing in the app target.
 - `TokenTaken` contains the main window and menu bar extra. `TokenTakenCLI` builds the `token-taken` tool. Both depend on `TokenTakenKit`; the CLI never depends on app UI.
 - Use native SwiftUI Liquid Glass APIs on macOS 26 and later. Do not substitute web or CSS imitations.
-- Pin the selected usage engine and keep its adapter thin. Engine selection remains open in `docs/decisions/0003-usage-engine.md`; do not claim accuracy or coverage before the reconciliation spike verifies it.
+- Pin the `tokscale` 4.21.0 usage engine in `engine/engine.lock.json`, keep its adapter thin, and use native Swift collectors where required by `docs/decisions/0003-usage-engine.md` and `docs/decisions/0005-collection-granularity.md`; do not claim accuracy or coverage beyond what reconciliation has verified.
 - Read agent logs read-only. Sync is opt-in, aggregate-only, and contains no prompts, responses, paths, project names, credentials, or cost. Costs are estimates from a versioned price table.

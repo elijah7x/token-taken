@@ -1,4 +1,4 @@
-Status: Draft v0 (2026-11-09)
+Status: Implemented v1 (2026-11-11)
 
 # Privacy contract
 
@@ -33,4 +33,4 @@ Status: Draft v0 (2026-11-09)
 
 ## Open questions
 
-- Account-scoped API endpoints, credential types, and per-source permission prompts: TBD after engine spike (ADR-0003).
+- None.

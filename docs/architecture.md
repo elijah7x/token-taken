@@ -80,7 +80,7 @@ See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merg
 - Defines a backend interface so local folder, S3, and WebDAV implementations can reuse the layout later. V1 ships iCloud Drive only.
 - For testing and diagnostics, `TOKEN_TAKEN_SYNC_ROOT` points the app and CLI at an existing test sync folder, like `TOKEN_TAKEN_SUPPORT_DIR` overrides local support storage.
 
-See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity decision [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/sync.md`. Daily cross-zone re-bucketing is inexact; fractional-offset boundaries and ambiguous fall-back hour labels also limit hourly attribution. Sync is a contract here, not an implemented transport.
+See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity decision [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/sync.md`. Daily cross-zone re-bucketing is inexact; fractional-offset boundaries and ambiguous fall-back hour labels also limit hourly attribution.
 
 ### Presentation and themes
 
@@ -105,7 +105,7 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 
 1. Collectors return daily and hourly batches with device attribution. Missing locations throw `sourceUnavailable`, never a successful empty snapshot.
 2. The runner replaces each successful source/device's two tables transactionally and records source health. Complete reads establish 48 hours of explicit hourly coverage; partial reads do not invent missing zero rows. Failures preserve cached data.
-3. Future opt-in sync writes daily history and a separate rolling hourly snapshot to this Mac's folder and reads other device folders, preserving single-writer ownership and tombstones. Exact account-scoped deduplication is not supported by these aggregates.
+3. Opt-in sync (off by default) writes daily history and a separate rolling hourly snapshot to this Mac's folder and reads other device folders, preserving single-writer ownership and tombstones. Exact account-scoped deduplication is not supported by these aggregates.
 4. `TokenTakenKit` applies viewer-calendar period boundaries to original daily date labels for totals and breakdowns, without shifting them. The Day chart instead reads actual hourly rows in viewer-local hours, including DST and coverage gaps; it can differ from the daily total because hourly reasoning is unavailable or zones/coverage differ. Pricing adds versioned estimates at read time.
 5. The main window, menu bar extra, and CLI query that shared pipeline. They do not implement separate aggregation rules.
 
@@ -123,11 +123,6 @@ Exact account-scoped deduplication remains unsupported without privacy-preservin
 
 | Question | Required decision point |
 | --- | --- |
-| Which engine ships, which agents it covers, and whether it needs a bundled runtime? | ADR-0003 and `docs/contracts/upstream.md` |
-| What source event identity deduplicates Cursor and other account-scoped data across Macs, including old Zcode samples? | ADR-0003 and `docs/contracts/statistics.md` |
 | Can a future privacy-preserving identity export enable exact account-scoped deduplication? | ADR-0005 and `docs/contracts/sync.md`; unsupported today |
-| How should sync transport publish consistent multi-file generations and per-source health? | `docs/contracts/sync.md` before enabling sync |
-| What incremental fallback should refresh use when a source lacks verified cursors? | Refresh cadence is fixed to launch + manual + 4-hour sleep-tolerant fallback (owner decision 2026-11-10); incremental collection follows ADR-0006 |
-| Which first-party rates should replace reseller or subscription-inclusive price rows the engine reports? | Owner decision 2026-11-11: prices ship bundled and are refreshed by `scripts/update-prices.py` before a release; per-model admission rules live in `docs/contracts/statistics.md` |
 
-Developer ID signing, notarization, and release mechanics are resolved by [ADR-0004](decisions/0004-distribution.md).
+Engine selection, collection granularity, and incremental refresh are resolved by [ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md), and [ADR-0006](decisions/0006-incremental-collection.md); sync publication and bundled pricing follow `docs/contracts/sync.md` and `docs/contracts/statistics.md`; Developer ID signing, notarization, and release mechanics are resolved by [ADR-0004](decisions/0004-distribution.md).

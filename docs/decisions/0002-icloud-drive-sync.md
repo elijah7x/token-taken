@@ -4,6 +4,8 @@
 
 Accepted
 
+Status note: [ADR-0005](0005-collection-granularity.md) supersedes the UTC-hour-by-model sync layout here with collecting-device local calendar days and a separate rolling per-source hourly snapshot; it also supersedes ADR-0003's native `pi` collector scope and legacy total-only Codex handling.
+
 ## Date
 
 2026-11-09

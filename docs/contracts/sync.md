@@ -69,7 +69,7 @@ Token Taken/
 
 ## Time and statistics limitations
 
-- Viewer day/month/year boundaries use the viewer's calendar and time zone. Daily records are placed on their original calendar-date labels without shifting them. This is exact when the collecting and viewer zones match; different-zone daily aggregates cannot be re-bucketed exactly into viewer-local periods. Disclose this limitation when synced data comes from another zone.
+- Viewer day/month/year boundaries use the viewer's calendar and time zone. Daily records are placed on their original calendar-date labels without shifting them. This is exact when the collecting and viewer zones match: each Mac's daily records use that Mac's local calendar day, so a merged day can mix zones. This limitation is documented in `README.md` and `README.zh-CN.md`, and CLI JSON output MUST report the viewer `timeZone`.
 - Day totals, categories, breakdowns, and pricing use daily records. The Day chart uses absolute hourly rows converted into viewer-local hours and may differ: tokscale hourly output has no reasoning field, cross-zone daily labels can select a different interval, and coverage can be partial. Never spread daily counts across fabricated hours or force the chart to equal the daily total.
 - DST charts have the actual day's hourly interval count. Offset-free tokscale local hour labels cannot distinguish repeated fall-back hours. Different fractional UTC offsets can put viewer boundaries inside a source hour; aggregates cannot split those buckets exactly.
 - Unknown hourly points (`SeriesPoint.isKnown=false`) are gaps, not confirmed zero. Preserve source-level coverage and reasoning knowledge across sync.

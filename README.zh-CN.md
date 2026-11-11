@@ -9,7 +9,7 @@
 ## v1 功能
 
 - 按日、周（周一起始）、月、年和累计查看总用量，并按模型和来源细分。
-- 汇总多台 Mac 的用量；启用 iCloud Drive 同步后，可查看各设备明细。
+- 汇总多台 Mac 的用量；启用 iCloud Drive 同步后，可查看各设备明细。每台 Mac 的按日记录使用该设备所在的本地日历日，因此合并后的同一天可能混合不同时区。
 - 极简菜单栏项目，显示今日 Token 总量与速览。
 - 原生 Liquid Glass 主题；主题系统从首版开始设计，后续加入 Geek 和 Sketchbook 主题。
 - `token-taken` CLI，支持 JSON 输出和 JSON/CSV 数据导出。
@@ -49,7 +49,7 @@ token-taken export --format csv --period all
 
 - [产品规格](docs/product.md)
 - [架构](docs/architecture.md)
-- 决策记录：[原生 macOS 应用](docs/decisions/0001-native-macos-app.md)、[iCloud Drive 同步](docs/decisions/0002-icloud-drive-sync.md)、[用量引擎](docs/decisions/0003-usage-engine.md)、[Developer ID 分发](docs/decisions/0004-distribution.md)、[采集粒度](docs/decisions/0005-collection-granularity.md)
+- 决策记录：[原生 macOS 应用](docs/decisions/0001-native-macos-app.md)、[iCloud Drive 同步](docs/decisions/0002-icloud-drive-sync.md)、[用量引擎](docs/decisions/0003-usage-engine.md)、[Developer ID 分发](docs/decisions/0004-distribution.md)、[采集粒度](docs/decisions/0005-collection-granularity.md)、[增量采集](docs/decisions/0006-incremental-collection.md)
 - [契约索引](docs/contracts/README.md)
 - 契约详情：[统计](docs/contracts/statistics.md)、[CLI](docs/contracts/cli.md)、[同步](docs/contracts/sync.md)、[隐私](docs/contracts/privacy.md)、[上游复用](docs/contracts/upstream.md)、[主题](docs/contracts/themes.md)
 - [更新日志](CHANGELOG.md)

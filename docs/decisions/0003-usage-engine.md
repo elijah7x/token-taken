@@ -4,6 +4,8 @@
 
 Accepted (2026-11-10)
 
+Status note: [ADR-0005](0005-collection-granularity.md) supersedes UTC day bucketing, the split `pi` collector, and CLI recovery of legacy total-only Codex rows: daily records use the collecting device's local time zone, the native `pi` collector handles all `pi` usage, and genuinely total-only legacy Codex rows remain an unrecovered export gap (`uncategorized` in the model).
+
 ## Date
 
 2026-11-09
