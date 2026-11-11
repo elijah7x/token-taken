@@ -20,7 +20,7 @@ struct ConfluenceView: View {
     @State private var settledValues: ConfluenceValues?
     @FocusState private var focused: ConfluenceTarget?
 
-    private let shape = RoundedRectangle(cornerRadius: 20, style: .continuous)
+    private let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
 
     var body: some View {
         GeometryReader { proxy in
@@ -29,8 +29,8 @@ struct ConfluenceView: View {
             let values = layout.animationValues
             let particleTracks = layout.particleTracks(
                 activeTarget: activeTarget,
-                reduceTransparency: reduceTransparency,
-                isDark: scheme == .dark
+                reduceMotion: reduceMotion,
+                reduceTransparency: reduceTransparency
             )
             let tooltip = hover.map { ($0.target, $0.location) }
                 ?? focused.flatMap { target in
@@ -52,12 +52,15 @@ struct ConfluenceView: View {
                     value: values
                 )
 
-                if !reduceMotion {
-                    ConfluenceParticleLayer(tracks: particleTracks, isActive: appearsActive)
-                        .opacity(particlesSettled ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.2), value: particlesSettled)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
+                if !reduceMotion && !reduceTransparency {
+                    ConfluenceParticleLayer(
+                        tracks: particleTracks,
+                        isActive: appearsActive
+                    )
+                    .opacity(particlesSettled ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.2), value: particlesSettled)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
                 }
 
                 if let tooltip, let stream = layout.stream(for: tooltip.0) {
@@ -94,36 +97,8 @@ struct ConfluenceView: View {
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activeTarget)
         }
-        .background { surface }
-        .clipShape(shape)
-        .overlay { shape.strokeBorder(Palette.hairline) }
-        .overlay {
-            shape.strokeBorder(
-                LinearGradient(
-                    colors: [.white.opacity(scheme == .dark ? 0.12 : 0.55), .clear],
-                    startPoint: .top,
-                    endPoint: .center
-                ),
-                lineWidth: 1
-            )
-            .allowsHitTesting(false)
-        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Confluence of sources into categories"))
-    }
-
-    @ViewBuilder private var surface: some View {
-        if reduceTransparency {
-            shape.fill(Palette.solid)
-        } else {
-            shape.fill(LinearGradient(
-                colors: scheme == .dark
-                    ? [.white.opacity(0.07), .white.opacity(0.02)]
-                    : [.white.opacity(0.34), .white.opacity(0.08)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ))
-        }
     }
 
     /// Keyboard focus has no pointer location; anchor the tooltip beside the focused label, toward the chart.
@@ -138,9 +113,10 @@ struct ConfluenceView: View {
 
     private func tooltipOffset(for point: CGPoint, in size: CGSize) -> CGSize {
         let width = Self.tooltipWidth, height: CGFloat = 66
-        let x = min(point.x + 14, size.width - width - 8)
-        let y = point.y + 16 + height > size.height ? point.y - height - 10 : point.y + 16
-        return CGSize(width: max(8, x), height: max(8, y))
+        let pad: CGFloat = 12
+        let x = min(point.x + 14, size.width - width - pad)
+        let y = point.y + 16 + height > size.height - pad ? point.y - height - 10 : point.y + 16
+        return CGSize(width: max(pad, x), height: max(pad, y))
     }
 }
 
@@ -193,7 +169,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
             .accessibilityHidden(true)
 
-            ConfluenceReservoir(layout: current, reduceTransparency: reduceTransparency)
+            ConfluenceReservoirHeader(layout: current)
                 .accessibilityHidden(current.isEmpty)
 
             streamGroup(.source, streams: current.sources, in: current)
@@ -201,9 +177,9 @@ private struct ConfluenceScene: View, @MainActor Animatable {
 
             if current.isEmpty {
                 Text("No usage in this period")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Palette.muted)
-                    .position(x: current.reservoir.midX, y: current.flowBottom - 2)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.ink3)
+                    .position(x: current.reservoir.midX, y: current.reservoir.midY)
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activeTarget)
@@ -222,7 +198,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     stream: stream,
                     total: current.totalTokens,
                     activeTarget: activeTarget,
-                    compact: current.compact,
+                    isDark: isDark,
                     focused: focused
                 )
             }
@@ -234,19 +210,24 @@ private struct ConfluenceScene: View, @MainActor Animatable {
     }
 }
 
-// MARK: - Animated particles
+// MARK: - Particles
 
 private struct ConfluenceParticleSample: Equatable {
     let point: CGPoint
     let distance: CGFloat
 }
 
-private struct ConfluenceParticleTrack: Equatable {
-    let id: String
+private struct ConfluenceParticleSpec: Equatable {
     let samples: [ConfluenceParticleSample]
     let length: CGFloat
-    let speed: Double
+    let phaseOffset: Double
     let radius: CGFloat
+}
+
+private struct ConfluenceParticleTrack: Equatable {
+    let id: String
+    let particles: [ConfluenceParticleSpec]
+    let speed: Double
     let color: Color
     let isDimmed: Bool
 }
@@ -278,7 +259,6 @@ private final class ConfluenceParticleView: NSView {
         }
     }
 
-    private let particleSpacing: CGFloat = 30
     private var trackLayers: [String: CALayer] = [:]
     private var paused = false
 
@@ -290,7 +270,7 @@ private final class ConfluenceParticleView: NSView {
         layer?.isGeometryFlipped = true
         layer?.masksToBounds = true
         // Particles barely overlap, so per-particle opacity looks the same as group opacity
-        // and avoids an offscreen pass over ~140 sublayers whenever the host fades.
+        // and avoids an offscreen pass over sublayers whenever the host fades.
         layer?.allowsGroupOpacity = false
         updateContentsScale()
         updatePlayback()
@@ -343,8 +323,7 @@ private final class ConfluenceParticleView: NSView {
 
         for track in tracks {
             if let existing = trackLayers[track.id], let old = previous[track.id] {
-                let geometryChanged = old.samples != track.samples
-                    || old.speed != track.speed || old.radius != track.radius
+                let geometryChanged = old.particles != track.particles || old.speed != track.speed
                 // Reuse the track's layers; only retarget their paths when the geometry moved.
                 if !geometryChanged || configureParticles(of: existing, for: track) {
                     applyAppearance(track, to: existing, animated: !geometryChanged)
@@ -371,43 +350,43 @@ private final class ConfluenceParticleView: NSView {
         return trackLayer
     }
 
-    /// Sizes the track's particle sublayers to the track, reusing existing ones; false when the track cannot animate.
     private func configureParticles(of trackLayer: CALayer, for track: ConfluenceParticleTrack) -> Bool {
-        guard let first = track.samples.first, track.length > 0, track.speed > 0 else { return false }
-        let path = CGMutablePath()
-        path.move(to: first.point)
-        for sample in track.samples.dropFirst() {
-            path.addLine(to: sample.point)
-        }
-
-        let count = max(1, Int((track.length / particleSpacing).rounded()))
-        let spacing = track.length / CGFloat(count)
-        let duration = Double(track.length) / track.speed
-        let diameter = track.radius * 2
+        guard !track.particles.isEmpty, track.speed > 0 else { return false }
+        let count = track.particles.count
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        var particles = trackLayer.sublayers ?? []
-        while particles.count > count {
-            particles.removeLast().removeFromSuperlayer()
+        var layers = trackLayer.sublayers ?? []
+        while layers.count > count {
+            layers.removeLast().removeFromSuperlayer()
         }
-        while particles.count < count {
+        while layers.count < count {
             let particle = CALayer()
             particle.contentsScale = backingScale
             trackLayer.addSublayer(particle)
-            particles.append(particle)
+            layers.append(particle)
         }
-        for (index, particle) in particles.enumerated() {
+        for (index, spec) in track.particles.enumerated() {
+            guard let first = spec.samples.first, spec.length > 0 else { continue }
+            let path = CGMutablePath()
+            path.move(to: first.point)
+            for sample in spec.samples.dropFirst() {
+                path.addLine(to: sample.point)
+            }
+
+            let diameter = spec.radius * 2
+            let duration = Double(spec.length) / track.speed
+            let particle = layers[index]
             particle.bounds = CGRect(x: 0, y: 0, width: diameter, height: diameter)
             particle.position = first.point
-            particle.cornerRadius = track.radius
+            particle.cornerRadius = spec.radius
 
             let animation = CAKeyframeAnimation(keyPath: "position")
             animation.path = path
             animation.calculationMode = .paced
             animation.repeatCount = .infinity
             animation.duration = duration
-            animation.timeOffset = Double(index) * Double(spacing) / track.speed
+            animation.timeOffset = spec.phaseOffset * duration
             particle.add(animation, forKey: "confluence.flow")
         }
         CATransaction.commit()
@@ -472,15 +451,15 @@ private struct ConfluenceHeading: View {
         switch side {
         case .source:
             Text("Sources")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Palette.muted)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.ink3)
                 .frame(width: layout.leftLabelWidth, alignment: .leading)
                 .position(x: layout.leftLabelX + layout.leftLabelWidth / 2, y: layout.headerY)
                 .accessibilityHidden(true)
         case .category:
             Text("Categories")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(Palette.muted)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.ink3)
                 .frame(width: layout.rightLabelWidth, alignment: .trailing)
                 .position(x: layout.rightLabelX + layout.rightLabelWidth / 2, y: layout.headerY)
                 .accessibilityHidden(true)
@@ -488,42 +467,27 @@ private struct ConfluenceHeading: View {
     }
 }
 
-private struct ConfluenceReservoir: View {
+private struct ConfluenceReservoirHeader: View {
     let layout: ConfluenceLayout
-    let reduceTransparency: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 1) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(TokenFormat.short(layout.totalTokens))
-                .font(.system(size: layout.compact ? 18 : 22, weight: .semibold))
-                .tracking(-0.5)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Palette.ink1)
                 .monospacedDigit()
                 .contentTransition(reduceMotion ? .identity : .numericText())
-            Text("Reservoir")
-                .font(.system(size: 9))
-                .foregroundStyle(Palette.muted)
+            Text("Confluence")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Palette.ink3)
         }
         .fixedSize()
         .position(x: layout.reservoir.midX, y: layout.headerY)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text("Reservoir"))
+        .accessibilityLabel(Text("Confluence"))
         .accessibilityValue(Text("\(TokenFormat.spoken(layout.totalTokens)) tokens"))
-
-        Group {
-            if reduceTransparency {
-                RoundedRectangle(cornerRadius: layout.reservoirCorner, style: .continuous)
-                    .strokeBorder(Palette.hairline)
-                    .frame(width: layout.reservoir.width, height: layout.reservoir.height)
-            } else {
-                Color.clear
-                    .frame(width: layout.reservoir.width, height: layout.reservoir.height)
-                    .glassEffect(.regular, in: .rect(cornerRadius: layout.reservoirCorner))
-            }
-        }
-        .position(x: layout.reservoir.midX, y: layout.reservoir.midY)
-        .accessibilityHidden(true)
     }
 }
 
@@ -531,24 +495,20 @@ private struct ConfluenceStreamLabel: View {
     let stream: ConfluenceLayout.Stream
     let total: Int64
     let activeTarget: ConfluenceTarget?
-    let compact: Bool
+    let isDark: Bool
     var focused: FocusState<ConfluenceTarget?>.Binding
 
     private var highlighted: Bool { activeTarget == stream.target }
     private var dimmed: Bool { activeTarget != nil && !highlighted }
 
     var body: some View {
-        VStack(alignment: stream.side == .source ? .trailing : .leading, spacing: 1) {
-            confluenceName(stream)
-                .font(.system(size: compact ? 10 : 11, weight: highlighted ? .semibold : .medium))
-                .foregroundStyle(dimmed ? Palette.muted : Color.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            valueText
-                .font(.system(size: compact ? 9 : 10))
-                .foregroundStyle(Palette.muted)
-                .monospacedDigit()
-                .lineLimit(1)
+        Group {
+            switch stream.side {
+            case .source:
+                sourceLane
+            case .category:
+                categoryChip
+            }
         }
         .frame(width: stream.labelFrame.width, height: stream.labelFrame.height)
         .contentShape(Rectangle())
@@ -561,12 +521,69 @@ private struct ConfluenceStreamLabel: View {
         .accessibilityValue(Text("\(TokenFormat.spoken(stream.tokens)) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
     }
 
-    private var valueText: Text {
-        switch stream.side {
-        case .source:
-            Text(verbatim: TokenFormat.short(stream.tokens))
-        case .category:
-            Text("\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))")
+    private var sourceLane: some View {
+        HStack(alignment: .center, spacing: 8) {
+            RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
+                .fill(stream.color.opacity(isDark ? 0.18 : 0.14))
+                .frame(width: 22, height: 22)
+                .overlay {
+                    Text(verbatim: stream.monogram)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(stream.color)
+                }
+                .opacity(dimmed ? 0.45 : 1)
+
+            if stream.isCollapsedLabel {
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    confluenceName(stream)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(verbatim: " · \(TokenFormat.short(stream.tokens))")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink2)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 1) {
+                    confluenceName(stream)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Text(verbatim: "\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink2)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    private var categoryChip: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            confluenceName(stream)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text(verbatim: "\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))")
+                .font(.system(size: 11.5))
+                .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+                .fill(Palette.ink1.opacity(highlighted ? (isDark ? 0.08 : 0.06) : (isDark ? 0.045 : 0.03)))
         }
     }
 }
@@ -589,27 +606,32 @@ private struct ConfluenceTooltip: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Circle().fill(stream.color).frame(width: 6, height: 6)
-                confluenceName(stream).font(.system(size: 11, weight: .semibold))
+                confluenceName(stream)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.ink1)
             }
-            Text("\(TokenFormat.short(stream.tokens)) tokens").fontWeight(.medium)
+            Text("\(TokenFormat.short(stream.tokens)) tokens")
+                .fontWeight(.medium)
+                .foregroundStyle(Palette.ink1)
             Text("\(Share.percent(stream.tokens, of: total)) of total")
-                .foregroundStyle(Palette.muted)
+                .foregroundStyle(Palette.ink2)
         }
         .font(.system(size: 11))
         .monospacedDigit()
         .padding(.horizontal, 11)
         .padding(.vertical, 8)
         .frame(maxWidth: 210, alignment: .leading)
-        .tooltipSurface(reduceTransparency: reduceTransparency)
+        .tooltipSurface(reduceTransparency: reduceTransparency, cornerRadius: Radius.inner)
     }
 }
 
 // MARK: - Data-to-form mapping
 
-/// A shared vertical scale maps tokens to ribbon thickness on both sides. Every visible
-/// stream has a minimum thickness; labels spread independently so narrow streams stay legible.
-/// The reservoir stacks the source colors using the same scale. Flow speed is 36 points/s
-/// times the stream's share of the period total, so motion also comes from usage data.
+/// A shared vertical scale maps tokens to ribbon thickness on both sides. Every non-zero
+/// stream keeps at least 4.5pt thickness (4.5–7pt under 2%); labels occupy independent lanes
+/// so small streams never collide. The central vessel derives its vertical bounds directly from
+/// the stream stack: 10pt of air headroom above the curved meniscus down to the lowest stream
+/// plus the bottom corner radius.
 private struct ConfluenceLayout {
     enum Side {
         case source, category
@@ -618,6 +640,7 @@ private struct ConfluenceLayout {
     struct Descriptor {
         let target: ConfluenceTarget
         let side: Side
+        let sourceID: String?
         let name: String
         let tokens: Int64
         let color: Color
@@ -629,6 +652,7 @@ private struct ConfluenceLayout {
         let target: ConfluenceTarget
         let side: Side
         let name: String
+        let monogram: String
         let tokens: Int64
         let value: Double
         let color: Color
@@ -638,8 +662,9 @@ private struct ConfluenceLayout {
         let innerTop: CGFloat
         let innerHeight: CGFloat
         let ribbon: Path
-        let centerSamples: [ConfluenceParticleSample]
+        let particleSpecs: [ConfluenceParticleSpec]
         var labelFrame: CGRect = .zero
+        var isCollapsedLabel = false
         var leader: Path?
 
         var id: String { target.id }
@@ -650,6 +675,9 @@ private struct ConfluenceLayout {
     let totalTokens: Int64
     let reservoir: CGRect
     let reservoirCorner: CGFloat
+    let meniscusY: CGFloat
+    let meniscusSag: CGFloat
+    let dominantCategoryColor: Color
     let flowBottom: CGFloat
     let flowBasis: Double
     let compact: Bool
@@ -665,6 +693,8 @@ private struct ConfluenceLayout {
     private let categoryDescriptors: [Descriptor]
 
     private static let otherID = "__other__"
+    private static let pad: CGFloat = 20
+    private static let vesselHeadroom: CGFloat = 10
 
     var animationValues: ConfluenceValues {
         var streams: [String: Double] = [:]
@@ -696,6 +726,7 @@ private struct ConfluenceLayout {
             Descriptor(
                 target: .source(source.id),
                 side: .source,
+                sourceID: source.id,
                 name: source.name,
                 tokens: source.counts.total,
                 color: Palette.color(forSource: source.id),
@@ -705,9 +736,10 @@ private struct ConfluenceLayout {
         } + (otherTokens > 0 ? [Descriptor(
             target: .source(Self.otherID),
             side: .source,
+            sourceID: Self.otherID,
             name: "Other",
             tokens: otherTokens,
-            color: Palette.muted,
+            color: Palette.ink3,
             category: nil,
             isOther: true
         )] : [])
@@ -718,6 +750,7 @@ private struct ConfluenceLayout {
             return Descriptor(
                 target: .category(category),
                 side: .category,
+                sourceID: nil,
                 name: category.rawValue,
                 tokens: tokens,
                 color: Palette.color(for: category),
@@ -748,30 +781,32 @@ private struct ConfluenceLayout {
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
 
         let w = max(size.width, 1), h = max(size.height, 1)
-        compact = w < 560 || h < 280
+        compact = w < 680 || h < 340
         let bounds = Self.flowBounds(for: size)
         let top = bounds.top, bottom = bounds.bottom
         flowBottom = bottom
         let flowHeight = max(1, bottom - top)
-        headerY = max(12, top * 0.42)
+        headerY = Self.pad + 8
 
-        let margin = min(14, max(8, w * 0.025))
-        leftLabelWidth = min(compact ? 108 : 140, max(48, w * (compact ? 0.19 : 0.18)))
-        rightLabelWidth = min(compact ? 118 : 150, max(60, w * (compact ? 0.21 : 0.19)))
-        leftLabelX = margin
-        let terminalWidth: CGFloat = 8
-        let labelGap: CGFloat = 18
-        let leftX = margin + leftLabelWidth + labelGap + terminalWidth
-        let rightX = w - margin - rightLabelWidth - labelGap - terminalWidth
-        rightLabelX = rightX + labelGap
+        leftLabelX = Self.pad
+        leftLabelWidth = min(188, max(140, ((w * 0.22) / 4).rounded() * 4))
+        rightLabelWidth = min(220, max(164, ((w * 0.25) / 4).rounded() * 4))
+        rightLabelX = max(leftLabelX + leftLabelWidth + 120, w - Self.pad - rightLabelWidth)
 
-        let poolWidth = min(58, max(36, w * 0.075))
-        let desiredPoolX = (leftX + rightX - poolWidth) / 2
-        let minimumPoolX = leftX + 22
-        let maximumPoolX = rightX - poolWidth - 22
+        let terminalWidth: CGFloat = 4
+        let leftLabelGap: CGFloat = 12
+        let rightLabelGap: CGFloat = 16
+        let leftX = leftLabelX + leftLabelWidth + leftLabelGap + terminalWidth
+        let rightX = rightLabelX - rightLabelGap - terminalWidth
+
+        let poolWidth = min(150, max(96, ((w * 0.12) / 4).rounded() * 4))
+        reservoirCorner = min(poolWidth / 2, 22)
+        let desiredPoolX = ((leftX + rightX - poolWidth) / 8).rounded() * 4
+        let minimumPoolX = leftX + 24
+        let maximumPoolX = rightX - poolWidth - 24
         let poolX = maximumPoolX >= minimumPoolX
             ? min(max(desiredPoolX, minimumPoolX), maximumPoolX)
-            : max(0, (w - poolWidth) / 2)
+            : max(Self.pad, (w - poolWidth) / 2)
 
         let sourceSum = sourceDescriptors.reduce(0.0) { result, descriptor in
             result + max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens))
@@ -783,59 +818,73 @@ private struct ConfluenceLayout {
         flowBasis = max(1, max(animatedTotal, max(sourceSum, categorySum)))
         isEmpty = animatedTotal == 0 && sourceSum == 0 && categorySum == 0
 
+        dominantCategoryColor = Palette.color(for: .cacheRead)
+
         let leftGap: CGFloat = compact ? 6 : 8
-        let rightGap: CGFloat = compact ? 8 : 10
-        let maximumGaps = max(
+        let rightGap: CGFloat = compact ? 6 : 8
+        let maxOuterGaps = max(
             leftGap * CGFloat(max(0, sourceDescriptors.count - 1)),
             rightGap * CGFloat(max(0, categoryDescriptors.count - 1))
         )
-        let scale = max(1, flowHeight - maximumGaps) / flowBasis
-        let minimumThickness: CGFloat = compact ? 1.8 : 2.2
+        let vesselExtra = Self.vesselHeadroom + reservoirCorner
+        let stackHeight = isEmpty
+            ? min(136, max(48, flowHeight - vesselExtra))
+            : max(36, flowHeight - max(maxOuterGaps, vesselExtra))
 
-        func thickness(for descriptor: Descriptor) -> CGFloat {
-            let value = max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens))
-            return max(minimumThickness, CGFloat(value * scale))
-        }
+        let sourceHeights = Self.allocateHeights(
+            descriptors: sourceDescriptors,
+            values: values,
+            flowBasis: flowBasis,
+            targetSum: stackHeight
+        )
+        let categoryHeights = Self.allocateHeights(
+            descriptors: categoryDescriptors,
+            values: values,
+            flowBasis: flowBasis,
+            targetSum: stackHeight
+        )
+        let actualStackHeight = isEmpty
+            ? stackHeight
+            : max(1, max(sourceHeights.reduce(0, +), categoryHeights.reduce(0, +)))
 
-        let sourceHeights = sourceDescriptors.map(thickness)
-        let categoryHeights = categoryDescriptors.map(thickness)
-        let sourcePoolHeight = sourceHeights.reduce(0, +)
-        let categoryPoolHeight = categoryHeights.reduce(0, +)
-        let poolHeight = sourceDescriptors.isEmpty && categoryDescriptors.isEmpty
-            ? min(120, flowHeight)
-            : max(1, max(sourcePoolHeight, categoryPoolHeight))
-        reservoir = CGRect(x: poolX, y: top + (flowHeight - poolHeight) / 2, width: poolWidth, height: poolHeight)
-        reservoirCorner = min(poolWidth / 2, compact ? 16 : 20)
+        let vesselHeight = Self.vesselHeadroom + actualStackHeight + reservoirCorner
+        let vesselTop = top + ((flowHeight - vesselHeight) / 2).rounded()
+        let streamTop = vesselTop + Self.vesselHeadroom
+        reservoir = CGRect(x: poolX, y: vesselTop, width: poolWidth, height: vesselHeight)
+        meniscusY = streamTop
+        meniscusSag = min(5, max(3.5, poolWidth * 0.04))
 
         sources = Self.makeStreams(
             descriptors: sourceDescriptors,
             heights: sourceHeights,
             values: values,
+            flowBasis: flowBasis,
             side: .source,
             top: top,
             flowHeight: flowHeight,
+            streamTop: streamTop,
             gap: leftGap,
             reservoir: reservoir,
             outerX: leftX,
             terminalWidth: terminalWidth,
-            labelX: margin,
-            labelWidth: leftLabelWidth,
-            compact: compact
+            labelX: leftLabelX,
+            labelWidth: leftLabelWidth
         )
         categories = Self.makeStreams(
             descriptors: categoryDescriptors,
             heights: categoryHeights,
             values: values,
+            flowBasis: flowBasis,
             side: .category,
             top: top,
             flowHeight: flowHeight,
+            streamTop: streamTop,
             gap: rightGap,
             reservoir: reservoir,
             outerX: rightX,
             terminalWidth: terminalWidth,
-            labelX: rightX + labelGap,
-            labelWidth: rightLabelWidth,
-            compact: compact
+            labelX: rightLabelX,
+            labelWidth: rightLabelWidth
         )
     }
 
@@ -855,27 +904,20 @@ private struct ConfluenceLayout {
 
     func particleTracks(
         activeTarget: ConfluenceTarget?,
-        reduceTransparency: Bool,
-        isDark: Bool
+        reduceMotion: Bool,
+        reduceTransparency: Bool
     ) -> [ConfluenceParticleTrack] {
-        (sources + categories).compactMap { stream in
-            guard stream.value > 0 else { return nil }
+        guard !reduceMotion, !reduceTransparency else { return [] }
+        return (sources + categories).compactMap { stream in
+            guard stream.value > 0, !stream.particleSpecs.isEmpty else { return nil }
             let highlighted = activeTarget == stream.target
-            // White particles vanish on the light pastel field; use a darker tone of the stream there.
-            let color: Color = if isDark {
-                reduceTransparency ? .white : .white.opacity(highlighted ? 0.82 : 0.48)
-            } else {
-                reduceTransparency
-                    ? stream.color.mix(with: .black, by: 0.45)
-                    : stream.color.mix(with: .black, by: 0.35).opacity(highlighted ? 0.85 : 0.6)
-            }
+            // Specks stay in the stream's own hue at <= 0.12 opacity.
+            let opacity = highlighted ? 0.12 : 0.09
             return ConfluenceParticleTrack(
                 id: stream.target.id,
-                samples: stream.centerSamples,
-                length: stream.centerSamples.last?.distance ?? 0,
-                speed: 36 * stream.value / flowBasis,
-                radius: max(0.65, min(4, stream.innerHeight * 0.16)) * 0.5,
-                color: color,
+                particles: stream.particleSpecs,
+                speed: max(10, 22 * stream.value / flowBasis),
+                color: stream.color.opacity(opacity),
                 isDimmed: activeTarget != nil && !highlighted
             )
         }
@@ -903,71 +945,150 @@ private struct ConfluenceLayout {
     private static func sourceLimit(for size: CGSize, count: Int) -> Int {
         let bounds = flowBounds(for: size)
         let height = max(1, bounds.bottom - bounds.top)
-        let pitch: CGFloat = size.height < 280 ? 28 : 32
+        let pitch: CGFloat = 32
         let fitting = max(1, Int((height + 4) / pitch))
         return min(7, max(count > 1 ? 2 : 1, fitting))
     }
 
     private static func flowBounds(for size: CGSize) -> (top: CGFloat, bottom: CGFloat) {
         let h = max(size.height, 1)
-        let top = min(h < 240 ? 46 : 56, h * 0.3)
-        let bottom = max(top + 1, h - (h < 240 ? 12 : 18))
-        return (top, min(h, bottom))
+        let top: CGFloat = 48
+        let bottom = max(top + 64, h - pad)
+        return (top, min(h - pad, bottom))
+    }
+
+    /// Allocates vessel-side heights that sum to `targetSum` while keeping every non-zero stream >= 4.5pt
+    /// and streams under 2% share within 4.5–7pt.
+    private static func allocateHeights(
+        descriptors: [Descriptor],
+        values: ConfluenceValues?,
+        flowBasis: Double,
+        targetSum: CGFloat
+    ) -> [CGFloat] {
+        guard !descriptors.isEmpty else { return [] }
+        let count = descriptors.count
+        let rawValues = descriptors.map { descriptor in
+            max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens))
+        }
+        let minFloor: CGFloat = 4.5
+        let smallMax: CGFloat = 7.0
+        let effectiveMin = min(minFloor, targetSum / CGFloat(count))
+        let effectiveSmallMax = max(effectiveMin, min(smallMax, targetSum / CGFloat(count)))
+
+        var heights = Array(repeating: CGFloat(0), count: count)
+        var locked = Array(repeating: false, count: count)
+
+        for index in 0..<count {
+            let value = rawValues[index]
+            guard value > 0 else {
+                heights[index] = effectiveMin
+                locked[index] = true
+                continue
+            }
+            let share = value / max(1, flowBasis)
+            if share < 0.02 {
+                let t = CGFloat(max(0, min(1, share / 0.02)))
+                heights[index] = effectiveMin + t * (effectiveSmallMax - effectiveMin)
+                locked[index] = true
+            }
+        }
+
+        while true {
+            let lockedSum = locked.indices.filter { locked[$0] }.reduce(CGFloat(0)) { $0 + heights[$1] }
+            let remainingHeight = max(0, targetSum - lockedSum)
+            let unlockedIndices = locked.indices.filter { !locked[$0] }
+            guard !unlockedIndices.isEmpty else {
+                if lockedSum > 0, abs(lockedSum - targetSum) > 0.01 {
+                    let scale = targetSum / lockedSum
+                    heights = heights.map { max(effectiveMin, $0 * scale) }
+                }
+                break
+            }
+            let unlockedValueSum = unlockedIndices.reduce(0.0) { $0 + rawValues[$1] }
+            guard unlockedValueSum > 0 else {
+                let each = remainingHeight / CGFloat(unlockedIndices.count)
+                for index in unlockedIndices {
+                    heights[index] = each
+                    locked[index] = true
+                }
+                break
+            }
+            var clampedAny = false
+            for index in unlockedIndices {
+                let proposed = CGFloat(rawValues[index] / unlockedValueSum) * remainingHeight
+                if proposed < effectiveSmallMax {
+                    heights[index] = effectiveSmallMax
+                    locked[index] = true
+                    clampedAny = true
+                } else {
+                    heights[index] = proposed
+                }
+            }
+            if !clampedAny { break }
+        }
+        return heights
     }
 
     private static func makeStreams(
         descriptors: [Descriptor],
         heights: [CGFloat],
         values: ConfluenceValues?,
+        flowBasis: Double,
         side: Side,
         top: CGFloat,
         flowHeight: CGFloat,
+        streamTop: CGFloat,
         gap: CGFloat,
         reservoir: CGRect,
         outerX: CGFloat,
         terminalWidth: CGFloat,
         labelX: CGFloat,
-        labelWidth: CGFloat,
-        compact: Bool
+        labelWidth: CGFloat
     ) -> [Stream] {
         guard !descriptors.isEmpty else { return [] }
         let innerHeight = heights.reduce(0, +)
         let outerHeight = innerHeight + gap * CGFloat(descriptors.count - 1)
-        var innerY = reservoir.midY - innerHeight / 2
+        var innerY = streamTop
         var outerY = top + (flowHeight - outerHeight) / 2
         var streams: [Stream] = []
+        let bleed = min(12, reservoir.width * 0.25)
 
         for (index, descriptor) in descriptors.enumerated() {
             let height = heights[index]
-            let startX = side == .source ? outerX : reservoir.maxX
-            let endX = side == .source ? reservoir.minX : outerX
             let outerFrame = CGRect(
                 x: side == .source ? outerX - terminalWidth : outerX,
                 y: outerY,
                 width: terminalWidth,
                 height: height
             )
+            let startX = side == .source ? outerFrame.minX : reservoir.maxX
+            let endX = side == .source ? reservoir.minX : outerFrame.maxX
             // Sources flow outer → reservoir; categories flow reservoir → outer.
             let startY = side == .source ? outerY : innerY
             let endY = side == .source ? innerY : outerY
             let ribbon = ribbonPath(
+                side: side,
                 startX: startX,
                 startTop: startY,
                 startBottom: startY + height,
                 endX: endX,
                 endTop: endY,
-                endBottom: endY + height
+                endBottom: endY + height,
+                vesselBleed: bleed
             )
-            let centerSamples = makeCenterSamples(
-                startX: startX,
-                startY: startY + height / 2,
-                endX: endX,
-                endY: endY + height / 2
+            let particleSpecs = makeParticleSpecs(
+                streamID: descriptor.target.id,
+                startX: startX + 8,
+                startTop: startY,
+                endX: endX - 8,
+                endTop: endY,
+                height: height
             )
             streams.append(Stream(
                 target: descriptor.target,
                 side: side,
                 name: descriptor.name,
+                monogram: monogram(for: descriptor),
                 tokens: descriptor.tokens,
                 value: max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens)),
                 color: descriptor.color,
@@ -977,14 +1098,18 @@ private struct ConfluenceLayout {
                 innerTop: innerY,
                 innerHeight: height,
                 ribbon: ribbon,
-                centerSamples: centerSamples
+                particleSpecs: particleSpecs
             ))
             innerY += height
             outerY += height + gap
         }
 
-        let labelHeight: CGFloat = compact ? 26 : 30
-        let labelPitch: CGFloat = compact ? 28 : 32
+        let labelHeight: CGFloat = side == .source ? 28 : 34
+        let labelPitch: CGFloat = if side == .source {
+            30
+        } else {
+            flowHeight >= CGFloat(streams.count) * 38 ? 38 : 34
+        }
         let centers = spread(
             streams.map { $0.outerFrame.midY },
             minimum: top + labelHeight / 2,
@@ -999,16 +1124,51 @@ private struct ConfluenceLayout {
                 width: labelWidth,
                 height: labelHeight
             )
+            if side == .source {
+                let share = streams[index].value / max(1, flowBasis)
+                let prevGap = index > 0 ? centers[index] - centers[index - 1] : .infinity
+                let nextGap = index + 1 < centers.count ? centers[index + 1] - centers[index] : .infinity
+                let neighborGap = min(prevGap, nextGap)
+                streams[index].isCollapsedLabel = share < 0.08
+                    || streams[index].outerFrame.height < 16
+                    || (neighborGap < 32 && index > 0 && share < 0.20)
+            }
             let streamY = streams[index].outerFrame.midY
-            if abs(labelY - streamY) > 2 {
-                let direction: CGFloat = side == .source ? -1 : 1
+            if side == .category, abs(labelY - streamY) > 1.5 {
                 var leader = Path()
-                leader.move(to: CGPoint(x: outerX + direction * 10, y: streamY))
-                leader.addLine(to: CGPoint(x: outerX + direction * 16, y: labelY))
+                leader.move(to: CGPoint(x: streams[index].outerFrame.maxX + 2, y: streamY))
+                leader.addLine(to: CGPoint(x: labelX - 3, y: labelY))
                 streams[index].leader = leader
             }
         }
         return streams
+    }
+
+    private static func monogram(for descriptor: Descriptor) -> String {
+        if descriptor.isOther { return "OT" }
+        switch descriptor.sourceID {
+        case "claude": return "CC"
+        case "pi": return "PI"
+        case "codex": return "CX"
+        case "kimi": return "KM"
+        case "zcode": return "ZC"
+        case "grok": return "GK"
+        case "omp": return "OM"
+        case "opencode": return "OC"
+        case "gemini": return "GM"
+        case "factory": return "FD"
+        case "deepseek": return "DS"
+        default: break
+        }
+        let words = descriptor.name
+            .split { !$0.isLetter && !$0.isNumber }
+            .filter { !$0.isEmpty }
+        if words.count >= 2, let first = words[0].first, let second = words[1].first {
+            return "\(first)\(second)".uppercased()
+        }
+        let chars = descriptor.name.filter { $0.isLetter || $0.isNumber }
+        let prefix = String(chars.prefix(2)).uppercased()
+        return prefix.isEmpty ? "••" : prefix
     }
 
     private static func spread(
@@ -1032,33 +1192,150 @@ private struct ConfluenceLayout {
                 result[index] = min(result[index], result[index + 1] - gap)
             }
         }
+        if result[0] < minimum {
+            let shift = minimum - result[0]
+            for index in result.indices {
+                result[index] += shift
+            }
+        }
         return result
     }
 
+    /// Extends the vessel-side edge slightly inside the vessel so clipping against the inverse
+    /// vessel shape produces a flush join, and rounds the outer end with a 3pt cap.
     private static func ribbonPath(
+        side: Side,
         startX: CGFloat,
         startTop: CGFloat,
         startBottom: CGFloat,
         endX: CGFloat,
         endTop: CGFloat,
-        endBottom: CGFloat
+        endBottom: CGFloat,
+        vesselBleed: CGFloat
     ) -> Path {
         let middleX = (startX + endX) / 2
         var path = Path()
-        path.move(to: CGPoint(x: startX, y: startTop))
-        path.addCurve(
-            to: CGPoint(x: endX, y: endTop),
-            control1: CGPoint(x: middleX, y: startTop),
-            control2: CGPoint(x: middleX, y: endTop)
-        )
-        path.addLine(to: CGPoint(x: endX, y: endBottom))
-        path.addCurve(
-            to: CGPoint(x: startX, y: startBottom),
-            control1: CGPoint(x: middleX, y: endBottom),
-            control2: CGPoint(x: middleX, y: startBottom)
-        )
+        if side == .source {
+            let height = max(0, startBottom - startTop)
+            let cap = min(3, height / 2)
+            let capX = min(endX, startX + cap)
+            let midY = (startTop + startBottom) / 2
+            path.move(to: CGPoint(x: capX, y: startTop))
+            path.addCurve(
+                to: CGPoint(x: endX, y: endTop),
+                control1: CGPoint(x: middleX, y: startTop),
+                control2: CGPoint(x: middleX, y: endTop)
+            )
+            path.addLine(to: CGPoint(x: endX + vesselBleed, y: endTop))
+            path.addLine(to: CGPoint(x: endX + vesselBleed, y: endBottom))
+            path.addLine(to: CGPoint(x: endX, y: endBottom))
+            path.addCurve(
+                to: CGPoint(x: capX, y: startBottom),
+                control1: CGPoint(x: middleX, y: endBottom),
+                control2: CGPoint(x: middleX, y: startBottom)
+            )
+            if cap > 0.25 {
+                path.addArc(
+                    tangent1End: CGPoint(x: startX, y: startBottom),
+                    tangent2End: CGPoint(x: startX, y: midY),
+                    radius: cap
+                )
+                path.addArc(
+                    tangent1End: CGPoint(x: startX, y: startTop),
+                    tangent2End: CGPoint(x: capX, y: startTop),
+                    radius: cap
+                )
+            }
+        } else {
+            let height = max(0, endBottom - endTop)
+            let cap = min(3, height / 2)
+            let capX = max(startX, endX - cap)
+            let midY = (endTop + endBottom) / 2
+            path.move(to: CGPoint(x: startX - vesselBleed, y: startTop))
+            path.addLine(to: CGPoint(x: startX, y: startTop))
+            path.addCurve(
+                to: CGPoint(x: capX, y: endTop),
+                control1: CGPoint(x: middleX, y: startTop),
+                control2: CGPoint(x: middleX, y: endTop)
+            )
+            if cap > 0.25 {
+                path.addArc(
+                    tangent1End: CGPoint(x: endX, y: endTop),
+                    tangent2End: CGPoint(x: endX, y: midY),
+                    radius: cap
+                )
+                path.addArc(
+                    tangent1End: CGPoint(x: endX, y: endBottom),
+                    tangent2End: CGPoint(x: capX, y: endBottom),
+                    radius: cap
+                )
+                path.addLine(to: CGPoint(x: capX, y: endBottom))
+            } else {
+                path.addLine(to: CGPoint(x: endX, y: endBottom))
+            }
+            path.addCurve(
+                to: CGPoint(x: startX, y: startBottom),
+                control1: CGPoint(x: middleX, y: endBottom),
+                control2: CGPoint(x: middleX, y: startBottom)
+            )
+            path.addLine(to: CGPoint(x: startX - vesselBleed, y: startBottom))
+        }
         path.closeSubpath()
         return path
+    }
+
+    /// Generates at most 3 seeded-jitter particle tracks per stream (none on thin streams).
+    private static func makeParticleSpecs(
+        streamID: String,
+        startX: CGFloat,
+        startTop: CGFloat,
+        endX: CGFloat,
+        endTop: CGFloat,
+        height: CGFloat
+    ) -> [ConfluenceParticleSpec] {
+        guard height >= 10, endX > startX + 12 else { return [] }
+        let count = height < 20 ? 1 : (height < 48 ? 2 : 3)
+        var specs: [ConfluenceParticleSpec] = []
+        specs.reserveCapacity(count)
+
+        for index in 0..<count {
+            let h1 = seededUnit(streamID, salt: UInt64(index * 3 + 1))
+            let h2 = seededUnit(streamID, salt: UInt64(index * 3 + 2))
+            let h3 = seededUnit(streamID, salt: UInt64(index * 3 + 3))
+
+            // Jitter cross-stream lane and phase so specks never line up on a grid.
+            let laneFraction = 0.24 + 0.52 * CGFloat(h1)
+            let endFraction = 0.26 + 0.48 * CGFloat(h2)
+            let samples = makeCenterSamples(
+                startX: startX,
+                startY: startTop + height * laneFraction,
+                endX: endX,
+                endY: endTop + height * endFraction
+            )
+            guard let length = samples.last?.distance, length > 0 else { continue }
+            let basePhase = (Double(index) + 0.18 + 0.64 * h2) / Double(count)
+            let phase = (basePhase + h3 * 0.37).truncatingRemainder(dividingBy: 1.0)
+            let radius = 1.1 + 0.5 * CGFloat(h3)
+            specs.append(ConfluenceParticleSpec(
+                samples: samples,
+                length: length,
+                phaseOffset: phase,
+                radius: radius
+            ))
+        }
+        return specs
+    }
+
+    private static func seededUnit(_ key: String, salt: UInt64) -> Double {
+        var hash: UInt64 = 0xcbf29ce484222325 ^ (salt &* 0x9e3779b97f4a7c15)
+        for byte in key.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        hash ^= hash >> 33
+        hash = hash &* 0xff51afd7ed558ccd
+        hash ^= hash >> 33
+        return Double(hash & 0x1F_FFFF) / Double(0x1F_FFFF)
     }
 
     private static func makeCenterSamples(
@@ -1067,7 +1344,7 @@ private struct ConfluenceLayout {
         endX: CGFloat,
         endY: CGFloat
     ) -> [ConfluenceParticleSample] {
-        let sampleCount = 40
+        let sampleCount = 32
         let middleX = (startX + endX) / 2
         var samples: [ConfluenceParticleSample] = []
         samples.reserveCapacity(sampleCount + 1)
@@ -1150,79 +1427,185 @@ private struct ConfluenceRenderer {
     let reduceTransparency: Bool
 
     func draw(in context: inout GraphicsContext) {
-        drawReservoir(in: &context)
+        let vesselShape = RoundedRectangle(cornerRadius: layout.reservoirCorner, style: .continuous)
+            .path(in: layout.reservoir)
+
+        var streamContext = context
+        streamContext.clip(to: vesselShape, options: .inverse)
         for stream in layout.sources + layout.categories {
-            draw(stream, in: &context)
+            draw(stream, in: &streamContext)
         }
-        for stream in layout.sources + layout.categories {
+
+        drawReservoir(vesselShape: vesselShape, in: &context)
+
+        for stream in layout.categories {
             guard let leader = stream.leader else { continue }
-            context.stroke(leader, with: .color(Palette.hairline), lineWidth: 0.8)
+            context.stroke(
+                leader,
+                with: .color(stream.color.opacity(0.5)),
+                style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [2.5, 2.5])
+            )
         }
     }
 
-    private func drawReservoir(in context: inout GraphicsContext) {
-        let shape = Path(roundedRect: layout.reservoir, cornerRadius: layout.reservoirCorner)
-        // A clipped copy of the context clips without the offscreen layer drawLayer allocates.
+    private func drawReservoir(vesselShape: Path, in context: inout GraphicsContext) {
+        let rect = layout.reservoir
+
+        if !reduceTransparency {
+            var shadowContext = context
+            shadowContext.clip(to: vesselShape, options: .inverse)
+            shadowContext.addFilter(.shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2))
+            shadowContext.fill(vesselShape, with: .color(.black))
+        }
+
         var clipped = context
-        clipped.clip(to: shape)
-        clipped.fill(
-            shape,
-            with: .color(reduceTransparency ? Palette.solid : Palette.accent.opacity(isDark ? 0.12 : 0.08))
-        )
-        for source in layout.sources {
-            let rect = CGRect(
-                x: layout.reservoir.minX,
-                y: source.innerTop,
-                width: layout.reservoir.width,
-                height: source.innerHeight
+        clipped.clip(to: vesselShape)
+
+        let meniscusY = layout.meniscusY
+        let controlY = meniscusY + layout.meniscusSag * 2
+
+        if reduceTransparency {
+            clipped.fill(vesselShape, with: .color(Palette.solid))
+        } else {
+            // Lightly frosted 10pt air headspace above the meniscus.
+            var airBody = Path()
+            airBody.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            airBody.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
+            airBody.addLine(to: CGPoint(x: rect.maxX, y: meniscusY))
+            airBody.addQuadCurve(
+                to: CGPoint(x: rect.minX, y: meniscusY),
+                control: CGPoint(x: rect.midX, y: controlY)
             )
+            airBody.closeSubpath()
             clipped.fill(
-                Path(rect),
-                with: .color(reduceTransparency ? source.color : source.color.opacity(isDark ? 0.5 : 0.4))
+                airBody,
+                with: .color(Color.white.opacity(isDark ? 0.06 : 0.45))
             )
         }
+
+        if !layout.isEmpty {
+            var liquidBody = Path()
+            liquidBody.move(to: CGPoint(x: rect.minX, y: meniscusY))
+            liquidBody.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: meniscusY),
+                control: CGPoint(x: rect.midX, y: controlY)
+            )
+            liquidBody.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+            liquidBody.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+            liquidBody.closeSubpath()
+
+            // Dominant-category liquid, deepening toward the base.
+            let liquidColor = layout.dominantCategoryColor
+            clipped.fill(
+                liquidBody,
+                with: .linearGradient(
+                    Gradient(colors: [
+                        liquidColor.opacity(isDark ? 0.30 : 0.28),
+                        liquidColor.opacity(isDark ? 0.55 : 0.50),
+                    ]),
+                    startPoint: CGPoint(x: rect.midX, y: meniscusY),
+                    endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+                )
+            )
+
+            // Meniscus lens sitting 10pt below the vessel's top: a 1pt line in the category colour
+            // at 0.5 opacity under a 4pt-tall convex arc band in white at 0.55 opacity.
+            let lensHalfHeight: CGFloat = 2
+            var meniscusLine = Path()
+            meniscusLine.move(to: CGPoint(x: rect.minX, y: meniscusY + lensHalfHeight))
+            meniscusLine.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: meniscusY + lensHalfHeight),
+                control: CGPoint(x: rect.midX, y: controlY + lensHalfHeight)
+            )
+            clipped.stroke(
+                meniscusLine,
+                with: .color(liquidColor.opacity(0.5)),
+                lineWidth: 1.0
+            )
+
+            var meniscusLens = Path()
+            meniscusLens.move(to: CGPoint(x: rect.minX, y: meniscusY - lensHalfHeight))
+            meniscusLens.addQuadCurve(
+                to: CGPoint(x: rect.maxX, y: meniscusY - lensHalfHeight),
+                control: CGPoint(x: rect.midX, y: controlY - lensHalfHeight)
+            )
+            meniscusLens.addLine(to: CGPoint(x: rect.maxX, y: meniscusY + lensHalfHeight))
+            meniscusLens.addQuadCurve(
+                to: CGPoint(x: rect.minX, y: meniscusY + lensHalfHeight),
+                control: CGPoint(x: rect.midX, y: controlY + lensHalfHeight)
+            )
+            meniscusLens.closeSubpath()
+            clipped.fill(meniscusLens, with: .color(.white.opacity(0.55)))
+        }
+
+        // Single 3pt highlight inset 6pt from the left rim, white at 0.45 opacity,
+        // fading out over the top and bottom 20pt.
+        if !reduceTransparency {
+            let highlightRect = CGRect(
+                x: rect.minX + 6,
+                y: rect.minY,
+                width: 3,
+                height: rect.height
+            )
+            let highlight = RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .path(in: highlightRect)
+            let fade = min(0.45, Double(20 / max(1, rect.height)))
+            clipped.fill(
+                highlight,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .white.opacity(0), location: 0),
+                        .init(color: .white.opacity(0.45), location: fade),
+                        .init(color: .white.opacity(0.45), location: 1 - fade),
+                        .init(color: .white.opacity(0), location: 1),
+                    ]),
+                    startPoint: CGPoint(x: highlightRect.midX, y: highlightRect.minY),
+                    endPoint: CGPoint(x: highlightRect.midX, y: highlightRect.maxY)
+                )
+            )
+        }
+
+        // Crisp 1pt rim stroke in ink at 0.10 opacity in light mode and white at 0.14 in dark mode.
+        let rimColor = isDark ? Color.white.opacity(0.14) : Palette.ink1.opacity(0.10)
+        context.stroke(vesselShape, with: .color(rimColor), lineWidth: 1.0)
     }
 
     private func draw(_ stream: ConfluenceLayout.Stream, in context: inout GraphicsContext) {
         let highlighted = activeTarget == stream.target
         let dimmed = activeTarget != nil && !highlighted
-        let alpha = (highlighted ? 0.96 : isDark ? 0.8 : 0.72) * (dimmed ? 0.2 : 1)
-        let fillColor = dimmed && reduceTransparency ? Palette.muted : stream.color
+        let alpha = (highlighted ? 0.96 : isDark ? 0.78 : 0.72) * (dimmed ? 0.2 : 1)
+        let fillColor = dimmed && reduceTransparency ? Palette.ink3 : stream.color
+        let startX = stream.side == .source ? stream.outerFrame.minX : layout.reservoir.maxX
+        let endX = stream.side == .source ? layout.reservoir.minX : stream.outerFrame.maxX
         let bounds = stream.ribbon.boundingRect
 
         if reduceTransparency {
             context.fill(stream.ribbon, with: .color(fillColor))
         } else {
             let colors = stream.side == .source
-                ? [stream.color.opacity(alpha), stream.color.opacity(alpha * 0.58)]
-                : [stream.color.opacity(alpha * 0.55), stream.color.opacity(alpha)]
+                ? [stream.color.opacity(alpha), stream.color.opacity(alpha * 0.48)]
+                : [stream.color.opacity(alpha * 0.46), stream.color.opacity(alpha * 0.88)]
             context.fill(
                 stream.ribbon,
                 with: .linearGradient(
                     Gradient(colors: colors),
-                    startPoint: CGPoint(x: bounds.minX, y: bounds.minY),
-                    endPoint: CGPoint(x: bounds.maxX, y: bounds.minY)
+                    startPoint: CGPoint(x: startX, y: bounds.minY),
+                    endPoint: CGPoint(x: endX, y: bounds.minY)
                 )
             )
             context.fill(
                 stream.ribbon,
                 with: .linearGradient(
                     Gradient(colors: [
-                        .white.opacity(dimmed ? 0.04 : 0.34),
+                        .white.opacity(dimmed ? 0.04 : 0.24),
                         .white.opacity(0),
-                        .white.opacity(dimmed ? 0.02 : 0.1),
+                        .white.opacity(dimmed ? 0.02 : 0.06),
                     ]),
                     startPoint: CGPoint(x: bounds.minX, y: bounds.minY),
                     endPoint: CGPoint(x: bounds.minX, y: bounds.maxY)
                 )
             )
         }
-
-        let terminal = Path(roundedRect: stream.outerFrame, cornerRadius: min(4, stream.outerFrame.height / 2))
-        context.fill(
-            terminal,
-            with: .color(reduceTransparency ? fillColor : stream.color.opacity(alpha))
-        )
 
         if highlighted && !reduceTransparency {
             context.stroke(stream.ribbon, with: .color(.white.opacity(0.5)), lineWidth: 0.8)

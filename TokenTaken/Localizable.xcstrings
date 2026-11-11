@@ -31,16 +31,6 @@
         }
       }
     },
-    "%@ tokens, %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ Token，%2$@"
-          }
-        }
-      }
-    },
     "%@ tokens, %@ of total" : {
       "localizations" : {
         "en" : {
@@ -73,6 +63,38 @@
         }
       }
     },
+    "%@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%2$@"
+          }
+        }
+      }
+    },
+    "%@, %@, …" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@, …"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@、%2$@ 等"
+          }
+        }
+      }
+    },
     "%@: %@" : {
       "localizations" : {
         "en" : {
@@ -89,17 +111,7 @@
         }
       }
     },
-    "%@: %@ tokens" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@：%2$@ Token"
-          }
-        }
-      }
-    },
-    "%lld agents" : {
+    "%lld Macs synced" : {
       "localizations" : {
         "en" : {
           "variations" : {
@@ -107,13 +119,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld agent"
+                  "value" : "%lld Mac synced"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld agents"
+                  "value" : "%lld Macs synced"
                 }
               }
             }
@@ -122,7 +134,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld 个 Agent"
+            "value" : "%lld 台设备已同步"
           }
         }
       }
@@ -139,6 +151,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 台 Mac 数据不可用"
+          }
+        }
+      }
+    },
+    "%lld installed sources" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld installed source"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld installed sources"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个已安装来源"
           }
         }
       }
@@ -171,22 +211,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 个来源不可用"
-          }
-        }
-      }
-    },
-    "+%lld more" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "+%lld more"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "另有 %lld 项"
           }
         }
       }
@@ -299,48 +323,44 @@
         }
       }
     },
-    "Appearance" : {
+    "Appearance, startup, and automatic collection" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Appearance"
+            "value" : "Appearance, startup, and automatic collection"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "外观"
+            "value" : "外观、登录启动与自动采集"
           }
         }
       }
     },
-    "Available" : {
+    "Back to the overview (Esc)" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "可用"
+            "value" : "返回概览（Esc）"
           }
         }
       }
     },
-    "Back" : {
+    "Breakdown view" : {
       "localizations" : {
-        "zh-Hans" : {
+        "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "返回"
+            "value" : "Breakdown view"
           }
-        }
-      }
-    },
-    "Binary" : {
-      "localizations" : {
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "二进制文件"
+            "value" : "明细视图"
           }
         }
       }
@@ -387,6 +407,12 @@
     },
     "Categories" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Categories"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -401,26 +427,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择 token-taken 符号链接的安装文件夹。"
-          }
-        }
-      }
-    },
-    "Choose the tokscale executable." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择 tokscale 可执行文件。"
-          }
-        }
-      }
-    },
-    "Choose…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "选择…"
           }
         }
       }
@@ -441,12 +447,34 @@
         }
       }
     },
-    "Collection engine" : {
+    "Collecting Token usage on this Mac for the first time" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collecting Token usage on this Mac for the first time"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "采集引擎"
+            "value" : "正在首次汇集本机 Token 用量"
+          }
+        }
+      }
+    },
+    "Collecting for the first time" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collecting for the first time"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首次采集中"
           }
         }
       }
@@ -477,22 +505,18 @@
         }
       }
     },
-    "Condensation" : {
+    "Command-Line Tool" : {
       "localizations" : {
-        "zh-Hans" : {
+        "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "凝露"
+            "value" : "Command-Line Tool"
           }
-        }
-      }
-    },
-    "CONDENSATION FIELD" : {
-      "localizations" : {
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "凝露视场"
+            "value" : "命令行工具"
           }
         }
       }
@@ -527,66 +551,18 @@
         }
       }
     },
-    "Expanded" : {
+    "Data stale" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Expanded"
+            "value" : "Data stale"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已展开"
-          }
-        }
-      }
-    },
-    "Not installed · %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not installed · %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未安装 · %lld"
-          }
-        }
-      }
-    },
-    "Reduce Transparency is on in System Settings." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reduce Transparency is on in System Settings."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已在“系统设置”中开启“降低透明度”。"
-          }
-        }
-      }
-    },
-    "data may be incomplete" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "data may be incomplete"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "数据可能不完整"
+            "value" : "数据过期"
           }
         }
       }
@@ -601,44 +577,14 @@
         }
       }
     },
-    "Demo data only; not collected usage." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "仅用于演示，并非实际采集数据。"
-          }
-        }
-      }
-    },
-    "Detected" : {
+    "Devices" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Detected"
+            "value" : "Devices"
           }
         },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已检测到"
-          }
-        }
-      }
-    },
-    "Developer" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开发"
-          }
-        }
-      }
-    },
-    "Devices" : {
-      "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -647,22 +593,50 @@
         }
       }
     },
-    "Drop area ∝ tokens" : {
+    "Does not include %@" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Does not include %@"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "露滴面积 ∝ Token"
+            "value" : "不含 %@ 的数据"
           }
         }
       }
     },
-    "Estimate, not a bill" : {
+    "Everything is computed offline on this Mac; logs are never modified or uploaded." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everything is computed offline on this Mac; logs are never modified or uploaded."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "估算，非账单"
+            "value" : "全部计算均在本机离线完成，原始日志不会被修改或上传。"
+          }
+        }
+      }
+    },
+    "Expanded" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expanded"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展开"
           }
         }
       }
@@ -693,6 +667,22 @@
         }
       }
     },
+    "Health · Last collected" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Health · Last collected"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康状态 · 最近采集"
+          }
+        }
+      }
+    },
     "How much shows through the window" : {
       "localizations" : {
         "en" : {
@@ -709,44 +699,18 @@
         }
       }
     },
-    "iCloud Drive is not available on this Mac." : {
+    "Included" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "iCloud Drive is not available on this Mac."
+            "value" : "Included"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这台 Mac 未开启 iCloud 云盘。"
-          }
-        }
-      }
-    },
-    "iCloud sync" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud sync"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud 同步"
-          }
-        }
-      }
-    },
-    "iCloud sync is in development" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iCloud 同步正在开发"
+            "value" : "已计入"
           }
         }
       }
@@ -781,6 +745,22 @@
         }
       }
     },
+    "Installed sources" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installed sources"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装来源"
+          }
+        }
+      }
+    },
     "Interface transparency" : {
       "localizations" : {
         "en" : {
@@ -803,36 +783,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "采集引擎自定义路径无效"
-          }
-        }
-      }
-    },
-    "Invalid override path" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "自定义路径无效"
-          }
-        }
-      }
-    },
-    "Last 7 days" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "近 7 天"
-          }
-        }
-      }
-    },
-    "Last success" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "上次成功"
           }
         }
       }
@@ -905,32 +855,98 @@
         }
       }
     },
-    "Main view" : {
+    "Local Agent token usage" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local Agent token usage"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "主视图"
+            "value" : "本机 Agent Token 用量统计"
           }
         }
       }
     },
-    "Mist = source volume and rank" : {
+    "Local collection (%@) · Last scanned %@" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local collection (%1$@) · Last scanned %2$@"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "薄雾 = 来源体量与排名"
+            "value" : "本机采集（%1$@） · 最近扫描 %2$@"
           }
         }
       }
     },
-    "Models" : {
+    "Local collection (%@) · Not scanned yet" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local collection (%@) · Not scanned yet"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "模型"
+            "value" : "本机采集（%@） · 尚未扫描"
+          }
+        }
+      }
+    },
+    "Local data · Read-only" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local data · Read-only"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机数据 · 只读"
+          }
+        }
+      }
+    },
+    "Mainly from %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mainly from %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主要来自 %@"
+          }
+        }
+      }
+    },
+    "Models · %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Models · %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型 · %lld"
           }
         }
       }
@@ -955,6 +971,22 @@
         }
       }
     },
+    "No installed sources found" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No installed sources found"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未发现已安装来源"
+          }
+        }
+      }
+    },
     "No other Macs yet" : {
       "localizations" : {
         "en" : {
@@ -967,16 +999,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "还没有其他 Mac"
-          }
-        }
-      }
-    },
-    "No successful collection yet" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "尚未成功采集"
           }
         }
       }
@@ -1001,6 +1023,22 @@
         }
       }
     },
+    "No usage this month" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No usage this month"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本月暂无记录"
+          }
+        }
+      }
+    },
     "No usage yet today" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1011,22 +1049,50 @@
         }
       }
     },
-    "Not bundled" : {
+    "Normal" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Normal"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未内置"
+            "value" : "正常"
           }
         }
       }
     },
-    "Not found" : {
+    "Not installed" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not installed"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未找到"
+            "value" : "未安装"
+          }
+        }
+      }
+    },
+    "Not installed (%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not installed (%lld)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未安装来源（%lld）"
           }
         }
       }
@@ -1043,6 +1109,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "尚未更新"
+          }
+        }
+      }
+    },
+    "Only aggregate token counts and a random device ID are stored in iCloud Drive." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only aggregate token counts and a random device ID are stored in iCloud Drive."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud 云盘中仅保存聚合 Token 计数与随机设备 ID，不含提示词、路径或费用。"
           }
         }
       }
@@ -1069,6 +1151,12 @@
     },
     "Open Token Taken" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Token Taken"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1109,6 +1197,62 @@
         }
       }
     },
+    "Other %lld models (%@) total %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Other %1$lld model (%2$@) totals %3$@ (%4$@)"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Other %1$lld models (%2$@) total %3$@ (%4$@)"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其余 %1$lld 个模型（%2$@）合计 %3$@ (%4$@)"
+          }
+        }
+      }
+    },
+    "Other %lld sources (%@) total %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Other %1$lld source (%2$@) totals %3$@ (%4$@)"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Other %1$lld sources (%2$@) total %3$@ (%4$@)"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其余 %1$lld 个来源（%2$@）合计 %3$@ (%4$@)"
+          }
+        }
+      }
+    },
     "Other Macs" : {
       "localizations" : {
         "en" : {
@@ -1135,12 +1279,12 @@
         }
       }
     },
-    "Override path" : {
+    "Overview" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "自定义路径"
+            "value" : "概览"
           }
         }
       }
@@ -1157,16 +1301,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "部分数据"
-          }
-        }
-      }
-    },
-    "Pinned version" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "固定版本"
           }
         }
       }
@@ -1191,28 +1325,34 @@
         }
       }
     },
-    "Quit Token Taken" : {
+    "Quit" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Quit Token Taken"
+            "value" : "Quit"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "退出 Token Taken"
+            "value" : "退出"
           }
         }
       }
     },
-    "Rank %lld · %@" : {
+    "Read failed" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read failed"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "排名 %1$lld · %2$@"
+            "value" : "读取失败"
           }
         }
       }
@@ -1227,6 +1367,22 @@
         }
       }
     },
+    "Reading supported agent logs in read-only mode. Your Confluence chart will appear automatically when finished." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reading supported agent logs in read-only mode. Your Confluence chart will appear automatically when finished."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在只读解析这台 Mac 上受支持的 Agent 日志，完成后自动呈现汇流图。"
+          }
+        }
+      }
+    },
     "Reasoning" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1237,12 +1393,18 @@
         }
       }
     },
-    "Records: %lld" : {
+    "Reduce Transparency is on in System Settings." : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reduce Transparency is on in System Settings."
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "记录数：%lld"
+            "value" : "已在“系统设置”中开启“降低透明度”。"
           }
         }
       }
@@ -1289,6 +1451,38 @@
         }
       }
     },
+    "Scan now" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scan now"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "立即扫描"
+          }
+        }
+      }
+    },
+    "Scanning…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Scanning…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "扫描中…"
+          }
+        }
+      }
+    },
     "Settings" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1299,12 +1493,76 @@
         }
       }
     },
-    "Settings…" : {
+    "Settings (⌘,)" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
+            "value" : "设置（⌘,）"
+          }
+        }
+      }
+    },
+    "Settings…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Settings…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
             "value" : "设置…"
+          }
+        }
+      }
+    },
+    "Show all %lld ›" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show all %lld ›"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展开全部 %lld 个 ›"
+          }
+        }
+      }
+    },
+    "Show top 4" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show top 4"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起至前 4 个"
+          }
+        }
+      }
+    },
+    "Showing all %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Showing all %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已显示全部 %lld 个"
           }
         }
       }
@@ -1325,22 +1583,50 @@
         }
       }
     },
-    "Source mist and daily usage rain trails" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源薄雾与每日用量雨痕"
-          }
-        }
-      }
-    },
     "Sources" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sources"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "来源"
+          }
+        }
+      }
+    },
+    "Sources are identified automatically from local logs; no manual setup is needed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sources are identified automatically from local logs; no manual setup is needed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据本机日志自动识别，无需手动启用。"
+          }
+        }
+      }
+    },
+    "Sources · %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sources · %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来源 · %lld"
           }
         }
       }
@@ -1361,22 +1647,28 @@
         }
       }
     },
-    "Status" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "状态"
-          }
-        }
-      }
-    },
     "Storage unavailable" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地存储不可用"
+          }
+        }
+      }
+    },
+    "Summarising…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Summarising…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在汇总…"
           }
         }
       }
@@ -1391,12 +1683,34 @@
         }
       }
     },
-    "Synthetic data" : {
+    "Synced" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Synced"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "合成数据"
+            "value" : "已同步"
+          }
+        }
+      }
+    },
+    "Temporarily unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temporarily unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂不可用"
           }
         }
       }
@@ -1423,6 +1737,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主题"
+          }
+        }
+      }
+    },
+    "This Mac" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This Mac"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本机"
+          }
+        }
+      }
+    },
+    "This month (local)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This month (local)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本月本机用量"
           }
         }
       }
@@ -1457,32 +1803,12 @@
         }
       }
     },
-    "Today" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "今天"
-          }
-        }
-      }
-    },
     "Today · %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "今天 · %@"
-          }
-        }
-      }
-    },
-    "Token mix" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Token 构成"
           }
         }
       }
@@ -1503,48 +1829,50 @@
         }
       }
     },
-    "tokens" : {
+    "Token mix" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "tokens"
+            "value" : "Token mix"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Token"
+            "value" : "Token 构成"
           }
         }
       }
     },
-    "Top: %@" : {
+    "Top sources" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top sources"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最多：%@"
+            "value" : "活跃来源"
           }
         }
       }
     },
-    "TOTAL TOKENS" : {
+    "Total tokens" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total tokens"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Token 总量"
-          }
-        }
-      }
-    },
-    "Trail length and ripple = usage" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "雨痕长度与涟漪 = 用量"
           }
         }
       }
@@ -1561,6 +1889,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "透明"
+          }
+        }
+      }
+    },
+    "Turn on sync to see your other Macs here." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn on sync to see your other Macs here."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启同步后，这里会显示其他 Mac。"
           }
         }
       }
@@ -1655,12 +1999,18 @@
         }
       }
     },
-    "Use synthetic data" : {
+    "Use token-taken in Terminal" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use token-taken in Terminal"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用合成数据"
+            "value" : "在终端中使用 token-taken"
           }
         }
       }
@@ -1695,424 +2045,82 @@
         }
       }
     },
-    "• Hourly UTC buckets contain token and event counts with a random device ID." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "• 按 UTC 小时分桶，仅含 Token、事件计数和随机设备 ID。"
-          }
-        }
-      }
-    },
-    "• Never sync prompts, responses, paths, project names, credentials, or cost." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "• 从不同步提示词、回复、路径、项目名称、凭据或费用。"
-          }
-        }
-      }
-    },
-    "• Sync is opt-in and contains aggregate usage only." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "• 同步由用户主动开启，仅包含聚合用量。"
-          }
-        }
-      }
-    },
-    "%lld installed sources · Last updated %@" : {
+    "data may be incomplete" : {
       "localizations" : {
         "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%1$lld installed source · Last updated %2$@"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%1$lld installed sources · Last updated %2$@"
-                }
-              }
-            }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "data may be incomplete"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$lld 个已安装来源，%2$@ 最近更新"
+            "value" : "数据可能不完整"
           }
         }
       }
     },
-    "%lld installed sources · Not updated yet" : {
+    "estimate, not a bill" : {
       "localizations" : {
         "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld installed source · Not updated yet"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "%lld installed sources · Not updated yet"
-                }
-              }
-            }
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "estimate, not a bill"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld 个已安装来源，尚未更新"
+            "value" : "估算，非账单"
           }
         }
       }
     },
-    "Appearance & Behavior" : {
+    "iCloud Drive is not available on this Mac." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Appearance & Behavior"
+            "value" : "iCloud Drive is not available on this Mac."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "外观与行为"
+            "value" : "这台 Mac 未开启 iCloud 云盘。"
           }
         }
       }
     },
-    "Combine usage from your Macs through iCloud Drive." : {
+    "iCloud sync" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Combine usage from your Macs through iCloud Drive."
+            "value" : "iCloud sync"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "通过 iCloud 云盘汇总你各台 Mac 的用量。"
+            "value" : "iCloud 同步"
           }
         }
       }
     },
-    "Command-Line Tool" : {
+    "tokens" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Command-Line Tool"
+            "value" : "tokens"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "命令行工具"
-          }
-        }
-      }
-    },
-    "Data stale" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Data stale"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "数据过期"
-          }
-        }
-      }
-    },
-    "Health" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Health"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "健康状态"
-          }
-        }
-      }
-    },
-    "Installed · %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Installed · %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已安装 · %lld"
-          }
-        }
-      }
-    },
-    "Last collected" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Last collected"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最近采集"
-          }
-        }
-      }
-    },
-    "Local Agent token usage" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local Agent token usage"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本机 Agent Token 用量统计"
-          }
-        }
-      }
-    },
-    "Local collection" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local collection"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本机采集"
-          }
-        }
-      }
-    },
-    "Local data · Read-only" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local data · Read-only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本机数据 · 只读"
-          }
-        }
-      }
-    },
-    "No installed sources found" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No installed sources found"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未发现已安装来源"
-          }
-        }
-      }
-    },
-    "Normal" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Normal"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正常"
-          }
-        }
-      }
-    },
-    "Not installed" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Not installed"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未安装"
-          }
-        }
-      }
-    },
-    "Only totals are shared" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Only totals are shared"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只共享总量"
-          }
-        }
-      }
-    },
-    "Read failed" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Read failed"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读取失败"
-          }
-        }
-      }
-    },
-    "Read-only" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Read-only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只读"
-          }
-        }
-      }
-    },
-    "Sources are identified automatically from local logs; no manual setup is needed." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sources are identified automatically from local logs; no manual setup is needed."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "根据本机日志自动识别，无需手动启用。"
-          }
-        }
-      }
-    },
-    "Synced" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Synced"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已同步"
-          }
-        }
-      }
-    },
-    "Temporarily unavailable" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Temporarily unavailable"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂不可用"
-          }
-        }
-      }
-    },
-    "Turn on sync to see your other Macs here." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Turn on sync to see your other Macs here."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "开启同步后，这里会显示其他 Mac。"
-          }
-        }
-      }
-    },
-    "Use token-taken in Terminal" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Use token-taken in Terminal"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在终端中使用 token-taken"
+            "value" : "Token"
           }
         }
       }

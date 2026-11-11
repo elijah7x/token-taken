@@ -2,8 +2,15 @@ import AppKit
 import SwiftUI
 import TokenTakenKit
 
-// Presentation tokens for the `liquid-glass` theme (Condensation direction).
-// Values follow design-archive/liquid-v1-head/y.html.
+// Presentation tokens for the Atmosphere direction.
+
+enum Radius {
+    /// Floating tray, inset 10pt from the window edge so its corners sit concentric with the window's.
+    static let tray: CGFloat = 18
+    static let card: CGFloat = 16
+    static let inner: CGFloat = 10
+    static let badge: CGFloat = 6
+}
 
 extension Color {
     /// `#RRGGBB` or `RRGGBB`; invalid input yields gray so a bad catalog entry stays visible.
@@ -38,58 +45,286 @@ extension Color {
 }
 
 enum Palette {
-    /// Secondary text. Light #5B6B72 on the pastel field is about 5:1 (AA).
-    static let muted = Color(light: "#5B6B72", dark: "#A6B4B8", contrastLight: "#38464C", contrastDark: "#D3DDE0")
+    // MARK: Ink hierarchy
+
+    static let ink1 = Color(
+        light: "#131A24",
+        dark: "#EEF2F8",
+        contrastLight: "#090E14",
+        contrastDark: "#FFFFFF"
+    )
+    static let ink2 = Color(
+        light: "#465264",
+        dark: "#A9B5C7",
+        contrastLight: "#283241",
+        contrastDark: "#D4DCE8"
+    )
+    static let ink3 = Color(
+        light: "#6C788A",
+        dark: "#7B889C",
+        contrastLight: "#465264",
+        contrastDark: "#B0BCCF"
+    )
+
+    // MARK: Surfaces & borders
+
+    static let cardSurface = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        if reduceTransparency {
+            return isDark
+                ? NSColor(srgbRed: 24 / 255, green: 33 / 255, blue: 47 / 255, alpha: 1)
+                : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        }
+        return isDark
+            ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.055)
+            : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.82)
+    })
+
+    static let sidebarSurface = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        if reduceTransparency {
+            return isDark
+                ? NSColor(srgbRed: 20 / 255, green: 27 / 255, blue: 38 / 255, alpha: 1)
+                : NSColor(srgbRed: 241 / 255, green: 244 / 255, blue: 248 / 255, alpha: 1)
+        }
+        return isDark
+            ? NSColor(srgbRed: 18 / 255, green: 25 / 255, blue: 36 / 255, alpha: 0.72)
+            : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.60)
+    })
+
+    /// The floating tray: a lighter, nearly opaque pane lifted off the frosted base.
+    static let traySurface = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
+            return isDark
+                ? NSColor(srgbRed: 34 / 255, green: 42 / 255, blue: 55 / 255, alpha: 1)
+                : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 1)
+        }
+        return isDark
+            ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.075)
+            : NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.78)
+    })
+
+    static let trayRim = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10)
+            : NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 0.08)
+    })
+
+    static let barTrack = Color(nsColor: NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        if isDark {
+            return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: increased ? 0.16 : 0.08)
+        }
+        return NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: increased ? 0.14 : 0.065)
+    })
+
     static let hairline = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        let alpha = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.34 : 0.13
-        return isDark
-            ? NSColor(red: 214 / 255, green: 233 / 255, blue: 236 / 255, alpha: alpha)
-            : NSColor(red: 66 / 255, green: 88 / 255, blue: 96 / 255, alpha: alpha)
+        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        if isDark {
+            return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: increased ? 0.30 : 0.095)
+        }
+        return NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: increased ? 0.28 : 0.085)
     })
-    static let accent = Color(light: "#4F8790", dark: "#8FC6CE")
-    /// Opaque surface used whenever Reduce Transparency is on.
-    static let solid = Color(light: "#F4F7F7", dark: "#202C31")
-    static let liveDot = Color(hex: "#73B99A")
 
-    /// Water strokes in the condensation field.
-    static let rain = Color(light: "#7FAFBA", dark: "#CFE8EC")
+    /// Opaque base window surface (`--win-bg`), also used under Reduce Transparency.
+    static let solid = Color(light: "#F4F6FA", dark: "#0D121A")
+
+    // MARK: Semantic roles & health
+
+    static let roleAccent = Color(
+        light: "#0068D6",
+        dark: "#56A8FF",
+        contrastLight: "#004FA3",
+        contrastDark: "#82BEFF"
+    )
+    static let healthOK = Color(
+        light: "#178750",
+        dark: "#3BD184",
+        contrastLight: "#0E6339",
+        contrastDark: "#6BE0A3"
+    )
+    static let healthWarn = Color(
+        light: "#B56100",
+        dark: "#FFB340",
+        contrastLight: "#8A4800",
+        contrastDark: "#FFC978"
+    )
+    static let healthScan = Color(
+        light: "#0D7490",
+        dark: "#4FB0CD",
+        contrastLight: "#08566B",
+        contrastDark: "#7AD0E6"
+    )
+
+    static let muted = ink2
+    static let accent = roleAccent
+    static let liveDot = healthOK
 
     // MARK: Data colors
 
-    /// Category order matches TokenCategory.allCases: input, cacheRead, cacheWrite, output, reasoning.
+    /// Category order matches `TokenCategory.allCases`: input, cacheRead, cacheWrite, output, reasoning.
     static func color(for category: TokenCategory) -> Color {
         switch category {
-        case .input: Color(hex: "#E79BB0")      // pink
-        case .cacheRead: Color(hex: "#8E9FE0")  // periwinkle
-        case .cacheWrite: Color(hex: "#E9AE78") // apricot
-        case .output: Color(hex: "#75C2A4")     // mint
-        case .reasoning: Color(hex: "#B2A2DD")  // lavender
+        case .input:
+            Color(light: "#CF6B85", dark: "#E2829B")
+        case .cacheRead:
+            Color(light: "#6B84D1", dark: "#859DF0")
+        case .cacheWrite:
+            Color(light: "#CC8B4B", dark: "#E0A160")
+        case .output:
+            Color(light: "#4A9D7C", dark: "#62BA96")
+        case .reasoning:
+            Color(light: "#8772C5", dark: "#A18CE0")
         }
     }
 
+    private static let sourceFallbackColors: [Color] = [
+        Color(light: "#D47353", dark: "#E4896A"),
+        Color(light: "#C8963E", dark: "#DFB059"),
+        Color(light: "#517ED1", dark: "#6D98E8"),
+        Color(light: "#C26F96", dark: "#D987AD"),
+        Color(light: "#4C9E79", dark: "#68BA93"),
+        Color(light: "#7D6EC4", dark: "#9788DE"),
+        Color(light: "#5C6C8A", dark: "#7D8EAD"),
+        Color(light: "#6B9969", dark: "#86B584"),
+        Color(light: "#3A93AE", dark: "#4FB0CD"),
+        Color(light: "#A87B5A", dark: "#C79875"),
+    ]
+
+    /// Twelve well-separated hues ordered so `+1` collision steps jump across the color wheel.
+    private static let modelPalette: [Color] = [
+        Color(light: "#4677CE", dark: "#6695EA"), // cobalt blue
+        Color(light: "#D27147", dark: "#E68A62"), // terracotta
+        Color(light: "#389A72", dark: "#56B990"), // sea jade
+        Color(light: "#8662C7", dark: "#A380E2"), // amethyst
+        Color(light: "#C2912E", dark: "#DCB04C"), // goldenrod amber
+        Color(light: "#2B8EA8", dark: "#49AFC9"), // cerulean teal
+        Color(light: "#C85B86", dark: "#E179A2"), // berry rose
+        Color(light: "#789836", dark: "#95B652"), // olive
+        Color(light: "#5B63BD", dark: "#7B83DC"), // indigo
+        Color(light: "#C9545C", dark: "#E3727A"), // carmine
+        Color(light: "#526E8C", dark: "#7390B0"), // petrol slate
+        Color(light: "#AD5CA8", dark: "#C97AC4"), // orchid
+    ]
+
     static func color(forSource id: String) -> Color {
-        Color(hex: SourceCatalog.info(for: id).colorHex)
+        switch id.lowercased() {
+        case "claude", "claude-code":
+            return Color(light: "#D47353", dark: "#E4896A")
+        case "pi":
+            return Color(light: "#C8963E", dark: "#DFB059")
+        case "codex":
+            return Color(light: "#517ED1", dark: "#6D98E8")
+        case "kimi", "kimi-code":
+            return Color(light: "#C26F96", dark: "#D987AD")
+        case "zcode":
+            return Color(light: "#4C9E79", dark: "#68BA93")
+        case "omp", "oh-my-pi":
+            return Color(light: "#7D6EC4", dark: "#9788DE")
+        case "grok":
+            return Color(light: "#5C6C8A", dark: "#7D8EAD")
+        case "opencode":
+            return Color(light: "#6B9969", dark: "#86B584")
+        case "gemini", "gemini-cli":
+            return Color(light: "#3A93AE", dark: "#4FB0CD")
+        case "factory", "droid":
+            return Color(light: "#A87B5A", dark: "#C79875")
+        default:
+            let hash = fnv1a64(id.lowercased())
+            return sourceFallbackColors[Int(hash % UInt64(sourceFallbackColors.count))]
+        }
     }
 
-    /// Models have no catalog color yet; rotate the category tones by rank as the reference does.
-    static func color(forModelRank rank: Int) -> Color {
-        let tones = TokenCategory.allCases
-        return color(for: tones[rank % tones.count])
+    /// Assigns distinct hues across `ids`, resolving hash collisions in sorted-ID order so colors stay stable across periods.
+    static func modelColors(for ids: [String]) -> [String: Color] {
+        let count = modelPalette.count
+        guard count > 0, !ids.isEmpty else { return [:] }
+
+        let uniqueSorted = Array(Set(ids)).sorted { lhs, rhs in
+            let left = lhs.lowercased()
+            let right = rhs.lowercased()
+            return left == right ? lhs < rhs : left < right
+        }
+
+        var used = Set<Int>()
+        var assigned: [String: Color] = [:]
+        assigned.reserveCapacity(uniqueSorted.count)
+
+        for id in uniqueSorted {
+            if used.count == count {
+                used.removeAll(keepingCapacity: true)
+            }
+            let start = Int(fnv1a64(id.lowercased()) % UInt64(count))
+            var chosen = start
+            for offset in 0..<count {
+                let candidate = (start + offset) % count
+                if !used.contains(candidate) {
+                    chosen = candidate
+                    break
+                }
+            }
+            used.insert(chosen)
+            assigned[id] = modelPalette[chosen]
+        }
+        return assigned
     }
 
-    // MARK: Background
+    private static func fnv1a64(_ string: String) -> UInt64 {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in string.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return hash
+    }
+}
 
-    /// Soft pastel spectrum (light) or its deep muted counterpart (dark).
-    static func meshColors(_ scheme: ColorScheme) -> [Color] {
-        let hexes = scheme == .dark
-            ? ["#3A3134", "#1F2A2B", "#263948",
-               "#262C2D", "#1B2628", "#1D2931",
-               "#1F3129", "#19242A", "#2B2738"]
-            : ["#F7E3DF", "#EEF2EC", "#DFE9F7",
-               "#F2ECE7", "#ECF2EF", "#E4ECF3",
-               "#E2EFE6", "#E8EDF1", "#EBE5F4"]
-        return hexes.map(Color.init(hex:))
+/// Compact two-letter source monogram badge matching the Confluence chart (`22pt`, `Radius.badge`, `0.14` tint).
+struct SourceMonogramBadge: View {
+    let sourceID: String
+    let name: String
+    var size: CGFloat = 22
+
+    @Environment(\.colorScheme) private var scheme
+
+    private var color: Color { Palette.color(forSource: sourceID) }
+
+    var body: some View {
+        Text(verbatim: Self.monogram(for: sourceID, name: name))
+            .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+            .minimumScaleFactor(0.75)
+            .foregroundStyle(
+                scheme == .dark
+                    ? color.mix(with: .white, by: 0.20)
+                    : color.mix(with: .black, by: 0.28)
+            )
+            .frame(width: size, height: size)
+            .background {
+                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
+                    .fill(color.opacity(0.14))
+            }
+            .accessibilityHidden(true)
+    }
+
+    static func monogram(for id: String, name: String) -> String {
+        switch id.lowercased() {
+        case "claude", "claude-code": "CC"
+        case "codex": "CX"
+        case "zcode": "ZC"
+        case "omp", "oh-my-pi": "OM"
+        case "pi": "PI"
+        case "kimi", "kimi-code": "KM"
+        case "grok": "GK"
+        case "opencode": "OC"
+        case "gemini", "gemini-cli": "GM"
+        case "factory", "droid": "FD"
+        default: String(name.prefix(2)).uppercased()
+        }
     }
 }
 
@@ -108,85 +343,80 @@ struct WindowBackdrop: View {
         theme == .liquidGlass && !reduceTransparency
     }
 
-    /// Matches Tivano's stock scrim at the midpoint, clear glass at 0 opacity,
-    /// and a solid base at 1, with a linear ramp on either side.
-    private static func scrim(for opacity: Double, isDark: Bool) -> Double {
-        let stock = isDark ? 0.26 : 0.18
+    /// Maps `opacity` to base fill alpha over the Liquid Glass backdrop.
+    private static func baseAlpha(for opacity: Double, isDark: Bool) -> Double {
+        let midpoint = isDark ? 0.82 : 0.86
         let value = min(max(opacity, 0), 1)
         return value <= 0.5
-            ? stock * (value / 0.5)
-            : stock + (1 - stock) * ((value - 0.5) / 0.5)
+            ? midpoint * (value / 0.5)
+            : midpoint + (1 - midpoint) * ((value - 0.5) / 0.5)
     }
 
     var body: some View {
         Group {
-            if !isTransparent || opacity >= 0.98 {
+            if reduceTransparency || theme != .liquidGlass {
                 Palette.solid
+            } else if opacity >= 0.98 {
+                ZStack {
+                    Palette.solid
+                    atmosphereGlows(scale: 1)
+                }
             } else {
                 let shape = ContainerRelativeShape()
                 ZStack {
                     shape
                         .fill(.clear)
                         .glassEffect(in: shape)
-                    MeshBackdrop.view(for: scheme)
-                        .opacity(opacity)
                     shape
-                        .fill(scheme == .dark ? Color.black : Color.white)
-                        .opacity(Self.scrim(for: opacity, isDark: scheme == .dark))
+                        .fill(Palette.solid)
+                        .opacity(Self.baseAlpha(for: opacity, isDark: scheme == .dark))
+                    atmosphereGlows(scale: 0.35 + 0.65 * opacity)
                 }
             }
         }
         .ignoresSafeArea()
-        .background { BackdropWindowConfigurator(isTransparent: isTransparent) }
+        .background { BackdropWindowConfigurator(isTransparent: isTransparent && opacity < 0.98) }
     }
-}
 
-/// The mesh is static and low-frequency, so it is rasterized once per scheme into a small image
-/// and stretched to fill (as the mesh itself stretches), instead of a window-sized drawable.
-@MainActor
-private enum MeshBackdrop {
-    private static let renderSize = CGSize(width: 96, height: 64)
-    private static var images: [ColorScheme: Image] = [:]
+    @ViewBuilder
+    private func atmosphereGlows(scale: Double) -> some View {
+        let isDark = scheme == .dark
+        let warm = isDark
+            ? Color(.sRGB, red: 186 / 255, green: 114 / 255, blue: 82 / 255, opacity: 0.11 * scale)
+            : Color(.sRGB, red: 235 / 255, green: 198 / 255, blue: 175 / 255, opacity: 0.22 * scale)
+        let cool = isDark
+            ? Color(.sRGB, red: 84 / 255, green: 124 / 255, blue: 198 / 255, opacity: 0.14 * scale)
+            : Color(.sRGB, red: 169 / 255, green: 194 / 255, blue: 238 / 255, opacity: 0.25 * scale)
 
-    static func view(for scheme: ColorScheme) -> AnyView {
-        if let image = image(for: scheme) {
-            return AnyView(image.resizable().interpolation(.high))
+        GeometryReader { proxy in
+            let radius = max(proxy.size.width, proxy.size.height) * 0.52
+            ZStack {
+                RadialGradient(
+                    colors: [warm, .clear],
+                    center: UnitPoint(x: 0.24, y: 0.26),
+                    startRadius: 0,
+                    endRadius: radius
+                )
+                RadialGradient(
+                    colors: [cool, .clear],
+                    center: UnitPoint(x: 0.78, y: 0.76),
+                    startRadius: 0,
+                    endRadius: radius * 1.08
+                )
+            }
         }
-        return AnyView(mesh(scheme))
-    }
-
-    private static func image(for scheme: ColorScheme) -> Image? {
-        if let image = images[scheme] { return image }
-        let renderer = ImageRenderer(content: mesh(scheme).frame(width: renderSize.width, height: renderSize.height))
-        renderer.scale = 1
-        guard let cgImage = renderer.cgImage else { return nil }
-        let image = Image(decorative: cgImage, scale: 1)
-        images[scheme] = image
-        return image
-    }
-
-    private static func mesh(_ scheme: ColorScheme) -> MeshGradient {
-        MeshGradient(
-            width: 3,
-            height: 3,
-            points: [
-                [0, 0], [0.55, 0], [1, 0],
-                [0, 0.5], [0.45, 0.55], [1, 0.45],
-                [0, 1], [0.5, 1], [1, 1],
-            ],
-            colors: Palette.meshColors(scheme)
-        )
+        .allowsHitTesting(false)
     }
 }
 
 extension View {
     /// Floating tooltip surface: glass normally, an opaque Palette surface with a hairline under Reduce Transparency.
     @ViewBuilder
-    func tooltipSurface(reduceTransparency: Bool, cornerRadius: CGFloat = 11) -> some View {
+    func tooltipSurface(reduceTransparency: Bool, cornerRadius: CGFloat = Radius.inner) -> some View {
         if reduceTransparency {
             background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Palette.solid)
+                    .fill(Palette.cardSurface)
                     .overlay {
                         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                             .strokeBorder(Palette.hairline)
@@ -195,6 +425,21 @@ extension View {
         } else {
             glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
         }
+    }
+
+    /// Grounded Atmosphere card surface: `Palette.cardSurface`, `Radius.card`, 0.5pt hairline border, soft shadow.
+    func atmosphereCard(reduceTransparency: Bool, isDark: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+        return self
+            .background { shape.fill(Palette.cardSurface) }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 0.5) }
+            .shadow(
+                color: .black.opacity(reduceTransparency ? 0 : (isDark ? 0.22 : 0.04)),
+                radius: 10,
+                x: 0,
+                y: 3
+            )
     }
 }
 
@@ -224,10 +469,21 @@ private final class BackdropWindowView: NSView {
 
     private func applyWindowAppearance() {
         guard let window else { return }
+        insetWindowControls(in: window)
         window.isOpaque = !isTransparent
         window.backgroundColor = isTransparent
             ? NSColor.white.withAlphaComponent(0.000001)
             : NSColor(Palette.solid)
+    }
+
+    /// An empty unified toolbar moves the traffic lights 20pt in and centres them in a 52pt band,
+    /// which places them inside the floating tray (inset 10pt) instead of on its edge.
+    private func insetWindowControls(in window: NSWindow) {
+        guard window.toolbar == nil else { return }
+        window.toolbar = NSToolbar(identifier: "TokenTakenMainWindow")
+        window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
     }
 }
 

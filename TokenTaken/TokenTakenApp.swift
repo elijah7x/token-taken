@@ -8,7 +8,6 @@ struct TokenTakenApp: App {
     @State private var model: AppModel
     @State private var refreshCoordinator: RefreshCoordinator?
     @State private var router = MainWindowRouter()
-    @Environment(\.openWindow) private var openWindow
 
     init() {
         let settings = AppSettings()
@@ -35,7 +34,7 @@ struct TokenTakenApp: App {
     }
 
     var body: some Scene {
-        // A single-instance Window, so openWindow (Cmd-, and the menu bar) focuses it instead of adding another.
+        // A single-instance Window, so openWindow from the menu bar focuses it instead of adding another.
         Window(Text(verbatim: "Token Taken"), id: MainWindowView.windowID) {
             withEnvironment(MainWindowView())
                 .frame(minWidth: 900, minHeight: 620)
@@ -46,20 +45,15 @@ struct TokenTakenApp: App {
         .defaultSize(width: 1100, height: 720)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                SettingsCommand(router: router)
+            }
             CommandGroup(after: .newItem) {
                 Button("Refresh Now") {
                     Task { await refreshCoordinator?.refresh() }
                 }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(refreshCoordinator == nil || refreshCoordinator?.isRefreshing == true)
-            }
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings…") {
-                    router.route = .settings
-                    openWindow(id: MainWindowView.windowID)
-                    NSApplication.shared.activate()
-                }
-                .keyboardShortcut(",", modifiers: .command)
             }
         }
 
@@ -88,5 +82,18 @@ struct TokenTakenApp: App {
                 .environment(model)
                 .environment(router)
         }
+    }
+}
+
+/// ⌘, shows Settings inside the main window instead of a separate Settings scene.
+private struct SettingsCommand: View {
+    let router: MainWindowRouter
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Settings…") {
+            router.openSettings(using: openWindow)
+        }
+        .keyboardShortcut(",", modifiers: .command)
     }
 }

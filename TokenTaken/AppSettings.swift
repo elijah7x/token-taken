@@ -10,11 +10,6 @@ enum AppTheme: String, CaseIterable {
 @Observable
 @MainActor
 final class AppSettings {
-    enum HeroStyle: String, CaseIterable {
-        case confluence
-        case condensation
-    }
-
     static let defaultInterfaceTransparency = 0.5
 
     var theme: AppTheme {
@@ -43,13 +38,6 @@ final class AppSettings {
             guard syncEnabled != oldValue else { return }
             defaults.set(syncEnabled, forKey: Keys.syncEnabled)
             onSyncEnabledChange?()
-        }
-    }
-
-    var heroStyle: HeroStyle {
-        didSet {
-            guard heroStyle != oldValue else { return }
-            defaults.set(heroStyle.rawValue, forKey: Keys.heroStyle)
         }
     }
 
@@ -90,14 +78,12 @@ final class AppSettings {
             Keys.theme: AppTheme.liquidGlass.rawValue,
             Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
             Keys.syncEnabled: false,
-            Keys.heroStyle: HeroStyle.confluence.rawValue,
         ])
 
         theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
-        heroStyle = HeroStyle(rawValue: defaults.string(forKey: Keys.heroStyle) ?? "") ?? .confluence
         launchAtLoginStatus = SMAppService.mainApp.status
     }
 
@@ -107,6 +93,5 @@ final class AppSettings {
         static let refreshIntervalMinutes = "refreshIntervalMinutes"
         static let tokscalePathOverride = "tokscalePathOverride"
         static let syncEnabled = "syncEnabled"
-        static let heroStyle = "heroStyle"
     }
 }
