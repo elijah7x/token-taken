@@ -89,10 +89,21 @@ public struct SyncBackend: Sendable {
 
 public enum ICloudSync {
     public static var defaultRoot: URL? {
-        let drive = FileManager.default.homeDirectoryForCurrentUser
+        root(environment: ProcessInfo.processInfo.environment, fileManager: .default)
+    }
+
+    static func root(environment: [String: String], fileManager: FileManager) -> URL? {
+        if let override = environment["TOKEN_TAKEN_SYNC_ROOT"], !override.isEmpty {
+            guard override.hasPrefix("/") else { return nil }
+            let url = URL(fileURLWithPath: override, isDirectory: true)
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            return url
+        }
+        let drive = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
         var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: drive.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+        guard fileManager.fileExists(atPath: drive.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
         return drive.appendingPathComponent("Token Taken", isDirectory: true)
     }
 
@@ -103,8 +114,8 @@ public enum ICloudSync {
         let folder = "v1/devices/\(device.id)"
         let metadataPath = folder + "/device.json"
         if let data = try? backend.read(metadataPath) {
+            guard try schemaVersion(data) == 1 else { throw SyncError.unsupportedSchema }
             let previous = try SyncSnapshot.decode(DeviceSyncSnapshot.self, from: data)
-            guard previous.schemaVersion == 1 else { throw SyncError.unsupportedSchema }
             guard previous.deviceId == device.id else { throw SyncError.invalidSnapshot }
             guard !previous.tombstone else { throw SyncError.tombstoned }
         } else if FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path) {
@@ -116,10 +127,9 @@ public enum ICloudSync {
         }
         let daily = try local.records().filter { $0.deviceID == device.id }
         guard daily.allSatisfy({ $0.dayInterval != nil }) else { throw SyncError.invalidSnapshot }
-        let currentHour = Calendar.current.dateInterval(of: .hour, for: now)!.start
-        let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
+        let window = hourlyWindow(now: now)
         let hourly = try local.hourly().filter {
-            $0.deviceID == device.id && $0.hourStart >= cutoff && $0.hourStart <= currentHour
+            $0.deviceID == device.id && window.contains($0.hourStart)
         }
         var payloads: [String: Data] = [:]
         for (month, records) in Dictionary(grouping: daily, by: { String($0.day.prefix(7)) }) {
@@ -189,7 +199,7 @@ public enum ICloudSync {
                               Set(snapshot.records.map { "\($0.sourceID)\u{0}\($0.hourStart.timeIntervalSince1970)" }).count == snapshot.records.count else {
                             throw SyncError.invalidSnapshot
                         }
-                        hourly = snapshot.records
+                        hourly = snapshot.records.filter { hourlyWindow(now: now).contains($0.hourStart) }
                         hourlyAvailable = true
                     } else {
                         let snapshot = try SyncSnapshot.decode(DailySyncSnapshot.self, from: data)
@@ -234,6 +244,12 @@ public enum ICloudSync {
 
     private static func validMonthFile(_ name: String) -> Bool {
         name.range(of: #"^usage-[0-9]{4}-(0[1-9]|1[0-2])\.json$"#, options: .regularExpression) != nil
+    }
+
+    private static func hourlyWindow(now: Date) -> ClosedRange<Date> {
+        let currentHour = Calendar.current.dateInterval(of: .hour, for: now)!.start
+        let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
+        return cutoff...currentHour
     }
 
     private static func schemaVersion(_ data: Data) throws -> Int {

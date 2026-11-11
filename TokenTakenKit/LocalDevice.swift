@@ -10,7 +10,11 @@ public enum LocalDevice {
            UUID(uuidString: stored) != nil {
             return Device(id: stored, name: name)
         }
-        let id = defaults.string(forKey: "deviceID") ?? UUID().uuidString
+        let id = if let stored = defaults.string(forKey: "deviceID"), UUID(uuidString: stored) != nil {
+            stored
+        } else {
+            UUID().uuidString
+        }
         try? id.write(to: file, atomically: true, encoding: .utf8)
         defaults.set(id, forKey: "deviceID")
         return Device(id: id, name: name)

@@ -1,3 +1,4 @@
+import CryptoKit
 import XCTest
 @testable import TokenTakenKit
 
@@ -759,6 +760,84 @@ final class SyncTests: XCTestCase {
         XCTAssertNotNil(UUID(uuidString: created.id))
         XCTAssertEqual(LocalDevice.storedID(supportDirectory: supportDir), created.id)
         XCTAssertEqual(LocalDevice.current(defaults: defaults, supportDirectory: supportDir).id, created.id)
+    }
+
+    func testWriterRejectsFutureIdentitySchemaBeforeDecodingV1Fields() throws {
+        let backend = SyncBackend(root: directory)
+        try backend.write(Data(#"{"schemaVersion":99}"#.utf8), to: "v1/devices/device-a/device.json")
+        XCTAssertThrowsError(try publish(local)) { error in
+            guard case SyncError.unsupportedSchema = error else {
+                return XCTFail("Expected SyncError.unsupportedSchema, got \(error)")
+            }
+        }
+    }
+
+    func testReaderDropsHourlyRowsOutsideWriterWindowWithoutMakingDevicePartial() throws {
+        try publish(other)
+        let backend = SyncBackend(root: directory)
+        let rows = [
+            hour(device: other, offset: -48),
+            hour(device: other, offset: -47),
+            hour(device: other),
+            hour(device: other, offset: 1),
+        ]
+        let hourlyData = try SyncSnapshot.encode(HourlySyncSnapshot(records: rows))
+        try backend.write(hourlyData, to: "v1/devices/device-b/hourly.json")
+
+        let metadataPath = "v1/devices/device-b/device.json"
+        let metadata = try SyncSnapshot.decode(DeviceSyncSnapshot.self, from: backend.read(metadataPath))
+        var files = metadata.files
+        files["hourly.json"] = SHA256.hash(data: hourlyData).map { String(format: "%02x", $0) }.joined()
+        let updated = DeviceSyncSnapshot(
+            device: other,
+            appVersion: metadata.appVersion,
+            lastWriteUTC: metadata.lastWriteUTC,
+            tombstone: metadata.tombstone,
+            files: files,
+            sources: metadata.sources
+        )
+        try backend.write(SyncSnapshot.encode(updated), to: metadataPath)
+
+        let remote = try XCTUnwrap(read().first)
+        XCTAssertEqual(Set(remote.hourly), Set([hour(device: other, offset: -47), hour(device: other)]))
+        XCTAssertEqual(remote.daily, [record(device: other)])
+        XCTAssertEqual(remote.status.state, .ok)
+    }
+
+    func testLocalDeviceReplacesInvalidDefaultsUUID() throws {
+        let supportDir = directory.appendingPathComponent("support", isDirectory: true)
+        try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        let suiteName = "TokenTakenTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("not-a-uuid", forKey: "deviceID")
+
+        let created = LocalDevice.current(defaults: defaults, supportDirectory: supportDir)
+        XCTAssertNotNil(UUID(uuidString: created.id))
+        XCTAssertNotEqual(created.id, "not-a-uuid")
+        XCTAssertEqual(defaults.string(forKey: "deviceID"), created.id)
+        XCTAssertEqual(LocalDevice.storedID(supportDirectory: supportDir), created.id)
+    }
+
+    func testSyncRootEnvironmentOverride() throws {
+        let manager = FileManager.default
+        let key = "TOKEN_TAKEN_SYNC_ROOT"
+        let root = directory.appendingPathComponent("sync", isDirectory: true)
+        try manager.createDirectory(at: root, withIntermediateDirectories: true)
+        XCTAssertEqual(ICloudSync.root(environment: [key: root.path], fileManager: manager), root)
+
+        let missing = directory.appendingPathComponent("missing", isDirectory: true)
+        XCTAssertNil(ICloudSync.root(environment: [key: missing.path], fileManager: manager))
+        XCTAssertFalse(manager.fileExists(atPath: missing.path))
+
+        let drive = manager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
+        var isDirectory: ObjCBool = false
+        let expected = manager.fileExists(atPath: drive.path, isDirectory: &isDirectory) && isDirectory.boolValue
+            ? drive.appendingPathComponent("Token Taken", isDirectory: true)
+            : nil
+        XCTAssertEqual(ICloudSync.root(environment: [:], fileManager: manager), expected)
+        XCTAssertEqual(ICloudSync.root(environment: [key: ""], fileManager: manager), expected)
     }
 }
 

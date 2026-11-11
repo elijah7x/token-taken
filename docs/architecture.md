@@ -78,6 +78,7 @@ See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merg
 - Never cross-deduplicates device-local sources. Aggregate-only export cannot support exact account-scoped deduplication; Cursor and that capability remain deferred.
 - Never syncs prompts, responses, file paths, project or repository names, credentials, or cost.
 - Defines a backend interface so local folder, S3, and WebDAV implementations can reuse the layout later. V1 ships iCloud Drive only.
+- For testing and diagnostics, `TOKEN_TAKEN_SYNC_ROOT` points the app and CLI at an existing test sync folder, like `TOKEN_TAKEN_SUPPORT_DIR` overrides local support storage.
 
 See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity decision [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/sync.md`. Daily cross-zone re-bucketing is inexact; fractional-offset boundaries and ambiguous fall-back hour labels also limit hourly attribution. Sync is a contract here, not an implemented transport.
 
