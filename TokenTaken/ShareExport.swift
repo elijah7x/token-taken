@@ -1025,111 +1025,276 @@ private struct TideGeometry {
         let stratum: ShareCardData.Stratum
         let minY: CGFloat
         let maxY: CGFloat
-        let labelMidY: CGFloat?
+        let anchorY: CGFloat
+        let inlineMidY: CGFloat?
+        let externalMidY: CGFloat?
+        let leaderPath: Path?
     }
 
     let canvasSize: CGSize
     let horizontalMargin: CGFloat
     let verticalMargin: CGFloat
+    let vesselRect: CGRect
+    let vesselCornerRadius: CGFloat
+    let innerRect: CGRect
+    let fillLevel: Double
+    let vesselLayers: [LiquidGlassVessel.Layer]
     let brimY: CGFloat
-    let brimHeight: CGFloat
-    let liquidHeight: CGFloat
     let meniscusY: CGFloat
-    let waveAmplitude: CGFloat
-    let wavelength: CGFloat
+    let meniscusHeight: CGFloat
     let strataTotalTokens: Int64
     let bands: [Band]
+    let hasExternalLabels: Bool
+    let calloutX: CGFloat
+    let calloutWidth: CGFloat
     let footerSubmerged: Bool
+
+    private static let inlineMinLayerHeight: CGFloat = 44
 
     init(data: ShareCardData, aspect: ShareAspect, showComposition: Bool) {
         let size = aspect.canvasSize
         self.canvasSize = size
+
+        let hMargin: CGFloat
+        let vMargin: CGFloat
+        let vesselTopY: CGFloat
+        let vesselBottomY: CGFloat
+        let cornerRadius: CGFloat
+        let reservedCalloutWidth: CGFloat
+        let leaderGap: CGFloat
+
         switch aspect {
         case .portrait:
-            self.horizontalMargin = 84
-            self.verticalMargin = 76
+            hMargin = 84
+            vMargin = 76
+            vesselTopY = 716
+            vesselBottomY = size.height - vMargin - 52
+            cornerRadius = 46
+            reservedCalloutWidth = 296
+            leaderGap = 32
         case .landscape:
-            self.horizontalMargin = 80
-            self.verticalMargin = 72
+            hMargin = 80
+            vMargin = 72
+            vesselTopY = 516
+            vesselBottomY = size.height - vMargin - 46
+            cornerRadius = 42
+            reservedCalloutWidth = 384
+            leaderGap = 36
         }
 
-        let brimFraction: CGFloat = aspect == .portrait ? 0.52 : 0.48
-        let brimH = size.height * brimFraction
-        self.brimHeight = brimH
-        self.brimY = size.height - brimH
+        self.horizontalMargin = hMargin
+        self.verticalMargin = vMargin
+        self.vesselCornerRadius = cornerRadius
+        self.footerSubmerged = false
 
-        let fillHeight: CGFloat
+        let effectiveFill: Double
         if data.counts.total <= 0 {
-            fillHeight = 0
+            effectiveFill = 0
         } else if data.isPartialScope {
-            fillHeight = min(brimH, max(28, brimH * CGFloat(data.periodShareRatio)))
+            effectiveFill = min(1, max(0.035, data.periodShareRatio))
         } else {
-            fillHeight = brimH
+            effectiveFill = 1.0
         }
-        self.liquidHeight = fillHeight
-        let topY = size.height - fillHeight
-        self.meniscusY = topY
-        let amp: CGFloat = fillHeight > 0 ? 10 : 0
-        self.waveAmplitude = amp
-        self.wavelength = size.width / 1.6
-
-        let footerBaselineApprox = size.height - verticalMargin - 14
-        self.footerSubmerged = fillHeight > 0 && footerBaselineApprox > topY + 12
+        self.fillLevel = effectiveFill
 
         let strata = data.strata
         let sum = strata.reduce(Int64(0)) { $0 + $1.tokens }
         self.strataTotalTokens = max(sum, data.counts.total)
 
-        guard showComposition, fillHeight > 0, !strata.isEmpty, sum > 0 else {
+        let layers: [LiquidGlassVessel.Layer]
+        if effectiveFill <= 0 {
+            layers = []
+        } else if showComposition, !strata.isEmpty, sum > 0 {
+            layers = strata.map { item in
+                LiquidGlassVessel.Layer(
+                    color: item.color,
+                    fraction: (Double(item.tokens) / Double(sum)) * effectiveFill
+                )
+            }
+        } else {
+            layers = [LiquidGlassVessel.Layer(color: data.accentColor, fraction: effectiveFill)]
+        }
+        self.vesselLayers = layers
+
+        let fullContentWidth = size.width - hMargin * 2
+        let vesselHeight = max(80, vesselBottomY - vesselTopY)
+        let fullVesselRect = CGRect(
+            x: hMargin,
+            y: vesselTopY,
+            width: fullContentWidth,
+            height: vesselHeight
+        )
+        let probeMetrics = LiquidGlassVessel.metrics(
+            for: fullVesselRect,
+            cornerRadius: cornerRadius,
+            layers: layers,
+            fillLevel: effectiveFill
+        )
+
+        let needsExternal: Bool
+        if showComposition, effectiveFill > 0, !strata.isEmpty, sum > 0 {
+            needsExternal = probeMetrics.layerRanges.contains { range in
+                (range.upperBound - range.lowerBound) < Self.inlineMinLayerHeight
+            }
+        } else {
+            needsExternal = false
+        }
+        self.hasExternalLabels = needsExternal
+
+        let resolvedVesselRect: CGRect
+        if needsExternal {
+            let narrowedWidth = max(320, fullContentWidth - reservedCalloutWidth - leaderGap)
+            resolvedVesselRect = CGRect(
+                x: hMargin,
+                y: vesselTopY,
+                width: narrowedWidth,
+                height: vesselHeight
+            )
+            self.calloutX = resolvedVesselRect.maxX + leaderGap
+            self.calloutWidth = max(160, size.width - hMargin - (resolvedVesselRect.maxX + leaderGap))
+        } else {
+            resolvedVesselRect = fullVesselRect
+            self.calloutX = fullVesselRect.maxX
+            self.calloutWidth = 0
+        }
+        self.vesselRect = resolvedVesselRect
+
+        let finalMetrics = needsExternal
+            ? LiquidGlassVessel.metrics(
+                for: resolvedVesselRect,
+                cornerRadius: cornerRadius,
+                layers: layers,
+                fillLevel: effectiveFill
+            )
+            : probeMetrics
+
+        self.innerRect = finalMetrics.innerRect
+        self.brimY = finalMetrics.brimCenterY
+        self.meniscusY = finalMetrics.meniscusCenterY
+        self.meniscusHeight = finalMetrics.meniscusHeight
+
+        guard showComposition, effectiveFill > 0, !strata.isEmpty, sum > 0 else {
             self.bands = []
             return
         }
 
-        let minBandHeight = min(8, fillHeight / CGFloat(max(1, strata.count * 2)))
-        var heights = strata.map { item in
-            max(minBandHeight, fillHeight * CGFloat(Double(item.tokens) / Double(sum)))
+        struct RawBand {
+            let index: Int
+            let item: ShareCardData.Stratum
+            let minY: CGFloat
+            let maxY: CGFloat
+            let anchorY: CGFloat
+            let inlineMidY: CGFloat?
         }
-        let excess = heights.reduce(0, +) - fillHeight
-        if excess > 0 {
-            let slack = heights.reduce(CGFloat(0)) { $0 + max(0, $1 - minBandHeight) }
-            if slack > 0 {
-                heights = heights.map { h in
-                    let room = max(0, h - minBandHeight)
-                    return h - excess * (room / slack)
+
+        var rawBands: [RawBand] = []
+        rawBands.reserveCapacity(strata.count)
+
+        for (index, item) in strata.enumerated() {
+            let range = index < finalMetrics.layerRanges.count
+                ? finalMetrics.layerRanges[index]
+                : finalMetrics.meniscusCenterY...finalMetrics.meniscusCenterY
+            let bandMinY = range.lowerBound
+            let bandMaxY = range.upperBound
+            let bandHeight = bandMaxY - bandMinY
+            let anchorY = (bandMinY + bandMaxY) * 0.5
+
+            let inlineMidY: CGFloat?
+            if bandHeight >= Self.inlineMinLayerHeight {
+                if index == strata.count - 1 {
+                    let topClear = min(
+                        finalMetrics.meniscusHeight * 0.42,
+                        max(0, bandHeight - 42) * 0.5
+                    )
+                    inlineMidY = (bandMinY + topClear + bandMaxY) * 0.5
+                } else {
+                    inlineMidY = anchorY
                 }
+            } else {
+                inlineMidY = nil
+            }
+
+            rawBands.append(RawBand(
+                index: index,
+                item: item,
+                minY: bandMinY,
+                maxY: bandMaxY,
+                anchorY: anchorY,
+                inlineMidY: inlineMidY
+            ))
+        }
+
+        let externalSorted = rawBands
+            .filter { $0.inlineMidY == nil }
+            .sorted { $0.anchorY < $1.anchorY }
+
+        var externalCentersByIndex: [Int: CGFloat] = [:]
+        if !externalSorted.isEmpty {
+            let rowPitch: CGFloat = aspect == .portrait ? 58 : 52
+            let minCenter = resolvedVesselRect.minY + 28
+            let maxCenter = resolvedVesselRect.maxY - 28
+            let spreadCenters = Self.spread(
+                externalSorted.map(\.anchorY),
+                minimum: minCenter,
+                maximum: max(minCenter, maxCenter),
+                gap: rowPitch
+            )
+            for (offset, entry) in externalSorted.enumerated() {
+                externalCentersByIndex[entry.index] = spreadCenters[offset]
             }
         }
 
-        let footerSafeCeiling = size.height - verticalMargin - 44
-        let minLabelBandHeight: CGFloat = aspect == .portrait ? 62 : 54
-
-        var cursorY = size.height
-        var built: [Band] = []
-        built.reserveCapacity(strata.count)
-        for (index, item) in strata.enumerated() {
-            let bandMaxY = cursorY
-            let bandMinY = index == strata.count - 1 ? topY : (cursorY - heights[index])
-            cursorY = bandMinY
-
-            let safeTop = max(bandMinY, topY + amp + 8)
-            let safeBottom = min(bandMaxY, footerSafeCeiling)
-            let labelMidY = (safeBottom - safeTop) >= minLabelBandHeight
-                ? (safeTop + safeBottom) / 2
-                : nil
-
-            built.append(Band(
-                id: item.id,
-                stratum: item,
-                minY: bandMinY,
-                maxY: bandMaxY,
-                labelMidY: labelMidY
-            ))
+        let resolvedCalloutX = self.calloutX
+        self.bands = rawBands.map { raw in
+            let extY = externalCentersByIndex[raw.index]
+            var leader: Path?
+            if let extY {
+                var path = Path()
+                path.move(to: CGPoint(x: resolvedVesselRect.maxX + 4, y: raw.anchorY))
+                path.addLine(to: CGPoint(x: resolvedCalloutX - 10, y: extY))
+                leader = path
+            }
+            return Band(
+                id: raw.item.id,
+                stratum: raw.item,
+                minY: raw.minY,
+                maxY: raw.maxY,
+                anchorY: raw.anchorY,
+                inlineMidY: raw.inlineMidY,
+                externalMidY: extY,
+                leaderPath: leader
+            )
         }
-        self.bands = built
     }
 
-    func waveY(at x: CGFloat, phase: CGFloat = 0.6) -> CGFloat {
-        meniscusY + waveAmplitude * sin((x / wavelength) * 2 * .pi + phase)
+    private static func spread(
+        _ proposed: [CGFloat],
+        minimum: CGFloat,
+        maximum: CGFloat,
+        gap: CGFloat
+    ) -> [CGFloat] {
+        guard !proposed.isEmpty else { return [] }
+        if proposed.count == 1 {
+            return [min(max(proposed[0], minimum), max(minimum, maximum))]
+        }
+        var result = proposed
+        result[0] = max(result[0], minimum)
+        for index in 1..<result.count {
+            result[index] = max(result[index], result[index - 1] + gap)
+        }
+        if let last = result.indices.last, result[last] > maximum {
+            result[last] = max(minimum, maximum)
+            for index in stride(from: result.count - 2, through: 0, by: -1) {
+                result[index] = min(result[index], result[index + 1] - gap)
+            }
+        }
+        if result[0] < minimum {
+            let shift = minimum - result[0]
+            for index in result.indices {
+                result[index] += shift
+            }
+        }
+        return result
     }
 }
 
@@ -1381,72 +1546,99 @@ struct ShareCardView: View {
     @ViewBuilder
     private func brimAndShareCallouts(geometry: TideGeometry) -> some View {
         let labelHeight: CGFloat = 38
-        let brimLabelBottomY = geometry.brimY - 14
+        let topCalloutBottomY = geometry.vesselRect.minY - 12
         let shareText = Share.percent(data.counts.total, of: data.summary.total.total)
-        let footerCeiling = geometry.canvasSize.height - geometry.verticalMargin - 44
-
-        // When the tide approaches the brim (> ~92%), lift the left share badge onto the brim baseline
-        // so text is never squeezed between the dashed brim line and the meniscus.
-        let shareBottomY: CGFloat = if geometry.meniscusY - geometry.brimY >= 64 {
-            min(geometry.meniscusY - 16, footerCeiling)
-        } else {
-            brimLabelBottomY
-        }
+        let meniscusTopY = geometry.meniscusY - geometry.meniscusHeight * 0.5
+        let insideHeadspaceClear = meniscusTopY - geometry.brimY >= 68
+        let shareBottomY: CGFloat = insideHeadspaceClear
+            ? min(meniscusTopY - 12, geometry.innerRect.maxY - 24)
+            : topCalloutBottomY
+        let shareX: CGFloat = insideHeadspaceClear
+            ? geometry.innerRect.minX + 28
+            : geometry.vesselRect.minX
 
         ZStack(alignment: .topLeading) {
             HStack {
                 Spacer(minLength: 0)
                 brimPeriodTotalText
-                    .font(.system(size: 30, weight: .medium))
+                    .font(.system(size: 29, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                     .monospacedDigit()
                     .lineLimit(1)
             }
-            .padding(.horizontal, geometry.horizontalMargin)
-            .frame(width: geometry.canvasSize.width, height: labelHeight, alignment: .bottomTrailing)
-            .offset(y: brimLabelBottomY - labelHeight)
+            .frame(width: geometry.vesselRect.width, height: labelHeight, alignment: .bottomTrailing)
+            .offset(x: geometry.vesselRect.minX, y: topCalloutBottomY - labelHeight)
 
-            HStack {
-                Text(verbatim: shareText)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(Palette.ink2)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, geometry.horizontalMargin)
-            .frame(width: geometry.canvasSize.width, height: labelHeight, alignment: .bottomLeading)
-            .offset(y: shareBottomY - labelHeight)
+            Text(verbatim: shareText)
+                .font(.system(size: 29, weight: .semibold))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .frame(height: labelHeight, alignment: .bottomLeading)
+                .offset(x: shareX, y: shareBottomY - labelHeight)
         }
     }
 
     private func inlineStrataLabels(geometry: TideGeometry) -> some View {
-        let nameSize: CGFloat = aspect == .portrait ? 34 : 31
-        let valueSize: CGFloat = aspect == .portrait ? 31 : 28
-        let rowHeight: CGFloat = 46
+        let inlineInsetX: CGFloat = 30
+        let inlineWidth = max(120, geometry.innerRect.width - inlineInsetX * 2)
+        let inlineNameSize: CGFloat = switch (aspect, geometry.hasExternalLabels) {
+        case (.portrait, true): 29
+        case (.portrait, false): 33
+        case (.landscape, _): 31
+        }
+        let inlineValueSize: CGFloat = inlineNameSize - 3
+        let inlineRowHeight: CGFloat = 42
+
+        let externalNameSize: CGFloat = aspect == .portrait ? 25 : 26
+        let externalValueSize: CGFloat = aspect == .portrait ? 22 : 23
+        let externalRowHeight: CGFloat = 54
 
         return ZStack(alignment: .topLeading) {
             ForEach(geometry.bands) { band in
-                if let midY = band.labelMidY {
-                    HStack(alignment: .firstTextBaseline, spacing: 24) {
-                        stratumNameText(band.stratum.label, size: nameSize)
+                if let midY = band.inlineMidY {
+                    HStack(alignment: .firstTextBaseline, spacing: 20) {
+                        stratumNameText(band.stratum.label, size: inlineNameSize)
                             .foregroundStyle(Color.white)
                             .lineLimit(1)
+                            .minimumScaleFactor(0.82)
                             .truncationMode(.middle)
 
-                        Spacer(minLength: 16)
+                        Spacer(minLength: 14)
 
                         Text(verbatim: "\(Share.percent(band.stratum.tokens, of: geometry.strataTotalTokens)) · \(TokenFormat.short(band.stratum.tokens))")
-                            .font(.system(size: valueSize, weight: .semibold))
+                            .font(.system(size: inlineValueSize, weight: .semibold))
                             .foregroundStyle(Color.white.opacity(0.92))
                             .monospacedDigit()
                             .lineLimit(1)
                             .fixedSize()
                     }
-                    .shadow(color: .black.opacity(reduceTransparency ? 0 : 0.18), radius: 3, x: 0, y: 1)
-                    .padding(.horizontal, geometry.horizontalMargin)
-                    .frame(width: geometry.canvasSize.width, height: rowHeight, alignment: .center)
-                    .offset(y: midY - rowHeight / 2)
+                    .shadow(color: .black.opacity(reduceTransparency ? 0 : 0.28), radius: 4, x: 0, y: 1.5)
+                    .frame(width: inlineWidth, height: inlineRowHeight, alignment: .center)
+                    .offset(x: geometry.innerRect.minX + inlineInsetX, y: midY - inlineRowHeight / 2)
+                } else if let extMidY = band.externalMidY, geometry.calloutWidth > 0 {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(alignment: .center, spacing: 10) {
+                            Circle()
+                                .fill(band.stratum.color)
+                                .frame(width: 12, height: 12)
+
+                            stratumNameText(band.stratum.label, size: externalNameSize)
+                                .foregroundStyle(Palette.ink1)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.82)
+                                .truncationMode(.middle)
+                        }
+
+                        Text(verbatim: "\(Share.percent(band.stratum.tokens, of: geometry.strataTotalTokens)) · \(TokenFormat.short(band.stratum.tokens))")
+                            .font(.system(size: externalValueSize, weight: .medium))
+                            .foregroundStyle(Palette.ink2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .padding(.leading, 22)
+                    }
+                    .frame(width: geometry.calloutWidth, height: externalRowHeight, alignment: .leading)
+                    .offset(x: geometry.calloutX, y: extMidY - externalRowHeight / 2)
                 }
             }
         }
@@ -1604,7 +1796,7 @@ private struct ShareTideVesselCanvas: View {
         Canvas { context, size in
             let fullRect = CGRect(origin: .zero, size: size)
 
-            // 1. Base vessel surface & soft warm/cool atmosphere glows.
+            // 1. Card backdrop & soft warm/cool atmosphere glows.
             if reduceTransparency {
                 context.fill(Path(fullRect), with: .color(Palette.solid))
             } else {
@@ -1657,155 +1849,75 @@ private struct ShareTideVesselCanvas: View {
                         endRadius: glowSpan * 0.64
                     )
                 )
+
+                if geometry.fillLevel > 0 {
+                    let bloomCenter = CGPoint(
+                        x: geometry.vesselRect.midX,
+                        y: (geometry.meniscusY + geometry.vesselRect.maxY) * 0.5
+                    )
+                    let bloomRadius = max(geometry.vesselRect.width, geometry.vesselRect.height) * 0.65
+                    context.fill(
+                        Path(fullRect),
+                        with: .radialGradient(
+                            Gradient(colors: [
+                                data.accentColor.opacity(isDark ? 0.18 : 0.20),
+                                .clear,
+                            ]),
+                            center: bloomCenter,
+                            startRadius: 0,
+                            endRadius: bloomRadius
+                        )
+                    )
+                }
             }
 
-            // 2. Dashed period-total brim line for single source / single model scopes.
+            // 2. Liquid-glass vessel at card scale.
+            LiquidGlassVessel.draw(
+                in: &context,
+                rect: geometry.vesselRect,
+                cornerRadius: geometry.vesselCornerRadius,
+                layers: geometry.vesselLayers,
+                fillLevel: geometry.fillLevel,
+                isDark: isDark,
+                reduceTransparency: reduceTransparency
+            )
+
+            // 3. Dashed period-total brim line inside the vessel for partial scopes.
             if data.isPartialScope {
                 var brimPath = Path()
-                brimPath.move(to: CGPoint(x: geometry.horizontalMargin, y: geometry.brimY))
-                brimPath.addLine(to: CGPoint(x: size.width - geometry.horizontalMargin, y: geometry.brimY))
+                brimPath.move(to: CGPoint(x: geometry.innerRect.minX + 18, y: geometry.brimY))
+                brimPath.addLine(to: CGPoint(x: geometry.innerRect.maxX - 18, y: geometry.brimY))
                 context.stroke(
                     brimPath,
-                    with: .color(Palette.ink2.opacity(isDark ? 0.42 : 0.36)),
+                    with: .color(Palette.ink2.opacity(isDark ? 0.44 : 0.38)),
                     style: StrokeStyle(lineWidth: 3, lineCap: .round, dash: [8, 13])
                 )
             }
 
-            // 3. Rising liquid, back wave, stratified bands (or single tint), and meniscus.
-            if geometry.liquidHeight > 0 {
-                let topLayerColor = (showComposition ? geometry.bands.last?.stratum.color : nil) ?? data.accentColor
-
-                if !reduceTransparency {
-                    let glowRect = CGRect(
-                        x: 0,
-                        y: geometry.meniscusY - 180,
-                        width: size.width,
-                        height: 360
+            // 4. Leader lines to beside-vessel callouts for layers shorter than 44pt.
+            if showComposition {
+                for band in geometry.bands {
+                    guard let leader = band.leaderPath else { continue }
+                    let anchorDot = CGRect(
+                        x: geometry.vesselRect.maxX + 1,
+                        y: band.anchorY - 3,
+                        width: 6,
+                        height: 6
                     )
                     context.fill(
-                        Path(glowRect),
-                        with: .radialGradient(
-                            Gradient(colors: [data.accentColor.opacity(isDark ? 0.26 : 0.28), .clear]),
-                            center: CGPoint(x: size.width * 0.5, y: geometry.meniscusY),
-                            startRadius: 0,
-                            endRadius: size.width * 0.68
-                        )
+                        Path(ellipseIn: anchorDot),
+                        with: .color(band.stratum.color.opacity(isDark ? 0.85 : 0.78))
                     )
-
-                    let backWave = waveClosedPath(in: size, phase: 2.4, verticalOffset: -16)
-                    context.fill(backWave, with: .color(topLayerColor.opacity(isDark ? 0.24 : 0.22)))
-                }
-
-                let frontClip = waveClosedPath(in: size, phase: 0.6, verticalOffset: 0)
-                var liquidContext = context
-                liquidContext.clip(to: frontClip)
-
-                if showComposition && !geometry.bands.isEmpty {
-                    for (index, band) in geometry.bands.enumerated() {
-                        let isTopBand = index == geometry.bands.count - 1
-                        let drawMinY = isTopBand ? (geometry.meniscusY - geometry.waveAmplitude - 16) : band.minY
-                        let bandRect = CGRect(
-                            x: 0,
-                            y: drawMinY,
-                            width: size.width,
-                            height: max(0, band.maxY - drawMinY + 1.5)
-                        )
-                        let pigmented = band.stratum.color.mix(with: .black, by: isDark ? 0.16 : 0.08)
-                        let fillOpacity = reduceTransparency ? 1.0 : (isDark ? 0.84 : 0.85)
-                        liquidContext.fill(Path(bandRect), with: .color(pigmented.opacity(fillOpacity)))
-
-                        if index > 0 {
-                            var divider = Path()
-                            divider.move(to: CGPoint(x: 0, y: band.maxY))
-                            divider.addLine(to: CGPoint(x: size.width, y: band.maxY))
-                            liquidContext.stroke(
-                                divider,
-                                with: .color(.white.opacity(isDark ? 0.30 : 0.42)),
-                                lineWidth: 2
-                            )
-                        }
-                    }
-                } else {
-                    let fillStartY = geometry.meniscusY - geometry.waveAmplitude - 16
-                    let fillRect = CGRect(
-                        x: 0,
-                        y: fillStartY,
-                        width: size.width,
-                        height: size.height - fillStartY
-                    )
-                    if reduceTransparency {
-                        let solidTint = data.accentColor.mix(with: .black, by: 0.18)
-                        liquidContext.fill(Path(fillRect), with: .color(solidTint))
-                    } else {
-                        let topTint = data.accentColor.mix(with: .white, by: isDark ? 0.06 : 0.12)
-                        let deepTint = data.accentColor.mix(with: .black, by: isDark ? 0.18 : 0.10)
-                        liquidContext.fill(
-                            Path(fillRect),
-                            with: .linearGradient(
-                                Gradient(colors: [
-                                    topTint.opacity(isDark ? 0.78 : 0.80),
-                                    deepTint.opacity(isDark ? 0.88 : 0.88),
-                                ]),
-                                startPoint: CGPoint(x: size.width / 2, y: geometry.meniscusY),
-                                endPoint: CGPoint(x: size.width / 2, y: size.height)
-                            )
-                        )
-                    }
-                }
-
-                if !reduceTransparency {
-                    let sheenStartY = geometry.meniscusY - geometry.waveAmplitude - 16
-                    let sheenRect = CGRect(
-                        x: 0,
-                        y: sheenStartY,
-                        width: size.width,
-                        height: size.height - sheenStartY
-                    )
-                    liquidContext.fill(
-                        Path(sheenRect),
-                        with: .linearGradient(
-                            Gradient(stops: [
-                                .init(color: .white.opacity(isDark ? 0.22 : 0.30), location: 0),
-                                .init(color: .white.opacity(0), location: 0.35),
-                                .init(color: .black.opacity(0.10), location: 1),
-                            ]),
-                            startPoint: CGPoint(x: size.width / 2, y: sheenStartY),
-                            endPoint: CGPoint(x: size.width / 2, y: size.height)
-                        )
+                    context.stroke(
+                        leader,
+                        with: .color(band.stratum.color.opacity(isDark ? 0.72 : 0.62)),
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 6])
                     )
                 }
-
-                let meniscusStroke = waveOpenPath(in: size, phase: 0.6, verticalOffset: 0)
-                context.stroke(
-                    meniscusStroke,
-                    with: .color(.white.opacity(reduceTransparency ? 0.55 : (isDark ? 0.68 : 0.84))),
-                    lineWidth: 3.5
-                )
             }
 
-            // 4. Left glass vessel refraction highlight & inner rim.
+            // 5. Outer card border rim.
             if !reduceTransparency {
-                let refractionRect = CGRect(
-                    x: 24,
-                    y: 52,
-                    width: 10,
-                    height: max(1, size.height - 104)
-                )
-                let refractionPath = Capsule().path(in: refractionRect)
-                context.fill(
-                    refractionPath,
-                    with: .linearGradient(
-                        Gradient(stops: [
-                            .init(color: .white.opacity(0), location: 0),
-                            .init(color: .white.opacity(isDark ? 0.20 : 0.44), location: 0.14),
-                            .init(color: .white.opacity(isDark ? 0.14 : 0.30), location: 0.86),
-                            .init(color: .white.opacity(0), location: 1),
-                        ]),
-                        startPoint: CGPoint(x: refractionRect.midX, y: refractionRect.minY),
-                        endPoint: CGPoint(x: refractionRect.midX, y: refractionRect.maxY)
-                    )
-                )
-
                 let rimRect = fullRect.insetBy(dx: 1.5, dy: 1.5)
                 context.stroke(
                     Path(rimRect),
@@ -1817,34 +1929,6 @@ private struct ShareTideVesselCanvas: View {
                 context.stroke(Path(rimRect), with: .color(Palette.hairline), lineWidth: 2)
             }
         }
-    }
-
-    private func waveOpenPath(in size: CGSize, phase: CGFloat, verticalOffset: CGFloat) -> Path {
-        var path = Path()
-        let step: CGFloat = 12
-        var x: CGFloat = 0
-        var isFirst = true
-        while x <= size.width {
-            let y = geometry.waveY(at: x, phase: phase) + verticalOffset
-            if isFirst {
-                path.move(to: CGPoint(x: x, y: y))
-                isFirst = false
-            } else {
-                path.addLine(to: CGPoint(x: x, y: y))
-            }
-            x += step
-        }
-        let endY = geometry.waveY(at: size.width, phase: phase) + verticalOffset
-        path.addLine(to: CGPoint(x: size.width, y: endY))
-        return path
-    }
-
-    private func waveClosedPath(in size: CGSize, phase: CGFloat, verticalOffset: CGFloat) -> Path {
-        var path = waveOpenPath(in: size, phase: phase, verticalOffset: verticalOffset)
-        path.addLine(to: CGPoint(x: size.width, y: size.height))
-        path.addLine(to: CGPoint(x: 0, y: size.height))
-        path.closeSubpath()
-        return path
     }
 }
 

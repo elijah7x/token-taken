@@ -163,6 +163,8 @@ private struct ConfluenceScene: View, @MainActor Animatable {
     var focused: FocusState<ConfluenceTarget?>.Binding
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.controlActiveState) private var controlActiveState
 
     var animatableData: ConfluenceValues {
         get { values }
@@ -171,6 +173,11 @@ private struct ConfluenceScene: View, @MainActor Animatable {
 
     var body: some View {
         let current = layout.interpolated(with: values)
+        let wobbleActive = controlActiveState == .key
+            && appearsActive
+            && !reduceMotion
+            && !reduceTransparency
+            && !current.isEmpty
 
         ZStack(alignment: .topLeading) {
             Canvas { context, _ in
@@ -180,9 +187,31 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     isDark: isDark,
                     reduceTransparency: reduceTransparency
                 )
-                .draw(in: &context)
+                .drawStreamsAndLeaders(in: &context)
             }
             .accessibilityHidden(true)
+
+            if !reduceTransparency {
+                let glassShape = RoundedRectangle(cornerRadius: current.reservoirCorner, style: .continuous)
+                glassShape
+                    .fill(.clear)
+                    .frame(width: current.reservoir.width, height: current.reservoir.height)
+                    .glassEffect(.clear, in: glassShape)
+                    .position(x: current.reservoir.midX, y: current.reservoir.midY)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+
+            if wobbleActive {
+                TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+                    vesselCanvas(
+                        current: current,
+                        wobblePhase: timeline.date.timeIntervalSinceReferenceDate / 6.0
+                    )
+                }
+            } else {
+                vesselCanvas(current: current, wobblePhase: nil)
+            }
 
             streamGroup(.source, streams: current.sources, in: current)
             streamGroup(.category, streams: current.categories, in: current)
@@ -195,6 +224,33 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activeTarget)
+    }
+
+    private func vesselCanvas(current: ConfluenceLayout, wobblePhase: Double?) -> some View {
+        let padX: CGFloat = 12
+        let padTop: CGFloat = 8
+        let padBottom: CGFloat = 24
+        let canvasRect = CGRect(
+            x: current.reservoir.minX - padX,
+            y: current.reservoir.minY - padTop,
+            width: current.reservoir.width + padX * 2,
+            height: current.reservoir.height + padTop + padBottom
+        )
+        return Canvas { context, _ in
+            var shifted = context
+            shifted.translateBy(x: -canvasRect.minX, y: -canvasRect.minY)
+            ConfluenceRenderer(
+                layout: current,
+                activeTarget: activeTarget,
+                isDark: isDark,
+                reduceTransparency: reduceTransparency
+            )
+            .drawVessel(in: &shifted, wobblePhase: wobblePhase)
+        }
+        .frame(width: canvasRect.width, height: canvasRect.height)
+        .offset(x: canvasRect.minX, y: canvasRect.minY)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     /// One VoiceOver group per side, named by its heading; chart chrome is hidden when the period is empty.
@@ -660,9 +716,8 @@ private struct ConfluenceLayout {
     let totalTokens: Int64
     let reservoir: CGRect
     let reservoirCorner: CGFloat
-    let meniscusY: CGFloat
-    let meniscusSag: CGFloat
-    let dominantCategoryColor: Color
+    let vesselLayers: [LiquidGlassVessel.Layer]
+    let vesselFillLevel: Double
     let flowBottom: CGFloat
     let flowBasis: Double
     let compact: Bool
@@ -678,7 +733,7 @@ private struct ConfluenceLayout {
 
     private static let otherID = "__other__"
     private static let pad: CGFloat = 20
-    private static let vesselHeadroom: CGFloat = 10
+    private static let vesselHeadroom: CGFloat = 18
 
     var animationValues: ConfluenceValues {
         var streams: [String: Double] = [:]
@@ -866,8 +921,6 @@ private struct ConfluenceLayout {
         flowBasis = max(1, max(animatedTotal, max(sourceSum, categorySum)))
         isEmpty = animatedTotal == 0 && sourceSum == 0 && categorySum == 0
 
-        dominantCategoryColor = Palette.color(for: .cacheRead)
-
         let leftGap: CGFloat = compact ? 6 : 8
         let rightGap: CGFloat = compact ? 6 : 8
         let maxOuterGaps = max(
@@ -898,9 +951,47 @@ private struct ConfluenceLayout {
         let vesselHeight = Self.vesselHeadroom + actualStackHeight + reservoirCorner
         let vesselTop = top + ((flowHeight - vesselHeight) / 2).rounded()
         let streamTop = vesselTop + Self.vesselHeadroom
-        reservoir = CGRect(x: poolX, y: vesselTop, width: poolWidth, height: vesselHeight)
-        meniscusY = streamTop
-        meniscusSag = min(5, max(3.5, poolWidth * 0.04))
+        let vesselRect = CGRect(x: poolX, y: vesselTop, width: poolWidth, height: vesselHeight)
+        reservoir = vesselRect
+
+        let fill = isEmpty
+            ? 0
+            : LiquidGlassVessel.fillLevel(
+                forSurfaceY: streamTop,
+                in: vesselRect,
+                cornerRadius: reservoirCorner
+            )
+        vesselFillLevel = fill
+
+        if isEmpty || fill <= 0 {
+            vesselLayers = []
+        } else {
+            let weightedCategories = categoryDescriptors.enumerated().compactMap { offset, desc -> (String, Color, Double)? in
+                let value = Self.animatedValue(for: desc, at: offset, in: values)
+                guard value > 0 else { return nil }
+                return (desc.target.id, desc.color, value)
+            }
+            .sorted { lhs, rhs in
+                lhs.2 == rhs.2 ? lhs.0 < rhs.0 : lhs.2 > rhs.2
+            }
+
+            if !weightedCategories.isEmpty {
+                let sum = weightedCategories.reduce(0.0) { $0 + $1.2 }
+                vesselLayers = weightedCategories.map { item in
+                    LiquidGlassVessel.Layer(
+                        color: item.1,
+                        fraction: (item.2 / max(1e-9, sum)) * fill
+                    )
+                }
+            } else {
+                vesselLayers = [
+                    LiquidGlassVessel.Layer(
+                        color: Palette.color(for: .cacheRead),
+                        fraction: fill
+                    ),
+                ]
+            }
+        }
 
         sources = Self.makeStreams(
             descriptors: sourceDescriptors,
@@ -1116,7 +1207,10 @@ private struct ConfluenceLayout {
         var innerY = streamTop
         var outerY = top + (flowHeight - outerHeight) / 2
         var streams: [Stream] = []
-        let bleed = min(12, reservoir.width * 0.25)
+        let wall = LiquidGlassVessel.wallThickness(for: reservoir)
+        let innerLeftX = reservoir.minX + wall
+        let innerRightX = reservoir.maxX - wall
+        let bleed = min(8, reservoir.width * 0.12)
 
         for (index, descriptor) in descriptors.enumerated() {
             let height = heights[index]
@@ -1126,26 +1220,28 @@ private struct ConfluenceLayout {
                 width: terminalWidth,
                 height: height
             )
-            let startX = side == .source ? outerFrame.minX : reservoir.maxX
-            let endX = side == .source ? reservoir.minX : outerFrame.maxX
+            let ribbonStartX = side == .source ? outerFrame.minX : innerRightX
+            let ribbonEndX = side == .source ? innerLeftX : outerFrame.maxX
             // Sources flow outer → reservoir; categories flow reservoir → outer.
             let startY = side == .source ? outerY : innerY
             let endY = side == .source ? innerY : outerY
             let ribbon = ribbonPath(
                 side: side,
-                startX: startX,
+                startX: ribbonStartX,
                 startTop: startY,
                 startBottom: startY + height,
-                endX: endX,
+                endX: ribbonEndX,
                 endTop: endY,
                 endBottom: endY + height,
                 vesselBleed: bleed
             )
+            let particleStartX = side == .source ? outerFrame.minX + 8 : reservoir.maxX + 6
+            let particleEndX = side == .source ? reservoir.minX - 6 : outerFrame.maxX - 8
             let particleSpecs = makeParticleSpecs(
                 streamID: descriptor.target.id,
-                startX: startX + 8,
+                startX: particleStartX,
                 startTop: startY,
-                endX: endX - 8,
+                endX: particleEndX,
                 endTop: endY,
                 height: height
             )
@@ -1493,7 +1589,7 @@ private struct ConfluenceRenderer {
     let isDark: Bool
     let reduceTransparency: Bool
 
-    func draw(in context: inout GraphicsContext) {
+    func drawStreamsAndLeaders(in context: inout GraphicsContext) {
         let vesselShape = RoundedRectangle(cornerRadius: layout.reservoirCorner, style: .continuous)
             .path(in: layout.reservoir)
 
@@ -1502,8 +1598,6 @@ private struct ConfluenceRenderer {
         for stream in layout.sources + layout.categories {
             draw(stream, in: &streamContext)
         }
-
-        drawReservoir(vesselShape: vesselShape, in: &context)
 
         for stream in layout.categories {
             guard let leader = stream.leader else { continue }
@@ -1515,126 +1609,31 @@ private struct ConfluenceRenderer {
         }
     }
 
-    private func drawReservoir(vesselShape: Path, in context: inout GraphicsContext) {
-        let rect = layout.reservoir
-
-        if !reduceTransparency {
-            var shadowContext = context
-            shadowContext.clip(to: vesselShape, options: .inverse)
-            shadowContext.addFilter(.shadow(color: .black.opacity(0.06), radius: 8, x: 0, y: 2))
-            shadowContext.fill(vesselShape, with: .color(.black))
-        }
-
-        var clipped = context
-        clipped.clip(to: vesselShape)
-
-        let meniscusY = layout.meniscusY
-        let controlY = meniscusY + layout.meniscusSag * 2
-
-        if reduceTransparency {
-            clipped.fill(vesselShape, with: .color(Palette.solid))
-        } else {
-            // Lightly frosted 10pt air headspace above the meniscus.
-            var airBody = Path()
-            airBody.move(to: CGPoint(x: rect.minX, y: rect.minY))
-            airBody.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-            airBody.addLine(to: CGPoint(x: rect.maxX, y: meniscusY))
-            airBody.addQuadCurve(
-                to: CGPoint(x: rect.minX, y: meniscusY),
-                control: CGPoint(x: rect.midX, y: controlY)
-            )
-            airBody.closeSubpath()
-            clipped.fill(
-                airBody,
-                with: .color(Color.white.opacity(isDark ? 0.06 : 0.45))
-            )
-        }
-
-        if !layout.isEmpty {
-            var liquidBody = Path()
-            liquidBody.move(to: CGPoint(x: rect.minX, y: meniscusY))
-            liquidBody.addQuadCurve(
-                to: CGPoint(x: rect.maxX, y: meniscusY),
-                control: CGPoint(x: rect.midX, y: controlY)
-            )
-            liquidBody.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-            liquidBody.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
-            liquidBody.closeSubpath()
-
-            // Dominant-category liquid, deepening toward the base.
-            let liquidColor = layout.dominantCategoryColor
-            clipped.fill(
-                liquidBody,
-                with: .linearGradient(
-                    Gradient(colors: [
-                        liquidColor.opacity(isDark ? 0.30 : 0.28),
-                        liquidColor.opacity(isDark ? 0.55 : 0.50),
-                    ]),
-                    startPoint: CGPoint(x: rect.midX, y: meniscusY),
-                    endPoint: CGPoint(x: rect.midX, y: rect.maxY)
+    func drawVessel(in context: inout GraphicsContext, wobblePhase: Double?) {
+        let inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)] =
+            (layout.sources + layout.categories).compactMap { stream in
+                guard stream.value > 0, stream.innerHeight > 0 else { return nil }
+                let dimmed = activeTarget != nil && activeTarget != stream.target
+                let color = dimmed ? stream.color.opacity(0.22) : stream.color
+                return (
+                    color: color,
+                    y: stream.innerTop,
+                    height: stream.innerHeight,
+                    fromLeft: stream.side == .source
                 )
-            )
+            }
 
-            // Meniscus lens sitting 10pt below the vessel's top: a 1pt line in the category colour
-            // at 0.5 opacity under a 4pt-tall convex arc band in white at 0.55 opacity.
-            let lensHalfHeight: CGFloat = 2
-            var meniscusLine = Path()
-            meniscusLine.move(to: CGPoint(x: rect.minX, y: meniscusY + lensHalfHeight))
-            meniscusLine.addQuadCurve(
-                to: CGPoint(x: rect.maxX, y: meniscusY + lensHalfHeight),
-                control: CGPoint(x: rect.midX, y: controlY + lensHalfHeight)
-            )
-            clipped.stroke(
-                meniscusLine,
-                with: .color(liquidColor.opacity(0.5)),
-                lineWidth: 1.0
-            )
-
-            var meniscusLens = Path()
-            meniscusLens.move(to: CGPoint(x: rect.minX, y: meniscusY - lensHalfHeight))
-            meniscusLens.addQuadCurve(
-                to: CGPoint(x: rect.maxX, y: meniscusY - lensHalfHeight),
-                control: CGPoint(x: rect.midX, y: controlY - lensHalfHeight)
-            )
-            meniscusLens.addLine(to: CGPoint(x: rect.maxX, y: meniscusY + lensHalfHeight))
-            meniscusLens.addQuadCurve(
-                to: CGPoint(x: rect.minX, y: meniscusY + lensHalfHeight),
-                control: CGPoint(x: rect.midX, y: controlY + lensHalfHeight)
-            )
-            meniscusLens.closeSubpath()
-            clipped.fill(meniscusLens, with: .color(.white.opacity(0.55)))
-        }
-
-        // Single 3pt highlight inset 6pt from the left rim, white at 0.45 opacity,
-        // fading out over the top and bottom 20pt.
-        if !reduceTransparency {
-            let highlightRect = CGRect(
-                x: rect.minX + 6,
-                y: rect.minY,
-                width: 3,
-                height: rect.height
-            )
-            let highlight = RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .path(in: highlightRect)
-            let fade = min(0.45, Double(20 / max(1, rect.height)))
-            clipped.fill(
-                highlight,
-                with: .linearGradient(
-                    Gradient(stops: [
-                        .init(color: .white.opacity(0), location: 0),
-                        .init(color: .white.opacity(0.45), location: fade),
-                        .init(color: .white.opacity(0.45), location: 1 - fade),
-                        .init(color: .white.opacity(0), location: 1),
-                    ]),
-                    startPoint: CGPoint(x: highlightRect.midX, y: highlightRect.minY),
-                    endPoint: CGPoint(x: highlightRect.midX, y: highlightRect.maxY)
-                )
-            )
-        }
-
-        // Crisp 1pt rim stroke in ink at 0.10 opacity in light mode and white at 0.14 in dark mode.
-        let rimColor = isDark ? Color.white.opacity(0.14) : Palette.ink1.opacity(0.10)
-        context.stroke(vesselShape, with: .color(rimColor), lineWidth: 1.0)
+        LiquidGlassVessel.draw(
+            in: &context,
+            rect: layout.reservoir,
+            cornerRadius: layout.reservoirCorner,
+            layers: layout.vesselLayers,
+            fillLevel: layout.vesselFillLevel,
+            isDark: isDark,
+            reduceTransparency: reduceTransparency,
+            inflows: inflows,
+            wobblePhase: wobblePhase
+        )
     }
 
     private func draw(_ stream: ConfluenceLayout.Stream, in context: inout GraphicsContext) {
@@ -1642,8 +1641,9 @@ private struct ConfluenceRenderer {
         let dimmed = activeTarget != nil && !highlighted
         let alpha = (highlighted ? 0.96 : isDark ? 0.78 : 0.72) * (dimmed ? 0.2 : 1)
         let fillColor = dimmed && reduceTransparency ? Palette.ink3 : stream.color
-        let startX = stream.side == .source ? stream.outerFrame.minX : layout.reservoir.maxX
-        let endX = stream.side == .source ? layout.reservoir.minX : stream.outerFrame.maxX
+        let wall = LiquidGlassVessel.wallThickness(for: layout.reservoir)
+        let startX = stream.side == .source ? stream.outerFrame.minX : layout.reservoir.maxX - wall
+        let endX = stream.side == .source ? layout.reservoir.minX + wall : stream.outerFrame.maxX
         let bounds = stream.ribbon.boundingRect
 
         if reduceTransparency {
