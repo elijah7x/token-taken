@@ -151,6 +151,68 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertEqual(hourlyLines.count, 2)
     }
 
+    func testStateSkipsUnchangedClientsAndRerunsOnlyChangedOnes() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let invocationsURL = dir.appendingPathComponent("invocations.log")
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-state.sh")
+        let script = """
+            #!/bin/sh
+            echo "$*" >> "\(invocationsURL.path)"
+            if [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; out="$1"; fi
+                shift
+              done
+              printf '%s' '{"contributions":[{"date":"2026-11-09","clients":[{"client":"claude","modelId":"m","messages":1,"tokens":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":0}},{"client":"codex","modelId":"m","messages":1,"tokens":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":0}}]}]}' > "$out"
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let sizes = FingerprintBox()
+        func makeCollector() -> TokscaleCollector {
+            TokscaleCollector(
+                executableURL: scriptURL,
+                configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+                clients: ["claude", "codex"],
+                deviceID: "device-a",
+                isClientAvailable: { _ in true },
+                stateDirectory: dir.appendingPathComponent("state", isDirectory: true),
+                fingerprint: { sizes.fingerprint(for: $0) }
+            )
+        }
+        func invocations() throws -> [String] {
+            guard FileManager.default.fileExists(atPath: invocationsURL.path) else { return [] }
+            return try String(contentsOf: invocationsURL, encoding: .utf8).split(separator: "\n").map(String.init)
+        }
+
+        let first = try await makeCollector().collect()
+        XCTAssertTrue(first.unchangedSourceIDs.isEmpty)
+        // Nothing is remembered until the runner commits a successful store.
+        let uncommitted = try await makeCollector().collect()
+        XCTAssertTrue(uncommitted.unchangedSourceIDs.isEmpty)
+        for commit in uncommitted.stateCommits { try commit() }
+        try FileManager.default.removeItem(at: invocationsURL)
+
+        let unchanged = try await makeCollector().collect()
+        XCTAssertEqual(unchanged.unchangedSourceIDs, ["claude", "codex"])
+        XCTAssertTrue(unchanged.daily.isEmpty)
+        XCTAssertEqual(try invocations(), [])
+
+        sizes.bump("codex")
+        let changed = try await makeCollector().collect()
+        XCTAssertEqual(changed.unchangedSourceIDs, ["claude"])
+        let lines = try invocations()
+        XCTAssertEqual(lines.filter { $0.hasPrefix("graph ") }.count, 1)
+        XCTAssertTrue(lines.contains { $0.hasPrefix("graph -c codex ") })
+        XCTAssertEqual(lines.filter { $0.hasPrefix("hourly ") }.map { $0.contains("-c codex") }, [true])
+    }
+
     func testHourlyFailureIsLimitedToOneClientAndPreservesItsCache() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -278,4 +340,17 @@ private struct BatchCollector: UsageCollector {
     let batch: CollectionBatch
 
     func collect() async throws -> CollectionBatch { batch }
+}
+
+private final class FingerprintBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sizes: [String: UInt64] = [:]
+
+    func fingerprint(for client: String) -> TokscaleCollector.ClientFingerprint {
+        lock.withLock { TokscaleCollector.ClientFingerprint(fileCount: 1, totalSize: sizes[client, default: 1], latestModification: 0) }
+    }
+
+    func bump(_ client: String) {
+        lock.withLock { sizes[client, default: 1] += 1 }
+    }
 }

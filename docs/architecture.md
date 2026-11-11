@@ -111,7 +111,7 @@ Exact account-scoped deduplication remains unsupported without privacy-preservin
 
 - **On launch:** display cached data first, then start a refresh. Keep stale data labeled until the refresh succeeds.
 - **On demand (manual-first):** let the user refresh from the main window (`Cmd-R`), menu bar extra, or Settings. There is no user-configurable refresh interval, keeping background work minimal (owner decision 2026-11-10).
-- **Fallback:** run an automatic fallback refresh every 4 hours through a single sleep-tolerant timer (`>= 10` minute tolerance), skipping when a refresh is already running and refreshing on wake from sleep if more than 4 hours have passed since the last success. No other periodic background work runs; sync reads happen with each refresh only. Independent source collectors run concurrently and expose last success and errors; `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records, and source health becomes stale by default after 24 hours.
+- **Fallback:** run an automatic fallback refresh every 4 hours through a single sleep-tolerant timer (`>= 10` minute tolerance), skipping when a refresh is already running and refreshing on wake from sleep if more than 4 hours have passed since the last success. Collection is incremental per ADR-0006: unchanged sources keep their stored rows and only changed inputs are re-read. No other periodic background work runs; sync reads happen with each refresh only. Independent source collectors run concurrently and expose last success and errors; `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records, and source health becomes stale by default after 24 hours.
 - **Incremental:** use source cursors or incremental engine output when available and verified. Otherwise run a complete enough collection to prevent gaps. Never treat an unsupported incremental mode as complete.
 - **Engine boundary:** ADR-0005 accepts complete daily history and rolling per-source hourly exports without a per-event export. Model-level hourly attribution and recovery of Codex total-only legacy records are not available.
 
@@ -123,7 +123,7 @@ Exact account-scoped deduplication remains unsupported without privacy-preservin
 | What source event identity deduplicates Cursor and other account-scoped data across Macs, including old Zcode samples? | ADR-0003 and `docs/contracts/statistics.md` |
 | Can a future privacy-preserving identity export enable exact account-scoped deduplication? | ADR-0005 and `docs/contracts/sync.md`; unsupported today |
 | How should sync transport publish consistent multi-file generations and per-source health? | `docs/contracts/sync.md` before enabling sync |
-| What incremental fallback should refresh use when a source lacks verified cursors? | Refresh cadence is fixed to launch + manual + 4-hour sleep-tolerant fallback (owner decision 2026-11-10); incremental cursors remain governed by ADR-0005 |
+| What incremental fallback should refresh use when a source lacks verified cursors? | Refresh cadence is fixed to launch + manual + 4-hour sleep-tolerant fallback (owner decision 2026-11-10); incremental collection follows ADR-0006 |
 | What price-table sources, update cadence, and model aliases should Pricing use? | `docs/contracts/statistics.md` and `docs/contracts/upstream.md` |
 
 Developer ID signing, notarization, and release mechanics are resolved by [ADR-0004](decisions/0004-distribution.md).

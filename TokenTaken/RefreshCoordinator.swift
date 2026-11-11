@@ -183,17 +183,18 @@ final class RefreshCoordinator {
 
     private func makeCollectors() -> [any UsageCollector] {
         var collectors: [any UsageCollector] = []
+        let state = CollectorStateFile<CollectionStamp>.defaultDirectory
         if case .found(let path) = engineStatus {
             collectors.append(TokscaleCollector(
                 executableURL: URL(fileURLWithPath: path),
                 configDirectory: AppPaths.tokscaleConfigDirectory,
                 clients: TokscaleCollector.defaultClients,
-                deviceID: device.id
+                deviceID: device.id,
+                stateDirectory: state
             ))
         } else {
             collectors.append(UnavailableEngineCollector())
         }
-        let state = CollectorStateFile<CollectionStamp>.defaultDirectory
         collectors.append(ZcodeCollector(deviceID: device.id, stateDirectory: state))
         collectors.append(PiCollector(deviceID: device.id, stateDirectory: state))
         collectors.append(OmpCollector(deviceID: device.id, stateDirectory: state))

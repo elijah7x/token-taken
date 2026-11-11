@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public struct TokscaleCollector: UsageCollector {
     public static let defaultClients = ["claude", "codex", "grok", "kimi", "opencode", "gemini", "droid"]
@@ -19,15 +20,37 @@ public struct TokscaleCollector: UsageCollector {
     private let deviceID: String
     private let timeoutSeconds: TimeInterval
     private let isClientAvailable: @Sendable (String) -> Bool
+    private let stateFile: CollectorStateFile<State>?
+    private let fingerprint: @Sendable (String) -> ClientFingerprint
 
-    public init(executableURL: URL, configDirectory: URL, clients: [String], deviceID: String) {
+    /// Bump when the per-client fingerprint or output mapping changes.
+    static let stateFormatVersion = 1
+    /// Must match engine/engine.lock.json; a new engine forces a full collection.
+    static let engineVersion = "4.21.0"
+    private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
+
+    struct ClientFingerprint: Codable, Hashable, Sendable {
+        var fileCount: Int
+        var totalSize: UInt64
+        var latestModification: Double
+    }
+
+    struct State: Codable, Sendable {
+        var stamp: CollectionStamp
+        var clients: [String: ClientFingerprint]
+    }
+
+    public init(
+        executableURL: URL, configDirectory: URL, clients: [String], deviceID: String, stateDirectory: URL? = nil
+    ) {
         self.init(
             executableURL: executableURL,
             configDirectory: configDirectory,
             clients: clients,
             deviceID: deviceID,
             timeoutSeconds: 300,
-            isClientAvailable: { Self.sourceAvailable(client: $0) }
+            isClientAvailable: { Self.sourceAvailable(client: $0) },
+            stateDirectory: stateDirectory
         )
     }
 
@@ -37,7 +60,9 @@ public struct TokscaleCollector: UsageCollector {
         clients: [String],
         deviceID: String,
         timeoutSeconds: TimeInterval = 300,
-        isClientAvailable: @escaping @Sendable (String) -> Bool = { Self.sourceAvailable(client: $0) }
+        isClientAvailable: @escaping @Sendable (String) -> Bool = { Self.sourceAvailable(client: $0) },
+        stateDirectory: URL? = nil,
+        fingerprint: @escaping @Sendable (String) -> ClientFingerprint = { Self.fingerprint(client: $0) }
     ) {
         self.executableURL = executableURL
         self.configDirectory = configDirectory
@@ -45,6 +70,8 @@ public struct TokscaleCollector: UsageCollector {
         self.deviceID = deviceID
         self.timeoutSeconds = timeoutSeconds
         self.isClientAvailable = isClientAvailable
+        self.stateFile = stateDirectory.map { CollectorStateFile<State>(directory: $0, name: "tokscale") }
+        self.fingerprint = fingerprint
     }
 
     public var sourceIDs: [String] {
@@ -97,6 +124,50 @@ public struct TokscaleCollector: UsageCollector {
         guard !availableClients.isEmpty else {
             throw CollectorError.sourceUnavailable
         }
+        let started = ContinuousClock.now
+        // Fingerprints are taken before tokscale starts, so logs written during collection trigger a re-run next time.
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, engineVersion: Self.engineVersion, timeZone: zone)
+        let fingerprints = stateFile == nil ? [:] : Dictionary(uniqueKeysWithValues: availableClients.map { ($0, fingerprint($0)) })
+        let previous = stateFile?.load().flatMap { $0.stamp == stamp ? $0.clients : nil } ?? [:]
+        let changedClients = availableClients.filter { previous[$0] == nil || previous[$0] != fingerprints[$0] }
+        let unchangedSourceIDs = Set(availableClients.filter { !changedClients.contains($0) }.compactMap { Self.sourceMap[$0] })
+        let stateFile = stateFile
+        func commit(_ succeeded: [String]) -> [@Sendable () throws -> Void] {
+            guard let stateFile else { return [] }
+            var clients = previous.filter { availableClients.contains($0.key) }
+            for client in succeeded { clients[client] = fingerprints[client] }
+            let state = State(stamp: stamp, clients: clients)
+            return [{ try stateFile.save(state) }]
+        }
+        guard !changedClients.isEmpty else {
+            Self.logger.info("source=tokscale changed=none unchanged=\(unchangedSourceIDs.count, privacy: .public) duration_ms=\(Self.milliseconds(since: started), privacy: .public)")
+            return CollectionBatch(
+                unavailableSourceIDs: unavailableSourceIDs, unchangedSourceIDs: unchangedSourceIDs, stateCommits: commit([])
+            )
+        }
+        let batch = try await collect(clients: changedClients, zone: zone, now: now)
+        let succeeded = changedClients.filter { client in
+            guard let sourceID = Self.sourceMap[client] else { return false }
+            return batch.failedSourceIDs[sourceID] == nil
+                && (batch.daily.contains { $0.sourceID == sourceID } || batch.hourly.contains { $0.sourceID == sourceID })
+        }
+        Self.logger.info("source=tokscale changed=\(changedClients.joined(separator: ","), privacy: .public) unchanged=\(unchangedSourceIDs.count, privacy: .public) duration_ms=\(Self.milliseconds(since: started), privacy: .public)")
+        return CollectionBatch(
+            daily: batch.daily,
+            hourly: batch.hourly,
+            unavailableSourceIDs: unavailableSourceIDs,
+            failedSourceIDs: batch.failedSourceIDs,
+            unchangedSourceIDs: unchangedSourceIDs,
+            stateCommits: commit(succeeded)
+        )
+    }
+
+    private static func milliseconds(since start: ContinuousClock.Instant) -> Int64 {
+        let elapsed = ContinuousClock.now - start
+        return elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000
+    }
+
+    private func collect(clients availableClients: [String], zone: TimeZone, now: Date) async throws -> CollectionBatch {
         try ensureSettings(timeZone: zone)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
@@ -124,12 +195,7 @@ public struct TokscaleCollector: UsageCollector {
             return (rows: rows, failedSourceIDs: failedSourceIDs)
         }
         let daily = try await Self.parse(data: graphData, clients: availableClients, deviceID: deviceID, timeZone: zone)
-        return CollectionBatch(
-            daily: daily,
-            hourly: hourly.rows,
-            unavailableSourceIDs: unavailableSourceIDs,
-            failedSourceIDs: hourly.failedSourceIDs
-        )
+        return CollectionBatch(daily: daily, hourly: hourly.rows, failedSourceIDs: hourly.failedSourceIDs)
     }
 
     private func hourlyOutcome(
@@ -225,28 +291,75 @@ public struct TokscaleCollector: UsageCollector {
 
     // Paths and environment overrides follow tokscale-core/src/clients.rs.
     private static func sourceAvailable(client: String) -> Bool {
+        roots(client: client).contains { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    /// Metadata-only walk of everything tokscale reads for a client; file contents are never opened.
+    static func fingerprint(client: String) -> ClientFingerprint {
+        var result = ClientFingerprint(fileCount: 0, totalSize: 0, latestModification: 0)
+        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
+        func add(_ url: URL) {
+            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { return }
+            result.fileCount += 1
+            result.totalSize += UInt64(values.fileSize ?? 0)
+            result.latestModification = max(result.latestModification,
+                values.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0)
+        }
+        for root in roots(client: client) + extraFingerprintRoots(client: client) {
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory) else { continue }
+            if isDirectory.boolValue {
+                guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys) else { continue }
+                for case let url as URL in enumerator { add(url) }
+            } else {
+                // SQLite sources change through their write-ahead log first.
+                for suffix in ["", "-wal", "-shm"] { add(URL(fileURLWithPath: root.path + suffix)) }
+            }
+        }
+        return result
+    }
+
+    /// Secondary inputs tokscale 4.21.0 also reads (scanner.rs); they decide change detection, not availability.
+    private static func extraFingerprintRoots(client: String) -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let environment = ProcessInfo.processInfo.environment
+        switch client {
+        case "grok":
+            let base = environment["GROK_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+                ?? home.appendingPathComponent(".grok")
+            return [base.appendingPathComponent("logs/unified.jsonl")]
+        case "kimi":
+            return [home.appendingPathComponent(
+                "Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/home/sessions")]
+        case "codex":
+            if let path = environment["TOKSCALE_HEADLESS_DIR"], !path.isEmpty { return [URL(fileURLWithPath: path)] }
+            return [home.appendingPathComponent(".config/tokscale/headless"),
+                    home.appendingPathComponent("Library/Application Support/tokscale/headless")]
+        default: return []
+        }
+    }
+
+    private static func roots(client: String) -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let environment = ProcessInfo.processInfo.environment
         func root(_ variable: String, _ fallback: String) -> URL {
             if let path = environment[variable], !path.isEmpty { return URL(fileURLWithPath: path) }
             return home.appendingPathComponent(fallback)
         }
-        let paths: [URL]
         switch client {
-        case "claude": paths = [root("CLAUDE_CONFIG_DIR", ".claude").appendingPathComponent("projects")]
+        case "claude": return [root("CLAUDE_CONFIG_DIR", ".claude").appendingPathComponent("projects")]
         case "codex":
             let base = root("CODEX_HOME", ".codex")
-            paths = [base.appendingPathComponent("sessions"), base.appendingPathComponent("archived_sessions")]
-        case "grok": paths = [root("GROK_HOME", ".grok").appendingPathComponent("sessions")]
-        case "kimi": paths = [home.appendingPathComponent(".kimi/sessions")]
-        case "gemini": paths = [root("GEMINI_CLI_HOME", ".gemini").appendingPathComponent("tmp")]
-        case "droid": paths = [home.appendingPathComponent(".factory/sessions")]
+            return [base.appendingPathComponent("sessions"), base.appendingPathComponent("archived_sessions")]
+        case "grok": return [root("GROK_HOME", ".grok").appendingPathComponent("sessions")]
+        case "kimi": return [home.appendingPathComponent(".kimi/sessions")]
+        case "gemini": return [root("GEMINI_CLI_HOME", ".gemini").appendingPathComponent("tmp")]
+        case "droid": return [home.appendingPathComponent(".factory/sessions")]
         case "opencode":
             let base = root("XDG_DATA_HOME", ".local/share").appendingPathComponent("opencode")
-            paths = [base.appendingPathComponent("storage/message"), base.appendingPathComponent("opencode.db")]
-        default: return false
+            return [base.appendingPathComponent("storage/message"), base.appendingPathComponent("opencode.db")]
+        default: return []
         }
-        return paths.contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     private func ensureSettings(timeZone: TimeZone) throws {
