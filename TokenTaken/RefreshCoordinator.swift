@@ -124,7 +124,7 @@ final class RefreshCoordinator {
         guard settings.syncEnabled else { return }
         guard let root = ICloudSync.defaultRoot else {
             markRemotesUnavailable()
-            updateRemoteRetry(isRetry: isRetry)
+            updateRemoteRetry(isRetry: isRetry, readFailed: true)
             onChange?()
             return
         }
@@ -133,7 +133,7 @@ final class RefreshCoordinator {
         guard let snapshots else {
             markRemotesUnavailable()
             syncReadFailed = true
-            updateRemoteRetry(isRetry: isRetry)
+            updateRemoteRetry(isRetry: isRetry, readFailed: true)
             onChange?()
             return
         }
@@ -153,14 +153,15 @@ final class RefreshCoordinator {
         onChange?()
     }
 
-    private func updateRemoteRetry(isRetry: Bool) {
+    private func updateRemoteRetry(isRetry: Bool, readFailed: Bool = false) {
         if isRetry {
             remoteRetryTask = nil
         } else {
             remoteRetryTask?.cancel()
             remoteRetryTask = nil
         }
-        let needsRetry = remoteSnapshots.contains {
+        // A failed root or folder read must retry even before any remote Mac has been cached.
+        let needsRetry = readFailed || remoteSnapshots.contains {
             $0.status.state == .unavailable || $0.status.state == .partial
         }
         guard needsRetry, settings.syncEnabled else {
