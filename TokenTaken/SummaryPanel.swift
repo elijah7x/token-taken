@@ -4,17 +4,25 @@ import TokenTakenKit
 
 // MARK: - Left sidebar summary rail
 
-/// Total, cost estimate, Token mix and devices for the selected period.
+/// Period range, total, cost estimate and partial-device notice for the selected period.
 struct SummaryRail: View {
     let summary: UsageSummary
     var isCollecting = false
 
     @Environment(AppModel.self) private var model
+    @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            Text(periodDescription)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .contentTransition(reduceMotion ? .identity : .numericText())
+
             if isCollecting {
                 Text(verbatim: "—")
                     .font(.system(size: 40, weight: .bold))
@@ -41,17 +49,7 @@ struct SummaryRail: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(TokenFormat.spoken(summary.total.total))
-                .padding(.top, 2)
-
-                if model.dataIssues.devices > 0 {
-                    PartialDeviceBanner(
-                        summary: summary,
-                        remoteDevices: model.remoteDevices,
-                        deviceIssueCount: model.dataIssues.devices,
-                        reduceTransparency: reduceTransparency
-                    )
-                    .padding(.top, 8)
-                }
+                .padding(.top, 4)
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(TokenFormat.usd(summary.cost.estimatedUSD))
@@ -67,9 +65,35 @@ struct SummaryRail: View {
                 .help(costHelp)
                 .padding(.top, 8)
 
+                if model.dataIssues.devices > 0 {
+                    PartialDeviceBanner(
+                        summary: summary,
+                        remoteDevices: model.remoteDevices,
+                        deviceIssueCount: model.dataIssues.devices,
+                        reduceTransparency: reduceTransparency
+                    )
+                    .padding(.top, 10)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var periodDescription: LocalizedStringKey {
+        let start = summary.start
+        switch model.period {
+        case .day:
+            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+        case .week:
+            let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
+            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+        case .month:
+            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
+        case .year:
+            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
+        case .all:
+            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
+        }
     }
 
     private var costHelp: Text {
@@ -79,68 +103,47 @@ struct SummaryRail: View {
     }
 }
 
-/// Devices in the tray footer: each Mac's share, plus any remote Mac that could not be read.
+/// Devices in the tray: each Mac as a stacked block, plus any remote Mac that could not be read.
 struct TrayDevices: View {
     let summary: UsageSummary
     var isCollecting = false
 
     @Environment(AppModel.self) private var model
+    @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
+    @Environment(\.locale) private var locale
 
     var body: some View {
-                if isCollecting {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+        TimelineView(.everyMinute) { context in
+            if isCollecting {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .center, spacing: 6) {
                         Text(verbatim: Host.current().localizedName ?? "Mac")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundStyle(Palette.ink1)
                             .lineLimit(1)
                         ThisMacBadge()
-                        Spacer(minLength: 8)
-                        Text(verbatim: "—")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Palette.ink3)
                     }
-                    .accessibilityElement(children: .combine)
-                    .accessibilityValue(Text("Summarising…"))
-                } else {
-                    VStack(spacing: 8) {
-                        ForEach(summary.byDevice) { device in
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text(verbatim: device.name)
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundStyle(Palette.ink1)
-                                    .lineLimit(1)
-                                if isLocalDevice(device) {
-                                    ThisMacBadge()
-                                }
-                                if let status = remoteStatusLabel(for: device) {
-                                    Text(status)
-                                        .font(.system(size: 11, weight: .medium))
-                                        .foregroundStyle(Palette.healthWarn)
-                                        .fixedSize()
-                                }
-                                Spacer(minLength: 8)
-                                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                    Text(TokenFormat.short(device.counts.total))
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundStyle(Palette.ink1)
-                                    if hidesDeviceShare {
-                                        Text("Included")
-                                            .font(.system(size: 11.5))
-                                            .foregroundStyle(Palette.ink3)
-                                    } else {
-                                        Text(Share.percent(device.counts.total, of: summary.total.total))
-                                            .font(.system(size: 11.5))
-                                            .foregroundStyle(Palette.ink3)
-                                    }
-                                }
-                                .monospacedDigit()
-                            }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityValue(TokenFormat.spoken(device.counts.total))
-                        }
+                    Text(verbatim: "—")
+                        .font(.system(size: 12))
+                        .monospacedDigit()
+                        .foregroundStyle(Palette.ink2)
+                    Text("Summarising…")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.ink3)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(Text("Summarising…"))
+            } else {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(summary.byDevice) { device in
+                        deviceBlock(device, now: context.date)
+                    }
 
-                        // A remote Mac whose snapshot could not be read adds no rows; keep it visible, not silently absent.
-                        ForEach(missingRemoteDevices, id: \.deviceID) { remote in
+                    // A remote Mac whose snapshot could not be read adds no rows; keep it visible, not silently absent.
+                    ForEach(missingRemoteDevices, id: \.deviceID) { remote in
+                        VStack(alignment: .leading, spacing: 3) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .font(.system(size: 11))
@@ -151,16 +154,120 @@ struct TrayDevices: View {
                                     .font(.system(size: 13, weight: .medium))
                                     .foregroundStyle(Palette.healthWarn)
                                     .lineLimit(1)
-                                Spacer(minLength: 8)
-                                Text(remote.state == .stale ? "Stale" : "Unavailable")
-                                    .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundStyle(Palette.healthWarn)
-                                    .fixedSize()
                             }
-                            .accessibilityElement(children: .combine)
+                            Text(remote.state == .stale ? "Stale" : "Unavailable")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(Palette.healthWarn)
+                                .lineLimit(1)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityElement(children: .combine)
                     }
                 }
+            }
+        }
+    }
+
+    private func deviceBlock(_ device: Breakdown, now: Date) -> some View {
+        let isLocal = isLocalDevice(device)
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .center, spacing: 6) {
+                Text(verbatim: device.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Palette.ink1)
+                    .lineLimit(1)
+                if isLocal {
+                    ThisMacBadge()
+                }
+            }
+
+            Group {
+                if hidesDeviceShare {
+                    Text(verbatim: "\(TokenFormat.short(device.counts.total)) · ") + Text("Included")
+                } else {
+                    Text(verbatim: "\(TokenFormat.short(device.counts.total)) · \(Share.percent(device.counts.total, of: summary.total.total))")
+                }
+            }
+            .font(.system(size: 12))
+            .monospacedDigit()
+            .foregroundStyle(Palette.ink2)
+            .lineLimit(1)
+
+            if let update = updateStatus(for: device, isLocal: isLocal, now: now) {
+                update.text
+                    .font(.system(size: 11, weight: update.isWarning ? .medium : .regular))
+                    .foregroundStyle(update.isWarning ? Palette.healthWarn : Palette.ink3)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(TokenFormat.spoken(device.counts.total))
+    }
+
+    private func updateStatus(
+        for device: Breakdown,
+        isLocal: Bool,
+        now: Date
+    ) -> (text: Text, isWarning: Bool)? {
+        if isLocal {
+            if model.storageError != nil || model.readError != nil {
+                return (Text("Storage unavailable"), true)
+            }
+            guard let refreshCoordinator else {
+                return (Text("Not updated yet"), false)
+            }
+            if refreshCoordinator.isRefreshing {
+                return (Text("Updating…"), false)
+            }
+            switch refreshCoordinator.engineStatus {
+            case .found:
+                break
+            case .missing:
+                return (Text("Collection engine not found"), true)
+            case .invalidOverride:
+                return (Text("Invalid engine override"), true)
+            }
+            if let lastRefresh = refreshCoordinator.lastRefresh {
+                if now.timeIntervalSince(lastRefresh) < 60 {
+                    return (Text("Updated just now"), false)
+                }
+                return (Text("Updated \(relativeTime(for: lastRefresh, now: now))"), false)
+            }
+            return (Text("Not updated yet"), false)
+        }
+
+        guard let remote = model.remoteDevices.first(where: {
+            $0.deviceID == device.id || $0.displayName == device.name
+        }) else {
+            return nil
+        }
+
+        let effectiveState: RemoteDeviceStatus.State =
+            remote.state == .ok && remote.lastWrite.map({ now.timeIntervalSince($0) > 86_400 }) == true
+            ? .stale
+            : remote.state
+
+        switch effectiveState {
+        case .ok:
+            guard let lastWrite = remote.lastWrite else { return nil }
+            if now.timeIntervalSince(lastWrite) < 60 {
+                return (Text("Updated just now"), false)
+            }
+            return (Text("Updated \(relativeTime(for: lastWrite, now: now))"), false)
+        case .stale:
+            return (Text("Stale"), true)
+        case .partial, .unavailable:
+            return (Text("Unavailable"), true)
+        }
+    }
+
+    private func relativeTime(for date: Date, now: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.locale = locale
+        return formatter.localizedString(for: date, relativeTo: now)
     }
 
     private var missingRemoteDevices: [RemoteDeviceStatus] {
@@ -185,22 +292,6 @@ struct TrayDevices: View {
             return !model.remoteDevices.contains { $0.deviceID == device.id }
         }
         return summary.devices.first?.id == device.id
-    }
-
-    private func remoteStatusLabel(for device: Breakdown) -> LocalizedStringKey? {
-        guard let remote = model.remoteDevices.first(where: {
-            $0.deviceID == device.id || $0.displayName == device.name
-        }) else {
-            return nil
-        }
-        return switch remote.state {
-        case .ok:
-            nil
-        case .stale:
-            "Stale"
-        case .partial, .unavailable:
-            "Unavailable"
-        }
     }
 }
 
@@ -408,35 +499,28 @@ struct SectionHead: View {
 
 // MARK: - Bottom breakdown card
 
-/// Single-column two-line breakdown card with a `Models · N | Sources · N` switch.
+/// Single-column breakdown list matching the active `BreakdownDimension`.
 struct BreakdownCard: View {
     let summary: UsageSummary
+    let dimension: BreakdownDimension
 
-    private enum Mode: CaseIterable, Hashable {
-        case models
-        case sources
-    }
+    // A footer that folds a single row saves nothing; show it instead.
+    private var limit: Int { items.count == 5 ? 5 : 4 }
 
-    private let limit = 4
-
-    @State private var mode: Mode = .models
     @State private var showsAllModels = false
     @State private var showsAllSources = false
-    @Namespace private var switchNamespace
-    @FocusState private var focusedMode: Mode?
+    @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
 
     private var items: [Breakdown] {
-        switch mode {
+        switch dimension {
         case .models: summary.byModel
         case .sources: summary.bySource
         }
     }
 
     private var isExpanded: Bool {
-        switch mode {
+        switch dimension {
         case .models: showsAllModels
         case .sources: showsAllSources
         }
@@ -449,13 +533,6 @@ struct BreakdownCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.bottom, 8)
-
-            Rectangle()
-                .fill(Palette.hairline)
-                .frame(height: 0.5)
-
             if items.isEmpty {
                 Text("No usage in this period")
                     .font(.system(size: 13))
@@ -464,12 +541,12 @@ struct BreakdownCard: View {
                     .padding(.vertical, 12)
             } else {
                 let visible = isExpanded ? items : Array(items.prefix(limit))
-                let modelColors = mode == .models ? Palette.modelColors(for: visible.map(\.id)) : [:]
+                let modelColors = dimension == .models ? Palette.modelColors(for: visible.map(\.id)) : [:]
                 if isExpanded && items.count > limit {
                     ScrollView {
                         rowList(visible, modelColors: modelColors)
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: 240)
                 } else {
                     rowList(visible, modelColors: modelColors)
                 }
@@ -480,71 +557,6 @@ struct BreakdownCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            GlassEffectContainer(spacing: 0) {
-                HStack(spacing: 2) {
-                    modeSegment(.models, label: "Models · \(summary.byModel.count)")
-                    modeSegment(.sources, label: "Sources · \(summary.bySource.count)")
-                }
-                .padding(2)
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .background(Capsule().fill(Palette.barTrack))
-            .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(Text("Breakdown view"))
-
-            Spacer(minLength: 8)
-
-            Text("By tokens, descending")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.ink3)
-                .lineLimit(1)
-        }
-    }
-
-    private func modeSegment(_ target: Mode, label: LocalizedStringKey) -> some View {
-        let isSelected = mode == target
-        return Button {
-            selectMode(target)
-        } label: {
-            Text(label)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink2)
-                .monospacedDigit()
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minHeight: 24)
-                .padding(.horizontal, 12)
-                .contentShape(Capsule())
-                .modifier(BreakdownSegmentSurface(
-                    isSelected: isSelected,
-                    reduceTransparency: reduceTransparency,
-                    namespace: switchNamespace
-                ))
-        }
-        .buttonStyle(.plain)
-        .focused($focusedMode, equals: target)
-        .onKeyPress(.leftArrow) {
-            selectMode(.models)
-            focusedMode = .models
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            selectMode(.sources)
-            focusedMode = .sources
-            return .handled
-        }
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private func selectMode(_ target: Mode) {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
-            mode = target
-        }
     }
 
     private func rowList(_ visible: [Breakdown], modelColors: [String: Color]) -> some View {
@@ -561,7 +573,7 @@ struct BreakdownCard: View {
     }
 
     private func row(_ item: Breakdown, modelColors: [String: Color]) -> some View {
-        let isModel = mode == .models
+        let isModel = dimension == .models
         let color = isModel
             ? (modelColors[item.id] ?? Palette.color(for: .output))
             : Palette.color(forSource: item.id)
@@ -623,7 +635,7 @@ struct BreakdownCard: View {
                     .padding(.leading, 16)
                 }
                 .padding(.vertical, 6)
-                .frame(minHeight: 44)
+                .frame(minHeight: 48)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -670,7 +682,7 @@ struct BreakdownCard: View {
                     .fixedSize(horizontal: true, vertical: false)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 44)
+                .frame(minHeight: 48)
             }
         }
         .help(item.name)
@@ -727,7 +739,7 @@ struct BreakdownCard: View {
 
     private func toggleExpanded() {
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) {
-            switch mode {
+            switch dimension {
             case .models:
                 showsAllModels.toggle()
             case .sources:
@@ -743,38 +755,18 @@ struct BreakdownCard: View {
         case 1:
             remaining[0].name
         case 2:
-            String(localized: "\(remaining[0].name), \(remaining[1].name)")
+            String(localized: "\(remaining[0].name), \(remaining[1].name)", locale: locale)
         default:
-            String(localized: "\(remaining[0].name), \(remaining[1].name), …")
+            String(localized: "\(remaining[0].name), \(remaining[1].name), …", locale: locale)
         }
         let remainingTokens = remaining.reduce(Int64(0)) { $0 + $1.counts.total }
         let totalShort = TokenFormat.short(remainingTokens)
         let shareText = Share.percent(remainingTokens, of: summary.total.total)
-        return switch mode {
+        return switch dimension {
         case .models:
-            String(localized: "Other \(remaining.count) models (\(preview)) total \(totalShort) (\(shareText))")
+            String(localized: "Other \(remaining.count) models (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
         case .sources:
-            String(localized: "Other \(remaining.count) sources (\(preview)) total \(totalShort) (\(shareText))")
-        }
-    }
-}
-
-private struct BreakdownSegmentSurface: ViewModifier {
-    let isSelected: Bool
-    let reduceTransparency: Bool
-    let namespace: Namespace.ID
-
-    func body(content: Content) -> some View {
-        if !isSelected {
-            content
-        } else if reduceTransparency {
-            content
-                .background { Capsule().fill(Palette.cardSurface) }
-                .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
-        } else {
-            content
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .glassEffectID("breakdownMode", in: namespace)
+            String(localized: "Other \(remaining.count) sources (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
         }
     }
 }

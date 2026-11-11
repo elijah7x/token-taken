@@ -70,17 +70,20 @@ struct TokenTakenApp: App {
 
     @ViewBuilder
     private func withEnvironment<Content: View>(_ content: Content) -> some View {
+        let locale = settings.language.locale ?? .autoupdatingCurrent
         if let refreshCoordinator {
             content
                 .environment(settings)
                 .environment(model)
                 .environment(refreshCoordinator)
                 .environment(router)
+                .environment(\.locale, locale)
         } else {
             content
                 .environment(settings)
                 .environment(model)
                 .environment(router)
+                .environment(\.locale, locale)
         }
     }
 }

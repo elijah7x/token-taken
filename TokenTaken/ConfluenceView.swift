@@ -3,10 +3,18 @@ import QuartzCore
 import SwiftUI
 import TokenTakenKit
 
-/// Sources flow into a glass reservoir and back out through the token categories.
+enum BreakdownDimension: Hashable, CaseIterable { case sources, models }
+
+/// Sources or models flow into a glass reservoir and back out through the token categories.
 /// All token-to-geometry rules live in `ConfluenceLayout`; only labels and glass are native views.
 struct ConfluenceView: View {
     let summary: UsageSummary
+    let dimension: BreakdownDimension
+
+    init(summary: UsageSummary, dimension: BreakdownDimension = .sources) {
+        self.summary = summary
+        self.dimension = dimension
+    }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Closed or background windows keep their views alive; animate only while the window is active.
@@ -24,8 +32,9 @@ struct ConfluenceView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = ConfluenceLayout(summary: summary, size: proxy.size)
-            let activeTarget = hover?.target ?? focused
+            let layout = ConfluenceLayout(summary: summary, dimension: dimension, size: proxy.size)
+            let rawTarget = hover?.target ?? focused
+            let activeTarget = rawTarget.flatMap { layout.stream(for: $0) != nil ? $0 : nil }
             let values = layout.animationValues
             let particleTracks = layout.particleTracks(
                 activeTarget: activeTarget,
@@ -98,7 +107,11 @@ struct ConfluenceView: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activeTarget)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Confluence of sources into categories"))
+        .accessibilityLabel(
+            dimension == .sources
+                ? Text("Confluence of sources into categories")
+                : Text("Confluence of models into categories")
+        )
     }
 
     /// Keyboard focus has no pointer location; anchor the tooltip beside the focused label, toward the chart.
@@ -127,11 +140,13 @@ private struct ConfluenceHover: Equatable {
 
 private enum ConfluenceTarget: Hashable {
     case source(String)
+    case model(String)
     case category(TokenCategory)
 
     var id: String {
         switch self {
         case .source(let id): "source:\(id)"
+        case .model(let id): "model:\(id)"
         case .category(let category): "category:\(category.rawValue)"
         }
     }
@@ -204,7 +219,11 @@ private struct ConfluenceScene: View, @MainActor Animatable {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(side == .source ? Text("Sources") : Text("Categories"))
+        .accessibilityLabel(
+            side == .source
+                ? (current.dimension == .sources ? Text("Sources") : Text("Models"))
+                : Text("Categories")
+        )
         .accessibilityAddTraits(.isHeader)
         .accessibilityHidden(current.isEmpty)
     }
@@ -450,7 +469,7 @@ private struct ConfluenceHeading: View {
     var body: some View {
         switch side {
         case .source:
-            Text("Sources")
+            Text(layout.dimension == .sources ? "Sources" : "Models")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Palette.ink3)
                 .frame(width: layout.leftLabelWidth, alignment: .leading)
@@ -521,22 +540,35 @@ private struct ConfluenceStreamLabel: View {
         .accessibilityValue(Text("\(TokenFormat.spoken(stream.tokens)) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
     }
 
+    private var nameFont: Font {
+        stream.dimension == .models && !stream.isOther
+            ? .system(size: 12.5, weight: .medium, design: .monospaced)
+            : .system(size: 13, weight: .semibold)
+    }
+
     private var sourceLane: some View {
         HStack(alignment: .center, spacing: 8) {
-            RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
-                .fill(stream.color.opacity(isDark ? 0.18 : 0.14))
-                .frame(width: 22, height: 22)
-                .overlay {
-                    Text(verbatim: stream.monogram)
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(stream.color)
-                }
-                .opacity(dimmed ? 0.45 : 1)
+            if stream.dimension == .models {
+                Circle()
+                    .fill(stream.color)
+                    .frame(width: 8, height: 8)
+                    .opacity(dimmed ? 0.45 : 1)
+            } else {
+                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
+                    .fill(stream.color.opacity(isDark ? 0.18 : 0.14))
+                    .frame(width: 22, height: 22)
+                    .overlay {
+                        Text(verbatim: stream.monogram)
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(stream.color)
+                    }
+                    .opacity(dimmed ? 0.45 : 1)
+            }
 
             if stream.isCollapsedLabel {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     confluenceName(stream)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(nameFont)
                         .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -550,7 +582,7 @@ private struct ConfluenceStreamLabel: View {
             } else {
                 VStack(alignment: .leading, spacing: 1) {
                     confluenceName(stream)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(nameFont)
                         .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -581,16 +613,17 @@ private struct ConfluenceStreamLabel: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
-                .fill(Palette.ink1.opacity(highlighted ? (isDark ? 0.08 : 0.06) : (isDark ? 0.045 : 0.03)))
-        }
     }
 }
 
 private func confluenceName(_ stream: ConfluenceLayout.Stream) -> Text {
     if let category = stream.category { return Text(category.title) }
-    if stream.isOther { return Text("Other") }
+    if stream.isOther {
+        if stream.dimension == .models, stream.otherCount > 0 {
+            return Text("Other \(stream.otherCount)")
+        }
+        return Text("Other")
+    }
     return Text(verbatim: stream.name)
 }
 
@@ -640,17 +673,20 @@ private struct ConfluenceLayout {
     struct Descriptor {
         let target: ConfluenceTarget
         let side: Side
+        let dimension: BreakdownDimension
         let sourceID: String?
         let name: String
         let tokens: Int64
         let color: Color
         let category: TokenCategory?
         let isOther: Bool
+        let otherCount: Int
     }
 
     struct Stream: Identifiable {
         let target: ConfluenceTarget
         let side: Side
+        let dimension: BreakdownDimension
         let name: String
         let monogram: String
         let tokens: Int64
@@ -658,6 +694,7 @@ private struct ConfluenceLayout {
         let color: Color
         let category: TokenCategory?
         let isOther: Bool
+        let otherCount: Int
         let outerFrame: CGRect
         let innerTop: CGFloat
         let innerHeight: CGFloat
@@ -670,6 +707,7 @@ private struct ConfluenceLayout {
         var id: String { target.id }
     }
 
+    let dimension: BreakdownDimension
     private(set) var sources: [Stream] = []
     private(set) var categories: [Stream] = []
     let totalTokens: Int64
@@ -698,83 +736,148 @@ private struct ConfluenceLayout {
 
     var animationValues: ConfluenceValues {
         var streams: [String: Double] = [:]
-        for descriptor in sourceDescriptors + categoryDescriptors {
+        for (index, descriptor) in sourceDescriptors.enumerated() {
+            streams[Self.slotKey(for: index)] = Double(descriptor.tokens)
+            streams[descriptor.target.id] = Double(descriptor.tokens)
+        }
+        for descriptor in categoryDescriptors {
             streams[descriptor.target.id] = Double(descriptor.tokens)
         }
         return ConfluenceValues(streams: streams, total: Double(totalTokens))
     }
 
-    init(summary: UsageSummary, size: CGSize) {
-        let positiveSources = summary.bySource
-            .filter { $0.counts.total > 0 }
-            .sorted { lhs, rhs in
-                lhs.counts.total == rhs.counts.total
-                    ? lhs.id < rhs.id
-                    : lhs.counts.total > rhs.counts.total
-            }
-        let limit = Self.sourceLimit(for: size, count: positiveSources.count)
-        var visible = Array(positiveSources.prefix(limit))
-        var otherTokens: Int64 = 0
+    init(summary: UsageSummary, dimension: BreakdownDimension = .sources, size: CGSize) {
+        let sourceDescriptors: [Descriptor]
+        switch dimension {
+        case .sources:
+            let positiveSources = summary.bySource
+                .filter { $0.counts.total > 0 }
+                .sorted { lhs, rhs in
+                    lhs.counts.total == rhs.counts.total
+                        ? lhs.id < rhs.id
+                        : lhs.counts.total > rhs.counts.total
+                }
+            let limit = Self.sourceLimit(for: size, count: positiveSources.count)
+            var visible = Array(positiveSources.prefix(limit))
+            var otherTokens: Int64 = 0
+            var otherCount = 0
 
-        if positiveSources.count > limit {
-            let kept = max(1, limit - 1)
-            visible = Array(positiveSources.prefix(kept))
-            otherTokens = positiveSources.dropFirst(kept).reduce(0) { $0 + $1.counts.total }
+            if positiveSources.count > limit {
+                let kept = max(1, limit - 1)
+                visible = Array(positiveSources.prefix(kept))
+                let remaining = positiveSources.dropFirst(kept)
+                otherCount = remaining.count
+                otherTokens = remaining.reduce(0) { $0 + $1.counts.total }
+            }
+
+            sourceDescriptors = visible.map { source in
+                Descriptor(
+                    target: .source(source.id),
+                    side: .source,
+                    dimension: .sources,
+                    sourceID: source.id,
+                    name: source.name,
+                    tokens: source.counts.total,
+                    color: Palette.color(forSource: source.id),
+                    category: nil,
+                    isOther: false,
+                    otherCount: 0
+                )
+            } + (otherTokens > 0 ? [Descriptor(
+                target: .source(Self.otherID),
+                side: .source,
+                dimension: .sources,
+                sourceID: Self.otherID,
+                name: "Other",
+                tokens: otherTokens,
+                color: Palette.ink3,
+                category: nil,
+                isOther: true,
+                otherCount: otherCount
+            )] : [])
+
+        case .models:
+            let positiveModels = summary.byModel
+                .filter { $0.counts.total > 0 }
+                .sorted { lhs, rhs in
+                    lhs.counts.total == rhs.counts.total
+                        ? lhs.id < rhs.id
+                        : lhs.counts.total > rhs.counts.total
+                }
+            let limit = 6
+            let visible = Array(positiveModels.prefix(limit))
+            let remaining = positiveModels.dropFirst(limit)
+            let otherCount = remaining.count
+            let otherTokens = remaining.reduce(Int64(0)) { $0 + $1.counts.total }
+            let modelColors = Palette.modelColors(for: visible.map(\.id))
+
+            sourceDescriptors = visible.map { model in
+                Descriptor(
+                    target: .model(model.id),
+                    side: .source,
+                    dimension: .models,
+                    sourceID: nil,
+                    name: model.name,
+                    tokens: model.counts.total,
+                    color: modelColors[model.id] ?? Palette.color(for: .output),
+                    category: nil,
+                    isOther: false,
+                    otherCount: 0
+                )
+            } + (otherTokens > 0 ? [Descriptor(
+                target: .model(Self.otherID),
+                side: .source,
+                dimension: .models,
+                sourceID: nil,
+                name: "Other",
+                tokens: otherTokens,
+                color: Palette.ink3.opacity(0.5),
+                category: nil,
+                isOther: true,
+                otherCount: otherCount
+            )] : [])
         }
 
-        let sourceDescriptors = visible.map { source in
-            Descriptor(
-                target: .source(source.id),
-                side: .source,
-                sourceID: source.id,
-                name: source.name,
-                tokens: source.counts.total,
-                color: Palette.color(forSource: source.id),
-                category: nil,
-                isOther: false
-            )
-        } + (otherTokens > 0 ? [Descriptor(
-            target: .source(Self.otherID),
-            side: .source,
-            sourceID: Self.otherID,
-            name: "Other",
-            tokens: otherTokens,
-            color: Palette.ink3,
-            category: nil,
-            isOther: true
-        )] : [])
+        let breakdownTotals = (dimension == .models ? summary.byModel : summary.bySource)
+            .reduce(TokenCounts.zero) { $0 + $1.counts }
+        let categoryTotals = breakdownTotals.total > 0 ? breakdownTotals : summary.total
 
         let categoryDescriptors = TokenCategory.allCases.compactMap { category -> Descriptor? in
-            let tokens = summary.total[category]
+            let tokens = categoryTotals[category]
             guard tokens > 0 else { return nil }
             return Descriptor(
                 target: .category(category),
                 side: .category,
+                dimension: dimension,
                 sourceID: nil,
                 name: category.rawValue,
                 tokens: tokens,
                 color: Palette.color(for: category),
                 category: category,
-                isOther: false
+                isOther: false,
+                otherCount: 0
             )
         }
 
         self.init(
+            dimension: dimension,
             sourceDescriptors: sourceDescriptors,
             categoryDescriptors: categoryDescriptors,
-            totalTokens: max(0, summary.total.total),
+            totalTokens: max(0, max(summary.total.total, categoryTotals.total)),
             size: size,
             values: nil
         )
     }
 
     private init(
+        dimension: BreakdownDimension,
         sourceDescriptors: [Descriptor],
         categoryDescriptors: [Descriptor],
         totalTokens: Int64,
         size: CGSize,
         values: ConfluenceValues?
     ) {
+        self.dimension = dimension
         self.sourceDescriptors = sourceDescriptors
         self.categoryDescriptors = categoryDescriptors
         self.totalTokens = totalTokens
@@ -808,11 +911,11 @@ private struct ConfluenceLayout {
             ? min(max(desiredPoolX, minimumPoolX), maximumPoolX)
             : max(Self.pad, (w - poolWidth) / 2)
 
-        let sourceSum = sourceDescriptors.reduce(0.0) { result, descriptor in
-            result + max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens))
+        let sourceSum = sourceDescriptors.enumerated().reduce(0.0) { result, entry in
+            result + Self.animatedValue(for: entry.element, at: entry.offset, in: values)
         }
-        let categorySum = categoryDescriptors.reduce(0.0) { result, descriptor in
-            result + max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens))
+        let categorySum = categoryDescriptors.enumerated().reduce(0.0) { result, entry in
+            result + Self.animatedValue(for: entry.element, at: entry.offset, in: values)
         }
         let animatedTotal = max(0, values?.total ?? Double(totalTokens))
         flowBasis = max(1, max(animatedTotal, max(sourceSum, categorySum)))
@@ -890,6 +993,7 @@ private struct ConfluenceLayout {
 
     func interpolated(with values: ConfluenceValues) -> ConfluenceLayout {
         ConfluenceLayout(
+            dimension: dimension,
             sourceDescriptors: sourceDescriptors,
             categoryDescriptors: categoryDescriptors,
             totalTokens: totalTokens,
@@ -950,9 +1054,25 @@ private struct ConfluenceLayout {
         return min(7, max(count > 1 ? 2 : 1, fitting))
     }
 
+    private static func slotKey(for index: Int) -> String {
+        "slot:\(index)"
+    }
+
+    private static func animatedValue(
+        for descriptor: Descriptor,
+        at index: Int,
+        in values: ConfluenceValues?
+    ) -> Double {
+        guard let values else { return Double(descriptor.tokens) }
+        if descriptor.side == .source, let slotValue = values.streams[slotKey(for: index)] {
+            return max(0, slotValue)
+        }
+        return max(0, values.streams[descriptor.target.id] ?? Double(descriptor.tokens))
+    }
+
     private static func flowBounds(for size: CGSize) -> (top: CGFloat, bottom: CGFloat) {
         let h = max(size.height, 1)
-        let top: CGFloat = 48
+        let top: CGFloat = 56
         let bottom = max(top + 64, h - pad)
         return (top, min(h - pad, bottom))
     }
@@ -967,8 +1087,8 @@ private struct ConfluenceLayout {
     ) -> [CGFloat] {
         guard !descriptors.isEmpty else { return [] }
         let count = descriptors.count
-        let rawValues = descriptors.map { descriptor in
-            max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens))
+        let rawValues = descriptors.enumerated().map { index, descriptor in
+            animatedValue(for: descriptor, at: index, in: values)
         }
         let minFloor: CGFloat = 4.5
         let smallMax: CGFloat = 7.0
@@ -1087,13 +1207,15 @@ private struct ConfluenceLayout {
             streams.append(Stream(
                 target: descriptor.target,
                 side: side,
+                dimension: descriptor.dimension,
                 name: descriptor.name,
                 monogram: monogram(for: descriptor),
                 tokens: descriptor.tokens,
-                value: max(0, values?.streams[descriptor.target.id] ?? Double(descriptor.tokens)),
+                value: animatedValue(for: descriptor, at: index, in: values),
                 color: descriptor.color,
                 category: descriptor.category,
                 isOther: descriptor.isOther,
+                otherCount: descriptor.otherCount,
                 outerFrame: outerFrame,
                 innerTop: innerY,
                 innerHeight: height,

@@ -12,10 +12,10 @@ struct SettingsView: View {
         ScrollView {
             sectionContent
                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(.top, 22)
-                .padding(.leading, 20)
-                .padding(.trailing, 28)
-                .padding(.bottom, 24)
+                .padding(.top, 104)
+                .padding(.leading, 28)
+                .padding(.trailing, 32)
+                .padding(.bottom, 32)
                 .id(router.settingsSection)
                 .transition(.opacity)
         }
@@ -72,10 +72,10 @@ struct SettingsSidebar: View {
                 .foregroundStyle(Palette.ink1)
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
-                .padding(.bottom, 14)
+                .padding(.bottom, 16)
                 .accessibilityAddTraits(.isHeader)
 
-            VStack(spacing: 2) {
+            VStack(spacing: 4) {
                 ForEach(SettingsSection.allCases) { section in
                     SettingsNavigationButton(section: section, selection: $router.settingsSection)
                         .focused($focusedSection, equals: section)
@@ -143,7 +143,7 @@ private struct SettingsNavigationButton: View {
             .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
             .foregroundStyle(isSelected ? Palette.roleAccent : (isHovered ? Palette.ink1 : Palette.ink2))
             .padding(.horizontal, 10)
-            .frame(height: 34)
+            .frame(height: 36)
             .background {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(
@@ -161,37 +161,67 @@ private struct SettingsNavigationButton: View {
     }
 }
 
-// MARK: - Shared header & primitives
+// MARK: - Shared group captions & rows
 
-private struct SettingsPageHeader: View {
-    let title: Text
-    let subtitle: Text
-    var showsScanAction = true
+private struct SettingsGroupCaption<Trailing: View>: View {
+    let title: LocalizedStringKey
+    var description: LocalizedStringKey?
+    let trailing: Trailing
+
+    init(
+        title: LocalizedStringKey,
+        description: LocalizedStringKey? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) {
+        self.title = title
+        self.description = description
+        self.trailing = trailing()
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
-                title
-                    .font(.system(size: 19, weight: .bold))
-                    .tracking(-0.2)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Palette.ink1)
-                    .monospacedDigit()
-                subtitle
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(Palette.ink2)
-                    .monospacedDigit()
-                    .fixedSize(horizontal: false, vertical: true)
+                if let description {
+                    Text(description)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
 
-            Spacer(minLength: 12)
-
-            if showsScanAction {
-                SettingsScanActionPill()
-                    .padding(.top, 2)
+            if Trailing.self != EmptyView.self {
+                Spacer(minLength: 12)
+                trailing
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private extension SettingsGroupCaption where Trailing == EmptyView {
+    init(title: LocalizedStringKey, description: LocalizedStringKey? = nil) {
+        self.init(title: title, description: description) {
+            EmptyView()
+        }
+    }
+}
+
+private struct SettingsRowsGroup<Content: View>: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsHairline()
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(reduceTransparency ? Palette.solid : .clear)
     }
 }
 
@@ -264,17 +294,6 @@ private struct SettingsActionPillSurface: ViewModifier {
     }
 }
 
-private struct SettingsSectionLabel: View {
-    let title: LocalizedStringKey
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: 12.5, weight: .semibold))
-            .foregroundStyle(Palette.ink2)
-            .accessibilityAddTraits(.isHeader)
-    }
-}
-
 private struct SettingsControlRow<Accessory: View>: View {
     let title: LocalizedStringKey
     var help: LocalizedStringKey?
@@ -302,7 +321,8 @@ private struct SettingsControlRow<Accessory: View>: View {
                 accessory
             }
         }
-        .frame(minHeight: 44)
+        .padding(.vertical, 8)
+        .frame(minHeight: 52)
     }
 }
 
@@ -310,131 +330,171 @@ private struct SettingsHairline: View {
     var body: some View {
         Rectangle()
             .fill(Palette.hairline)
-            .frame(height: 0.5)
+            .frame(height: 1)
             .accessibilityHidden(true)
-    }
-}
-
-private struct SettingsEmptyCard: View {
-    let text: LocalizedStringKey
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        Text(text)
-            .font(.system(size: 12.5))
-            .foregroundStyle(Palette.ink3)
-            .multilineTextAlignment(.center)
-            .frame(maxWidth: .infinity, minHeight: 96)
-            .padding(20)
-            .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
     }
 }
 
 // MARK: - General
 
 private struct GeneralSettingsTab: View {
+    private static var languageChangedThisSession = false
+
     @Environment(AppSettings.self) private var settings
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
+    @State private var showsRelaunchNote = false
 
     var body: some View {
         @Bindable var settings = settings
-        VStack(alignment: .leading, spacing: 14) {
-            SettingsPageHeader(
-                title: Text("General"),
-                subtitle: Text("Appearance, startup, and automatic collection")
-            )
+        VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsGroupCaption(
+                    title: "Appearance",
+                    description: "Theme and how much of the desktop shows through."
+                )
 
-            VStack(spacing: 0) {
-                SettingsControlRow(title: "Theme") {
-                    Picker("Theme", selection: $settings.theme) {
-                        Text("Liquid Glass").tag(AppTheme.liquidGlass)
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .frame(minWidth: 132)
-                    .accessibilityLabel(Text("Theme"))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-
-                if settings.theme == .liquidGlass {
-                    SettingsHairline()
-                    SettingsControlRow(title: "Interface transparency", help: "How much shows through the window") {
-                        InterfaceTransparencySlider(value: $settings.interfaceTransparency)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                }
-            }
-            .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
-
-            VStack(spacing: 0) {
-                SettingsControlRow(title: "Launch at login") {
-                    Toggle("Launch at login", isOn: $settings.launchAtLogin)
+                SettingsRowsGroup {
+                    SettingsControlRow(title: "Theme") {
+                        Picker("Theme", selection: $settings.theme) {
+                            Text("Liquid Glass").tag(AppTheme.liquidGlass)
+                        }
+                        .pickerStyle(.menu)
                         .labelsHidden()
-                        .toggleStyle(.switch)
-                        .accessibilityLabel(Text("Launch at login"))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-
-                if let error = settings.launchAtLoginError {
-                    SettingsHairline()
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(SourceHealth.State.failed.dotColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                }
-
-                if settings.launchAtLoginNeedsApproval {
-                    SettingsHairline()
-                    HStack(spacing: 16) {
-                        Text("Allow Token Taken in System Settings › Login Items to finish.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.ink2)
-                        Spacer(minLength: 12)
-                        Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                            .controlSize(.small)
+                        .frame(minWidth: 132)
+                        .accessibilityLabel(Text("Theme"))
                     }
-                    .padding(16)
-                }
 
-                SettingsHairline()
-
-                TimelineView(.everyMinute) { _ in
-                    HStack(spacing: 16) {
-                        Text("Last updated")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.ink1)
-                        Spacer(minLength: 12)
-                        lastUpdatedText
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
+                    if settings.theme == .liquidGlass {
+                        SettingsHairline()
+                        SettingsControlRow(title: "Interface transparency", help: "How much shows through the window") {
+                            InterfaceTransparencySlider(value: $settings.interfaceTransparency)
+                        }
                     }
-                    .frame(minHeight: 44)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .accessibilityElement(children: .combine)
-                }
-
-                if let error = model.storageError {
-                    SettingsHairline()
-                    Text(error)
-                        .font(.system(size: 12))
-                        .foregroundStyle(SourceHealth.State.failed.dotColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
                 }
             }
-            .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
+
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsGroupCaption(title: "Language", description: "Applies to the app window and menu bar.")
+
+                SettingsRowsGroup {
+                    SettingsControlRow(title: "Interface language") {
+                        Picker("Language", selection: $settings.language) {
+                            Text(AppLanguage.system.title)
+                                .tag(AppLanguage.system)
+                            Text(AppLanguage.english.title)
+                                .tag(AppLanguage.english)
+                            Text(AppLanguage.simplifiedChinese.title)
+                                .tag(AppLanguage.simplifiedChinese)
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(minWidth: 132)
+                        .accessibilityLabel(Text("Language"))
+                    }
+
+                    if showsRelaunchNote {
+                        SettingsHairline()
+                        HStack(spacing: 16) {
+                            Text("Some text changes language after relaunch.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.ink2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 12)
+                            if reduceTransparency {
+                                Button("Relaunch") { settings.relaunch() }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                            } else {
+                                Button("Relaunch") { settings.relaunch() }
+                                    .buttonStyle(.glass)
+                                    .controlSize(.small)
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .frame(minHeight: 52)
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsGroupCaption(
+                    title: "Startup",
+                    description: "Launch and background collection."
+                )
+
+                SettingsRowsGroup {
+                    SettingsControlRow(title: "Launch at login") {
+                        Toggle("Launch at login", isOn: $settings.launchAtLogin)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .accessibilityLabel(Text("Launch at login"))
+                    }
+
+                    if let error = settings.launchAtLoginError {
+                        SettingsHairline()
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(SourceHealth.State.failed.dotColor)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    }
+
+                    if settings.launchAtLoginNeedsApproval {
+                        SettingsHairline()
+                        HStack(spacing: 16) {
+                            Text("Allow Token Taken in System Settings › Login Items to finish.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.ink2)
+                            Spacer(minLength: 12)
+                            Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
+                                .controlSize(.small)
+                        }
+                        .padding(.vertical, 8)
+                        .frame(minHeight: 52)
+                    }
+
+                    SettingsHairline()
+
+                    TimelineView(.everyMinute) { _ in
+                        HStack(spacing: 16) {
+                            Text("Last updated")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Palette.ink1)
+                            Spacer(minLength: 12)
+                            lastUpdatedText
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.ink2)
+                                .monospacedDigit()
+                        }
+                        .padding(.vertical, 8)
+                        .frame(minHeight: 52)
+                        .accessibilityElement(children: .combine)
+                    }
+
+                    if let error = model.storageError {
+                        SettingsHairline()
+                        Text(error)
+                            .font(.system(size: 12))
+                            .foregroundStyle(SourceHealth.State.failed.dotColor)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    }
+                }
+            }
         }
-        .onAppear { settings.refreshLaunchAtLoginStatus() }
+        .onAppear {
+            settings.refreshLaunchAtLoginStatus()
+            if Self.languageChangedThisSession {
+                showsRelaunchNote = true
+            }
+        }
+        .onChange(of: settings.language) { oldValue, newValue in
+            guard oldValue != newValue else { return }
+            Self.languageChangedThisSession = true
+            showsRelaunchNote = true
+        }
     }
 
     private var lastUpdatedText: Text {
@@ -512,8 +572,6 @@ private struct SourcesSettingsTab: View {
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
     @State private var showsNotInstalled = false
     @State private var localMonthBySource: [String: Int64] = [:]
 
@@ -533,34 +591,34 @@ private struct SourcesSettingsTab: View {
     var body: some View {
         TimelineView(.everyMinute) { context in
             let ledger = makeLedger(now: context.date)
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsPageHeader(
-                    title: Text("\(ledger.installed.count) installed sources"),
-                    subtitle: subtitle(for: ledger.installed, now: context.date)
-                )
+            VStack(alignment: .leading, spacing: 32) {
+                VStack(alignment: .leading, spacing: 12) {
+                    SettingsGroupCaption(
+                        title: "Installed sources",
+                        description: "Agents on this Mac whose logs are read."
+                    ) {
+                        SettingsScanActionPill()
+                    }
 
-                VStack(spacing: 0) {
-                    tableHeader
-                    SettingsHairline()
-
-                    if ledger.installed.isEmpty {
-                        Text("No installed sources found")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Palette.ink3)
-                            .frame(maxWidth: .infinity, minHeight: 108)
-                    } else {
-                        ForEach(Array(ledger.installed.enumerated()), id: \.element.id) { item in
-                            if item.offset > 0 {
-                                SettingsHairline()
+                    SettingsRowsGroup {
+                        if ledger.installed.isEmpty {
+                            Text("No installed sources found")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(Palette.ink3)
+                                .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                        } else {
+                            ForEach(Array(ledger.installed.enumerated()), id: \.element.id) { item in
+                                if item.offset > 0 {
+                                    SettingsHairline()
+                                }
+                                sourceRow(item.element, now: context.date)
                             }
-                            sourceRow(item.element, now: context.date)
                         }
                     }
                 }
-                .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
 
                 if !ledger.notInstalled.isEmpty {
-                    notInstalledCard(ledger.notInstalled)
+                    notInstalledGroup(ledger.notInstalled)
                 }
 
                 Text("Sources are identified automatically from local logs; no manual setup is needed.")
@@ -643,32 +701,6 @@ private struct SourcesSettingsTab: View {
         }
     }
 
-    private func subtitle(for entries: [SourceLedgerEntry], now: Date) -> Text {
-        let hostName = Host.current().localizedName ?? "Mac"
-        if let lastScan = refreshCoordinator?.lastRefresh ?? entries.compactMap(\.health.lastSuccess).max() {
-            return Text("Local collection (\(hostName)) · Last scanned \(formattedDate(lastScan, now: now))")
-        }
-        return Text("Local collection (\(hostName)) · Not scanned yet")
-    }
-
-    private var tableHeader: some View {
-        HStack(spacing: 12) {
-            Text("Installed sources")
-                .frame(width: 164, alignment: .leading)
-            Text("This month (local)")
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Health · Last collected")
-                .frame(width: 192, alignment: .trailing)
-        }
-        .font(.system(size: 11.5, weight: .semibold))
-        .foregroundStyle(Palette.ink3)
-        .padding(.horizontal, 14)
-        .frame(height: 30)
-        .background(Palette.barTrack.opacity(0.55))
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
-
     private func sourceRow(_ entry: SourceLedgerEntry, now: Date) -> some View {
         let monthTokens = localMonthBySource[entry.id] ?? 0
         return HStack(spacing: 12) {
@@ -679,7 +711,7 @@ private struct SourcesSettingsTab: View {
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
             }
-            .frame(width: 164, alignment: .leading)
+            .frame(width: 176, alignment: .leading)
 
             Group {
                 if monthTokens > 0 {
@@ -706,83 +738,83 @@ private struct SourcesSettingsTab: View {
             }
             .frame(width: 192, alignment: .trailing)
         }
-        .padding(.horizontal, 14)
-        .frame(height: 41)
+        .frame(minHeight: 52)
         .accessibilityElement(children: .combine)
         .help(entry.health.errorMessage ?? "")
     }
 
-    private func notInstalledCard(_ sources: [SourceInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                showsNotInstalled.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.ink3)
-                        .rotationEffect(.degrees(showsNotInstalled ? 90 : 0))
-                        .frame(width: 12)
-                        .accessibilityHidden(true)
+    private func notInstalledGroup(_ sources: [SourceInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SettingsGroupCaption(title: "Not installed")
 
-                    Text("Not installed (\(sources.count))")
-                        .font(.system(size: 12.5, weight: .medium))
-                        .foregroundStyle(Palette.ink2)
-                        .monospacedDigit()
-
-                    Spacer(minLength: 12)
-
-                    if !showsNotInstalled {
-                        Text(verbatim: sources.map(\.name).joined(separator: " · "))
-                            .font(.system(size: 12))
+            SettingsRowsGroup {
+                Button {
+                    showsNotInstalled.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Palette.ink3)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .frame(minHeight: 36)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onKeyPress(.leftArrow) {
-                guard showsNotInstalled else { return .ignored }
-                showsNotInstalled = false
-                return .handled
-            }
-            .onKeyPress(.rightArrow) {
-                guard !showsNotInstalled else { return .ignored }
-                showsNotInstalled = true
-                return .handled
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text("Not installed (\(sources.count))"))
-            .accessibilityValue(showsNotInstalled ? Text("Expanded") : Text("Collapsed"))
+                            .rotationEffect(.degrees(showsNotInstalled ? 90 : 0))
+                            .frame(width: 12)
+                            .accessibilityHidden(true)
 
-            if showsNotInstalled {
-                SettingsHairline()
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading), count: 3),
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(sources) { source in
-                        HStack(spacing: 8) {
-                            SourceMonogramBadge(sourceID: source.id, name: source.name, size: 20)
-                                .opacity(0.65)
-                            Text(verbatim: source.name)
+                        Text("Not installed (\(sources.count))")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Palette.ink1)
+                            .monospacedDigit()
+
+                        Spacer(minLength: 12)
+
+                        if !showsNotInstalled {
+                            Text(verbatim: sources.map(\.name).joined(separator: " · "))
                                 .font(.system(size: 12))
-                                .foregroundStyle(Palette.ink2)
+                                .foregroundStyle(Palette.ink3)
                                 .lineLimit(1)
+                                .truncationMode(.tail)
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .frame(minHeight: 52)
+                    .contentShape(Rectangle())
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
+                .buttonStyle(.plain)
+                .onKeyPress(.leftArrow) {
+                    guard showsNotInstalled else { return .ignored }
+                    showsNotInstalled = false
+                    return .handled
+                }
+                .onKeyPress(.rightArrow) {
+                    guard !showsNotInstalled else { return .ignored }
+                    showsNotInstalled = true
+                    return .handled
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Not installed (\(sources.count))"))
+                .accessibilityValue(showsNotInstalled ? Text("Expanded") : Text("Collapsed"))
+
+                if showsNotInstalled {
+                    SettingsHairline()
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading), count: 3),
+                        alignment: .leading,
+                        spacing: 10
+                    ) {
+                        ForEach(sources) { source in
+                            HStack(spacing: 8) {
+                                SourceMonogramBadge(sourceID: source.id, name: source.name, size: 20)
+                                    .opacity(0.65)
+                                Text(verbatim: source.name)
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(Palette.ink2)
+                                    .lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.vertical, 14)
+                }
             }
         }
-        .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
     }
 
     private func formattedDate(_ date: Date, now: Date) -> String {
@@ -870,65 +902,71 @@ private struct SyncSettingsTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         @Bindable var settings = settings
-        VStack(alignment: .leading, spacing: 14) {
-            SettingsPageHeader(
-                title: Text("iCloud sync"),
-                subtitle: Text("Combine usage from your Macs through iCloud Drive. Only totals are shared.")
-            )
-
-            VStack(spacing: 0) {
-                SettingsControlRow(
+        VStack(alignment: .leading, spacing: 32) {
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsGroupCaption(
                     title: "iCloud sync",
-                    help: "Only aggregate token counts and a random device ID are stored in iCloud Drive."
-                ) {
-                    Toggle("iCloud sync", isOn: $settings.syncEnabled)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .accessibilityLabel(Text("iCloud sync"))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                    description: "Share totals between your Macs through iCloud Drive."
+                )
 
-                if refreshCoordinator?.iCloudAvailable == false || ICloudSync.defaultRoot == nil {
-                    SettingsHairline()
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.healthWarn)
-                            .accessibilityHidden(true)
-                        Text("iCloud Drive is not available on this Mac.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.healthWarn)
+                SettingsRowsGroup {
+                    SettingsControlRow(
+                        title: "iCloud sync",
+                        help: "Only aggregate token counts and a random device ID are stored in iCloud Drive."
+                    ) {
+                        Toggle("iCloud sync", isOn: $settings.syncEnabled)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .accessibilityLabel(Text("iCloud sync"))
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                } else if settings.syncEnabled && refreshCoordinator?.syncFailed == true {
-                    SettingsHairline()
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.healthWarn)
-                            .accessibilityHidden(true)
-                        Text("Unavailable")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Palette.healthWarn)
+
+                    if refreshCoordinator?.iCloudAvailable == false || ICloudSync.defaultRoot == nil {
+                        SettingsHairline()
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Palette.healthWarn)
+                                .accessibilityHidden(true)
+                            Text("iCloud Drive is not available on this Mac.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.healthWarn)
+                        }
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    } else if settings.syncEnabled && refreshCoordinator?.syncFailed == true {
+                        SettingsHairline()
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Palette.healthWarn)
+                                .accessibilityHidden(true)
+                            Text("Unavailable")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Palette.healthWarn)
+                        }
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
                 }
             }
-            .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
 
-            if settings.syncEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    SettingsSectionLabel(title: "Other Macs")
-                    if model.remoteDevices.isEmpty {
-                        SettingsEmptyCard(text: "No other Macs yet")
+            VStack(alignment: .leading, spacing: 12) {
+                SettingsGroupCaption(title: "Devices")
+
+                SettingsRowsGroup {
+                    if !settings.syncEnabled {
+                        Text("Turn on sync to see your other Macs here.")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Palette.ink3)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    } else if model.remoteDevices.isEmpty {
+                        Text("No other Macs yet")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Palette.ink3)
+                            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                     } else {
                         TimelineView(.everyMinute) { _ in
                             VStack(spacing: 0) {
@@ -939,12 +977,9 @@ private struct SyncSettingsTab: View {
                                     remoteRow(entry.element)
                                 }
                             }
-                            .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
                         }
                     }
                 }
-            } else {
-                SettingsEmptyCard(text: "Turn on sync to see your other Macs here.")
             }
         }
     }
@@ -967,7 +1002,7 @@ private struct SyncSettingsTab: View {
             RemoteStatusLabel(state: device.state == .ok && device.lastWrite.map { Date.now.timeIntervalSince($0) > 86_400 } == true
                 ? .stale : device.state)
         }
-        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
         .frame(minHeight: 52)
         .accessibilityElement(children: .combine)
     }
@@ -1015,7 +1050,6 @@ private struct RemoteStatusLabel: View {
 
 private struct AboutSettingsTab: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var scheme
     @State private var installationMessage: String?
     @State private var installationFailed = false
 
@@ -1026,7 +1060,7 @@ private struct AboutSettingsTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 32) {
             HStack(spacing: 14) {
                 Image(nsImage: NSApplication.shared.applicationIconImage)
                     .resizable()
@@ -1044,38 +1078,20 @@ private struct AboutSettingsTab: View {
                         .foregroundStyle(Palette.ink2)
                 }
             }
-            .padding(.vertical, 2)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
 
-            HStack(alignment: .top, spacing: 14) {
-                VStack(spacing: 0) {
-                    AboutValueRow(label: "Version", value: version)
-                    SettingsHairline()
-                    AboutValueRow(label: "License", value: "MIT")
-                    SettingsHairline()
-                    AboutValueRow(label: "Acknowledgements", value: "tokscale, TokenTracker")
-                }
-                .frame(maxWidth: .infinity)
-                .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Privacy")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Palette.ink1)
-                    Text("Read-only local Agent logs, no content uploads, no telemetry")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Palette.ink2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
-                .accessibilityElement(children: .combine)
+            SettingsRowsGroup {
+                AboutValueRow(label: "Version", value: Text(verbatim: version))
+                SettingsHairline()
+                AboutValueRow(label: "License", value: Text(verbatim: "MIT"))
+                SettingsHairline()
+                AboutValueRow(label: "Acknowledgements", value: Text(verbatim: "tokscale, TokenTracker"))
+                SettingsHairline()
+                AboutValueRow(label: "Privacy", value: Text("Read-only local Agent logs, no content uploads, no telemetry"))
             }
-            .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 0) {
+            SettingsRowsGroup {
                 SettingsControlRow(title: "Command-Line Tool", help: "Use token-taken in Terminal") {
                     if reduceTransparency {
                         Button("Install Command-Line Tool", action: install)
@@ -1087,8 +1103,6 @@ private struct AboutSettingsTab: View {
                             .controlSize(.small)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
 
                 if let installationMessage {
                     SettingsHairline()
@@ -1097,11 +1111,10 @@ private struct AboutSettingsTab: View {
                         .foregroundStyle(installationFailed ? SourceHealth.State.failed.dotColor : Palette.ink2)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
                 }
             }
-            .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
         }
     }
 
@@ -1120,22 +1133,22 @@ private struct AboutSettingsTab: View {
 
 private struct AboutValueRow: View {
     let label: LocalizedStringKey
-    let value: String
+    let value: Text
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 16) {
             Text(label)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(Palette.ink1)
+            Spacer(minLength: 12)
+            value
                 .font(.system(size: 12.5))
                 .foregroundStyle(Palette.ink2)
-            Spacer(minLength: 8)
-            Text(verbatim: value)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(Palette.ink1)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 40)
+        .padding(.vertical, 8)
+        .frame(minHeight: 52)
         .accessibilityElement(children: .combine)
     }
 }

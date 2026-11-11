@@ -1,10 +1,41 @@
+import AppKit
 import Foundation
 import Observation
 import ServiceManagement
+import SwiftUI
 import TokenTakenKit
 
 enum AppTheme: String, CaseIterable {
     case liquidGlass = "liquid-glass"
+}
+
+enum AppLanguage: String, CaseIterable, Identifiable {
+    case system
+    case english
+    case simplifiedChinese
+
+    var id: Self { self }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .system: "Follow System"
+        case .english: "English"
+        case .simplifiedChinese: "简体中文"
+        }
+    }
+
+    var locale: Locale? {
+        guard let languageCode else { return nil }
+        return Locale(identifier: languageCode)
+    }
+
+    fileprivate var languageCode: String? {
+        switch self {
+        case .system: nil
+        case .english: "en"
+        case .simplifiedChinese: "zh-Hans"
+        }
+    }
 }
 
 @Observable
@@ -26,6 +57,18 @@ final class AppSettings {
         }
     }
 
+    var language: AppLanguage {
+        didSet {
+            guard language != oldValue else { return }
+            defaults.set(language.rawValue, forKey: Keys.language)
+            if let code = language.languageCode {
+                UserDefaults.standard.set([code], forKey: Keys.appleLanguages)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.appleLanguages)
+            }
+        }
+    }
+
     var tokscalePathOverride: String? {
         didSet {
             guard tokscalePathOverride != oldValue else { return }
@@ -38,6 +81,18 @@ final class AppSettings {
             guard syncEnabled != oldValue else { return }
             defaults.set(syncEnabled, forKey: Keys.syncEnabled)
             onSyncEnabledChange?()
+        }
+    }
+
+    func relaunch() {
+        CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
+            guard error == nil else { return }
+            Task { @MainActor in
+                NSApplication.shared.terminate(nil)
+            }
         }
     }
 
@@ -77,11 +132,13 @@ final class AppSettings {
         defaults.register(defaults: [
             Keys.theme: AppTheme.liquidGlass.rawValue,
             Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
+            Keys.language: AppLanguage.system.rawValue,
             Keys.syncEnabled: false,
         ])
 
         theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
+        language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .system
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
         launchAtLoginStatus = SMAppService.mainApp.status
@@ -90,6 +147,8 @@ final class AppSettings {
     private enum Keys {
         static let theme = "theme"
         static let interfaceTransparency = "interfaceTransparency"
+        static let language = "appLanguage"
+        static let appleLanguages = "AppleLanguages"
         static let refreshIntervalMinutes = "refreshIntervalMinutes"
         static let tokscalePathOverride = "tokscalePathOverride"
         static let syncEnabled = "syncEnabled"

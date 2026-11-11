@@ -66,6 +66,7 @@ struct MainWindowView: View {
     @Environment(MainWindowRouter.self) private var router
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dimension: BreakdownDimension = .sources
 
     private var isFirstLaunchCollecting: Bool {
         model.isEmpty && refreshCoordinator?.isRefreshing == true
@@ -75,7 +76,7 @@ struct MainWindowView: View {
         HStack(spacing: 0) {
             Tray(isFirstLaunchCollecting: isFirstLaunchCollecting)
                 .frame(width: 264)
-                .padding(10)
+                .padding(8)
 
             Group {
                 switch router.route {
@@ -98,29 +99,124 @@ struct MainWindowView: View {
     private var dashboard: some View {
         if isFirstLaunchCollecting {
             FirstLaunchCollectingCard()
-                .padding(24)
+                .padding(28)
         } else if model.isEmpty {
             DashboardEmptyStateCard { router.openSettings() }
-                .padding(24)
+                .padding(28)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                RangeTitle()
-                    .padding(.leading, 20)
-                    .frame(height: 48)
+                DimensionSwitchRow(summary: model.summary, dimension: $dimension)
+                    .padding(.horizontal, 28)
+                    .padding(.top, 18)
+                    .padding(.bottom, 6)
 
-                ConfluenceView(summary: model.summary)
+                ConfluenceView(summary: model.summary, dimension: dimension)
+                    .padding(.horizontal, 8)
                     .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
 
                 Rectangle().fill(Palette.hairline).frame(height: 1)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 24)
 
-                BreakdownCard(summary: model.summary)
-                    .padding(.horizontal, 20)
+                BreakdownCard(summary: model.summary, dimension: dimension)
+                    .padding(.horizontal, 28)
             }
-            .padding(.leading, 0)
-            .padding(.trailing, 6)
-            .padding(.bottom, 20)
+            .padding(.bottom, 24)
+        }
+    }
+}
+
+private struct DimensionSwitchRow: View {
+    let summary: UsageSummary
+    @Binding var dimension: BreakdownDimension
+
+    @Namespace private var switchNamespace
+    @FocusState private var focusedDimension: BreakdownDimension?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    var body: some View {
+        HStack(spacing: 12) {
+            GlassEffectContainer(spacing: 0) {
+                HStack(spacing: 2) {
+                    segment(.sources, label: "Sources · \(summary.bySource.count)")
+                    segment(.models, label: "Models · \(summary.byModel.count)")
+                }
+                .padding(2)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .background(Capsule().fill(Palette.barTrack))
+            .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Breakdown view"))
+
+            Spacer(minLength: 12)
+
+            Text("By tokens, descending")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
+                .lineLimit(1)
+        }
+    }
+
+    private func segment(_ target: BreakdownDimension, label: LocalizedStringKey) -> some View {
+        let isSelected = dimension == target
+        return Button {
+            select(target)
+        } label: {
+            Text(label)
+                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minHeight: 24)
+                .padding(.horizontal, 12)
+                .contentShape(Capsule())
+                .modifier(DimensionSegmentSurface(
+                    isSelected: isSelected,
+                    reduceTransparency: reduceTransparency,
+                    namespace: switchNamespace
+                ))
+        }
+        .buttonStyle(.plain)
+        .focused($focusedDimension, equals: target)
+        .onKeyPress(.leftArrow) {
+            select(.sources)
+            focusedDimension = .sources
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            select(.models)
+            focusedDimension = .models
+            return .handled
+        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func select(_ target: BreakdownDimension) {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
+            dimension = target
+        }
+    }
+}
+
+private struct DimensionSegmentSurface: ViewModifier {
+    let isSelected: Bool
+    let reduceTransparency: Bool
+    let namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if !isSelected {
+            content
+        } else if reduceTransparency {
+            content
+                .background { Capsule().fill(Palette.cardSurface) }
+                .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
+        } else {
+            content
+                .glassEffect(.regular.interactive(), in: .capsule)
+                .glassEffectID("breakdownDimension", in: namespace)
         }
     }
 }
@@ -141,15 +237,15 @@ private struct Tray: View {
         let shape = RoundedRectangle(cornerRadius: Radius.tray, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
             // Clear band for the traffic lights, which sit inside the tray.
-            Color.clear.frame(height: 34)
+            Color.clear.frame(height: 46)
 
             switch router.route {
             case .dashboard:
-                PeriodPicker()
-                    .padding(.top, 10)
+                PeriodSlider()
+                    .padding(.top, 6)
 
                 SummaryRail(summary: model.summary, isCollecting: isFirstLaunchCollecting)
-                    .padding(.top, 24)
+                    .padding(.top, 22)
                     .padding(.horizontal, 4)
 
                 Spacer(minLength: 20)
@@ -181,7 +277,7 @@ private struct Tray: View {
     }
 }
 
-/// Sync status and refresh on the left, Settings on the right.
+/// Collection/sync mode on the left, refresh and Settings on the right.
 private struct TrayFooter: View {
     let isFirstLaunchCollecting: Bool
 
@@ -192,60 +288,96 @@ private struct TrayFooter: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Relative time ("5 min ago") and staleness must re-render as the clock advances.
-            TimelineView(.everyMinute) { _ in status }
+            TimelineView(.everyMinute) { context in
+                modeIndicator(now: context.date)
+            }
             Spacer(minLength: 4)
             RefreshNowButton(refreshCoordinator: refreshCoordinator)
             TraySettingsButton()
         }
     }
 
-    private var status: some View {
-        let hasIssue = !isFirstLaunchCollecting && model.hasStatusIssue && refreshCoordinator?.isRefreshing != true
-        let hasSyncIssue = settings.syncEnabled
-            && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false)
-        return Button {
-            router.openSettings(for: hasIssue ? model.dataIssues : nil, syncIssue: hasIssue && hasSyncIssue)
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Group {
-                    if hasIssue {
+    @ViewBuilder
+    private func modeIndicator(now: Date) -> some View {
+        if !settings.syncEnabled {
+            HStack(spacing: 6) {
+                Image(systemName: "laptopcomputer")
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(Palette.ink3)
+                    .accessibilityHidden(true)
+                Text("Local only")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.ink2)
+                    .lineLimit(1)
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            let isRefreshing = isFirstLaunchCollecting || refreshCoordinator?.isRefreshing == true
+            let hasSyncWarning = !isRefreshing && hasSyncIssue(now: now)
+            if hasSyncWarning {
+                Button {
+                    router.openSettings(syncIssue: true)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "icloud")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Palette.healthWarn)
+                            .accessibilityHidden(true)
+                        Text("iCloud sync")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(Palette.healthWarn)
+                            .lineLimit(1)
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(Palette.healthWarn)
-                    } else {
-                        Circle()
-                            .fill(isFirstLaunchCollecting || refreshCoordinator?.isRefreshing == true ? Palette.healthScan : Palette.healthOK)
-                            .frame(width: 6, height: 6)
-                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            .accessibilityHidden(true)
                     }
+                    .contentShape(Rectangle())
                 }
-                .accessibilityHidden(true)
-                statusLabel
-                    .font(.system(size: 11.5, weight: hasIssue ? .semibold : .regular))
-                    .foregroundStyle(hasIssue ? Palette.healthWarn : Palette.ink3)
-                    .monospacedDigit()
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                .buttonStyle(.plain)
+                .help(syncWarningTooltip)
+                .accessibilityLabel(Text("iCloud sync"))
+                .accessibilityValue(Text("Unavailable"))
+                .accessibilityHint(Text("Opens Settings"))
+            } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "icloud")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(Palette.ink3)
+                        .accessibilityHidden(true)
+                    Text("iCloud sync")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.ink2)
+                        .lineLimit(1)
+                    Circle()
+                        .fill(isRefreshing ? Palette.healthScan : Palette.healthOK)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("iCloud sync"))
+                .accessibilityValue(Text(isRefreshing ? "Updating…" : "Synced"))
             }
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .help(model.statusTooltip(refreshCoordinator: refreshCoordinator))
-        .accessibilityHint(Text("Opens Settings"))
     }
 
-    private var statusLabel: Text {
-        if isFirstLaunchCollecting {
-            return Text("Collecting for the first time")
+    private func hasSyncIssue(now: Date) -> Bool {
+        if refreshCoordinator?.iCloudAvailable == false || refreshCoordinator?.syncFailed == true || ICloudSync.defaultRoot == nil {
+            return true
         }
-        if refreshCoordinator?.isRefreshing == true {
-            return Text("Updating…")
+        if model.dataIssues.devices > 0 {
+            return true
         }
-        if let note = model.statusIssueNote {
-            return Text(note)
+        return model.remoteDevices.contains { device in
+            device.state != .ok || (device.lastWrite.map { now.timeIntervalSince($0) > 86_400 } == true)
         }
-        return Text(model.statusText)
+    }
+
+    private var syncWarningTooltip: String {
+        if refreshCoordinator?.iCloudAvailable == false || ICloudSync.defaultRoot == nil {
+            return String(localized: "iCloud Drive is not available on this Mac.")
+        }
+        return model.statusTooltip(refreshCoordinator: refreshCoordinator)
     }
 }
 
@@ -267,39 +399,6 @@ private struct TraySettingsButton: View {
         .buttonStyle(.plain)
         .help(Text("Settings (⌘,)"))
         .accessibilityLabel(Text("Settings"))
-    }
-}
-
-/// Quiet title over the dashboard naming the period's range.
-private struct RangeTitle: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Text(title)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(Palette.ink1)
-            .monospacedDigit()
-            .lineLimit(1)
-            .contentTransition(reduceMotion ? .identity : .numericText())
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private var title: LocalizedStringKey {
-        let start = model.summary.start
-        switch model.period {
-        case .day:
-            return "Today · \(start.formatted(.dateTime.month(.abbreviated).day()))"
-        case .week:
-            let today = Calendar.current.date(byAdding: .day, value: -1, to: model.summary.end) ?? start
-            return "This week · \(start.formatted(.dateTime.month(.abbreviated).day()))–\(today.formatted(.dateTime.month(.abbreviated).day()))"
-        case .month:
-            return "This month · \(start.formatted(.dateTime.year().month(.wide)))"
-        case .year:
-            return "This year · \(start.formatted(.dateTime.year()))"
-        case .all:
-            return "All time · since \(start.formatted(.dateTime.year().month(.abbreviated).day()))"
-        }
     }
 }
 
@@ -593,55 +692,138 @@ extension AppModel {
     }
 }
 
-// MARK: - Segmented period picker
+// MARK: - Liquid period slider
 
-/// Segmented control whose selection is a native glass capsule that morphs
-/// between segments through `glassEffectID`, with an opaque fallback under Reduce Transparency.
-private struct PeriodPicker: View {
+/// Five-detent horizontal period slider with a sky-blue water-drop thumb that stretches with motion.
+private struct PeriodSlider: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Namespace private var selection
-    @FocusState private var focusedPeriod: Period?
 
-    var body: some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 2) {
-                ForEach(Period.allCases) { period in
-                    segment(period)
-                }
-            }
-            .padding(3)
-        }
-        .background(Capsule().fill(Palette.barTrack))
-        .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Text("Usage period"))
+    private let periods = Period.allCases
+    private let thumbSize: CGFloat = 18
+    private let trackHeight: CGFloat = 4
+    private let horizontalInset: CGFloat = 18
+
+    @State private var dragProgress: Double?
+    @State private var stretchAmount: CGFloat = 0
+    @State private var settleTask: Task<Void, Never>?
+
+    private var selectedIndex: Int {
+        periods.firstIndex(of: model.period) ?? 0
     }
 
-    private func segment(_ period: Period) -> some View {
-        let isSelected = model.period == period
-        return Button {
-            select(period)
-        } label: {
-            Text(period.title)
-                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .frame(maxWidth: .infinity, minHeight: 26)
-                .padding(.horizontal, 2)
-                .contentShape(Capsule())
-                // Glass applied to the label itself renders behind its text; as a background it covered the text.
-                .modifier(SelectedGlass(
-                    isSelected: isSelected,
-                    reduceTransparency: reduceTransparency,
-                    namespace: selection
-                ))
+    private var currentProgress: Double {
+        dragProgress ?? Double(selectedIndex)
+    }
+
+    private var activePeriod: Period {
+        let index = min(max(Int(currentProgress.rounded()), 0), periods.count - 1)
+        return periods[index]
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            GeometryReader { proxy in
+                let width = max(proxy.size.width, horizontalInset * 2 + 1)
+                let span = width - horizontalInset * 2
+                let step = span / CGFloat(max(periods.count - 1, 1))
+                let centerY = proxy.size.height / 2
+                let thumbX = horizontalInset + CGFloat(currentProgress) * step
+
+                ZStack {
+                    Capsule()
+                        .fill(Palette.barTrack)
+                        .overlay {
+                            if reduceTransparency {
+                                Capsule().strokeBorder(Palette.hairline, lineWidth: 1)
+                            }
+                        }
+                        .frame(width: span + 8, height: trackHeight)
+                        .position(x: width / 2, y: centerY)
+
+                    ForEach(Array(periods.enumerated()), id: \.element.id) { index, _ in
+                        Circle()
+                            .fill(Palette.ink3.opacity(0.35))
+                            .frame(width: 4, height: 4)
+                            .position(x: horizontalInset + CGFloat(index) * step, y: centerY)
+                    }
+
+                    WaterDropThumb(reduceTransparency: reduceTransparency)
+                        .frame(width: thumbSize, height: thumbSize)
+                        .scaleEffect(
+                            x: reduceMotion ? 1 : (1 + 0.35 * stretchAmount),
+                            y: reduceMotion ? 1 : (1 - 0.15 * stretchAmount)
+                        )
+                        .position(x: thumbX, y: centerY)
+                }
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { value in
+                            settleTask?.cancel()
+                            guard abs(value.translation.width) > 1.5 else { return }
+                            let clampedX = min(max(value.location.x, horizontalInset), horizontalInset + span)
+                            dragProgress = Double((clampedX - horizontalInset) / step)
+                            if !reduceMotion {
+                                let velocityRatio = min(abs(value.velocity.width) / 650, 1)
+                                withAnimation(.interactiveSpring(response: 0.14, dampingFraction: 0.78)) {
+                                    stretchAmount = velocityRatio
+                                }
+                            }
+                        }
+                        .onEnded { value in
+                            let clampedX = min(max(value.location.x, horizontalInset), horizontalInset + span)
+                            let rawProgress = Double((clampedX - horizontalInset) / step)
+                            let targetIndex = min(max(Int(rawProgress.rounded()), 0), periods.count - 1)
+                            let target = periods[targetIndex]
+                            let wasDragged = dragProgress != nil
+
+                            if wasDragged {
+                                let settle: Animation? = reduceMotion
+                                    ? nil
+                                    : .spring(response: 0.42, dampingFraction: 0.62)
+                                withAnimation(settle) {
+                                    dragProgress = nil
+                                    stretchAmount = 0
+                                    model.period = target
+                                }
+                            } else {
+                                select(target)
+                            }
+                        }
+                )
+            }
+            .frame(height: 24)
+
+            GeometryReader { proxy in
+                let width = max(proxy.size.width, horizontalInset * 2 + 1)
+                let span = width - horizontalInset * 2
+                let step = span / CGFloat(max(periods.count - 1, 1))
+                let centerY = proxy.size.height / 2
+
+                ForEach(Array(periods.enumerated()), id: \.element.id) { index, period in
+                    let isSelected = activePeriod == period
+                    Button {
+                        select(period)
+                    } label: {
+                        Text(period.title)
+                            .font(.system(size: isSelected ? 13 : 11, weight: isSelected ? .semibold : .regular))
+                            .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink3)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .frame(minWidth: 36, minHeight: 18)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .focusable(false)
+                    .position(x: horizontalInset + CGFloat(index) * step, y: centerY)
+                }
+            }
+            .frame(height: 18)
         }
-        .buttonStyle(.plain)
-        .keyboardShortcut(period.shortcutKey, modifiers: .command)
-        .focused($focusedPeriod, equals: period)
+        // Focusable only with system keyboard navigation on, so launch shows no focus ring.
+        .focusable(interactions: .activate)
         .onKeyPress(.leftArrow) {
             moveSelection(by: -1)
             return .handled
@@ -650,22 +832,72 @@ private struct PeriodPicker: View {
             moveSelection(by: 1)
             return .handled
         }
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .onDisappear {
+            settleTask?.cancel()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text("Usage period"))
+        .accessibilityValue(Text(model.period.title))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment:
+                moveSelection(by: 1)
+            case .decrement:
+                moveSelection(by: -1)
+            @unknown default:
+                break
+            }
+        }
+        .background {
+            HStack(spacing: 0) {
+                ForEach(periods) { period in
+                    Button(period.title) {
+                        select(period)
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(period.shortcutKey, modifiers: .command)
+                    .focusable(false)
+                }
+            }
+            .frame(width: 0, height: 0)
+            .opacity(0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 
     private func select(_ period: Period) {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.45)) {
+        guard period != model.period else { return }
+        let oldIndex = selectedIndex
+        let newIndex = periods.firstIndex(of: period) ?? oldIndex
+        let distance = abs(newIndex - oldIndex)
+
+        settleTask?.cancel()
+        if reduceMotion {
+            stretchAmount = 0
             model.period = period
+            return
+        }
+
+        let peakStretch = min(1.0, 0.55 + 0.15 * CGFloat(distance))
+        withAnimation(.easeOut(duration: 0.10)) {
+            stretchAmount = peakStretch
+        }
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.62)) {
+            model.period = period
+        }
+        settleTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(105))
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.62)) {
+                stretchAmount = 0
+            }
         }
     }
 
     private func moveSelection(by offset: Int) {
-        let periods = Period.allCases
-        guard let index = periods.firstIndex(of: model.period) else { return }
-        let newIndex = min(max(index + offset, 0), periods.count - 1)
-        let target = periods[newIndex]
-        select(target)
-        focusedPeriod = target
+        let newIndex = min(max(selectedIndex + offset, 0), periods.count - 1)
+        select(periods[newIndex])
     }
 }
 
@@ -681,22 +913,40 @@ private extension Period {
     }
 }
 
-private struct SelectedGlass: ViewModifier {
-    let isSelected: Bool
+private struct WaterDropThumb: View {
     let reduceTransparency: Bool
-    let namespace: Namespace.ID
 
-    func body(content: Content) -> some View {
-        if !isSelected {
-            content
-        } else if reduceTransparency {
-            content
-                .background { Capsule().fill(Palette.cardSurface) }
-                .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
-        } else {
-            content
-                .glassEffect(.regular.interactive(), in: .capsule)
-                .glassEffectID("selection", in: namespace)
-        }
+    var body: some View {
+        Circle()
+            .fill(
+                LinearGradient(
+                    colors: [Color(hex: "#7CC8F2"), Color(hex: "#3A9BE0")],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            .overlay {
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [.white.opacity(0.90), .white.opacity(0.22), .clear],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
+            .shadow(
+                color: Color(hex: "#3A9BE0").opacity(reduceTransparency ? 0 : 0.30),
+                radius: 4,
+                x: 0,
+                y: 2
+            )
+            .shadow(
+                color: .black.opacity(reduceTransparency ? 0 : 0.10),
+                radius: 1.5,
+                x: 0,
+                y: 1
+            )
     }
 }

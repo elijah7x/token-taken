@@ -5,8 +5,8 @@ import TokenTakenKit
 // Presentation tokens for the Atmosphere direction.
 
 enum Radius {
-    /// Floating tray, inset 10pt from the window edge so its corners sit concentric with the window's.
-    static let tray: CGFloat = 18
+    /// Floating tray, inset 8pt from the window edge so its corners sit concentric with the window's.
+    static let tray: CGFloat = 16
     static let card: CGFloat = 16
     static let inner: CGFloat = 10
     static let badge: CGFloat = 6
@@ -458,13 +458,108 @@ private struct BackdropWindowConfigurator: NSViewRepresentable {
 }
 
 private final class BackdropWindowView: NSView {
+    private static let trafficLightOffset = CGPoint(x: 6, y: 6)
+    private static let trafficLightTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+
+    private struct DefaultButtonOrigin {
+        let x: CGFloat
+        let topInset: CGFloat
+    }
+
     var isTransparent = false {
         didSet { applyWindowAppearance() }
     }
 
+    private var defaultButtonOrigins: [NSWindow.ButtonType: DefaultButtonOrigin] = [:]
+    private weak var observedWindow: NSWindow?
+    private weak var observedButtonSuperview: NSView?
+    private var isAdjustingButtons = false
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        configureWindowObservers()
         applyWindowAppearance()
+        Task { @MainActor [weak self] in
+            self?.repositionWindowControls()
+        }
+    }
+
+    override func layout() {
+        super.layout()
+        repositionWindowControls()
+    }
+
+    private func configureWindowObservers() {
+        guard observedWindow !== window else { return }
+        if let oldWindow = observedWindow {
+            let center = NotificationCenter.default
+            center.removeObserver(self, name: NSWindow.didResizeNotification, object: oldWindow)
+            center.removeObserver(self, name: NSWindow.didEndLiveResizeNotification, object: oldWindow)
+            center.removeObserver(self, name: NSWindow.didExitFullScreenNotification, object: oldWindow)
+        }
+        if let oldSuperview = observedButtonSuperview {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSView.frameDidChangeNotification,
+                object: oldSuperview
+            )
+        }
+        observedWindow = window
+        observedButtonSuperview = nil
+        defaultButtonOrigins.removeAll()
+
+        guard let window else { return }
+        let center = NotificationCenter.default
+        center.addObserver(
+            self,
+            selector: #selector(windowLayoutDidChange(_:)),
+            name: NSWindow.didResizeNotification,
+            object: window
+        )
+        center.addObserver(
+            self,
+            selector: #selector(windowLayoutDidChange(_:)),
+            name: NSWindow.didEndLiveResizeNotification,
+            object: window
+        )
+        center.addObserver(
+            self,
+            selector: #selector(windowLayoutDidChange(_:)),
+            name: NSWindow.didExitFullScreenNotification,
+            object: window
+        )
+    }
+
+    private func observeButtonSuperviewIfNeeded(_ superview: NSView) {
+        guard observedButtonSuperview !== superview else { return }
+        if let oldSuperview = observedButtonSuperview {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSView.frameDidChangeNotification,
+                object: oldSuperview
+            )
+        }
+        observedButtonSuperview = superview
+        superview.postsFrameChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowLayoutDidChange(_:)),
+            name: NSView.frameDidChangeNotification,
+            object: superview
+        )
+    }
+
+    @objc private func windowLayoutDidChange(_ notification: Notification) {
+        repositionWindowControls()
+        if notification.name == NSWindow.didExitFullScreenNotification {
+            Task { @MainActor [weak self] in
+                self?.repositionWindowControls()
+            }
+        }
     }
 
     private func applyWindowAppearance() {
@@ -476,14 +571,60 @@ private final class BackdropWindowView: NSView {
             : NSColor(Palette.solid)
     }
 
-    /// An empty unified toolbar moves the traffic lights 20pt in and centres them in a 52pt band,
-    /// which places them inside the floating tray (inset 10pt) instead of on its edge.
+    /// An empty unified toolbar moves the traffic lights 20pt in and centres them in a 52pt band;
+    /// `repositionWindowControls` shifts them a further +6pt inward and +6pt down inside the tray.
     private func insetWindowControls(in window: NSWindow) {
-        guard window.toolbar == nil else { return }
-        window.toolbar = NSToolbar(identifier: "TokenTakenMainWindow")
-        window.toolbarStyle = .unified
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
+        if window.toolbar == nil {
+            window.toolbar = NSToolbar(identifier: "TokenTakenMainWindow")
+            window.toolbarStyle = .unified
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.layoutIfNeeded()
+        }
+        repositionWindowControls()
+    }
+
+    private func repositionWindowControls() {
+        guard !isAdjustingButtons,
+              let window,
+              !window.styleMask.contains(.fullScreen),
+              let closeButton = window.standardWindowButton(.closeButton),
+              let superview = closeButton.superview,
+              superview.bounds.height >= 36
+        else { return }
+
+        observeButtonSuperviewIfNeeded(superview)
+
+        if defaultButtonOrigins.count < Self.trafficLightTypes.count {
+            for type in Self.trafficLightTypes where defaultButtonOrigins[type] == nil {
+                guard let button = window.standardWindowButton(type),
+                      let buttonSuperview = button.superview,
+                      buttonSuperview.bounds.height >= 36
+                else { continue }
+                let topInset = buttonSuperview.isFlipped
+                    ? button.frame.minY
+                    : (buttonSuperview.bounds.height - button.frame.maxY)
+                defaultButtonOrigins[type] = DefaultButtonOrigin(x: button.frame.minX, topInset: topInset)
+            }
+        }
+
+        isAdjustingButtons = true
+        defer { isAdjustingButtons = false }
+
+        for type in Self.trafficLightTypes {
+            guard let button = window.standardWindowButton(type),
+                  let buttonSuperview = button.superview,
+                  let base = defaultButtonOrigins[type]
+            else { continue }
+            let targetX = base.x + Self.trafficLightOffset.x
+            let targetTop = base.topInset + Self.trafficLightOffset.y
+            let targetY = buttonSuperview.isFlipped
+                ? targetTop
+                : (buttonSuperview.bounds.height - targetTop - button.frame.height)
+            if abs(button.frame.origin.x - targetX) > 0.5 || abs(button.frame.origin.y - targetY) > 0.5 {
+                button.setFrameOrigin(NSPoint(x: targetX, y: targetY))
+            }
+        }
     }
 }
 
