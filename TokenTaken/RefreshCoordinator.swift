@@ -193,9 +193,10 @@ final class RefreshCoordinator {
         } else {
             collectors.append(UnavailableEngineCollector())
         }
-        collectors.append(ZcodeCollector(deviceID: device.id))
-        collectors.append(PiCollector(deviceID: device.id))
-        collectors.append(OmpCollector(deviceID: device.id))
+        let state = CollectorStateFile<CollectionStamp>.defaultDirectory
+        collectors.append(ZcodeCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(PiCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(OmpCollector(deviceID: device.id, stateDirectory: state))
         return collectors
     }
 
