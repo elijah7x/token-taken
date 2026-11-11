@@ -16,7 +16,9 @@ Status: Implemented v1 (2026-11-11)
 
 ## Source identity and deduplication
 
-- Source IDs are stable lowercase kebab-case. Factory Droid is `factory`; its tokscale client selector is `droid`.
+- Source IDs are stable lowercase kebab-case. Factory Droid is `factory`; its tokscale client selector is `droid`. Devin is `devin` (tokscale `devin-cli` and `devin-desktop`) and Antigravity is `antigravity` (tokscale `antigravity-cli` and `antigravity-extension`).
+- Every tokscale client of one source is requested in the same engine run, in both graph and hourly output, and a change in any of them re-collects them all. tokscale drops Devin Desktop sessions already present in the Devin CLI database and deduplicates the Antigravity family by provider response ID only across clients requested together; collecting them apart would double count.
+- A source is available when the root of any of its clients exists. Change detection reads file metadata (path, size, modification time) only; a single SQLite database is fingerprinted by itself and its `-wal`/`-shm` siblings and is never opened, since Devin's database can exceed 1 GB.
 - Native collectors deduplicate before forming aggregates using stable native IDs or documented deterministic fingerprints. Ingestion time and read order MUST NOT become event identity.
 - tokscale performs its own source-specific deduplication before export; its graph and hourly output do not expose per-event dedup keys. Aggregate natural keys identify snapshot rows, not individual calls.
 - Device-local sources are attributed to their collecting device and MUST NOT be cross-device deduplicated. Exact account-scoped cross-device deduplication is not supported by these aggregates. Cursor remains deferred and opt-in; do not claim account-scoped accuracy.
@@ -26,15 +28,20 @@ Status: Implemented v1 (2026-11-11)
 | Claude Code | tokscale `claude` | Engine category and dedup rules; hourly reasoning unavailable |
 | Codex | tokscale `codex` | Engine splits reasoning from output and handles fork replay; genuinely total-only legacy records remain a known export gap |
 | Grok | tokscale `grok` | Engine category and dedup rules; hourly reasoning unavailable |
-| Kimi Code | tokscale `kimi` | Engine category and dedup rules, including usage records; hourly reasoning unavailable |
+| Kimi Code | tokscale `kimi` (`~/.kimi/sessions` and `~/.kimi-code/sessions`, honours `KIMI_CODE_HOME`) | Engine category and dedup rules, including usage records; hourly reasoning unavailable |
 | OpenCode | tokscale `opencode` | Engine category and dedup rules; hourly reasoning unavailable |
 | Gemini CLI | tokscale `gemini` | Engine category and dedup rules; hourly reasoning unavailable |
 | Factory Droid | tokscale `droid` | Engine category and dedup rules; hourly reasoning unavailable |
+| Devin | tokscale `devin-cli` (`~/.local/share/devin/cli/sessions.db`, honours `XDG_DATA_HOME`) and `devin-desktop` (`~/Library/Application Support/Devin/User/acp-events`) | Engine reads CLI request-level metrics; Desktop sessions already in the CLI database are dropped; hourly reasoning unavailable |
+| Antigravity | tokscale `antigravity-cli` (`~/.gemini/antigravity-cli/conversations/*.db`, honours `GEMINI_CLI_HOME`) and `antigravity-extension` (`~/.gemini/antigravity/conversations/*.db`) | Engine response-ID dedup across both clients; hourly reasoning unavailable |
+| DeepSeek Harness | tokscale `dsh` (`~/.dsh/sessions`, honours `DSH_HOME`) | Engine category and dedup rules; hourly reasoning unavailable |
+| fx | tokscale `fx` (`~/.fx/sessions`) | Engine category and dedup rules; hourly reasoning unavailable |
 | Zcode | native Swift | Completed native usage plus pre-boundary legacy assistant messages; exact cross-session copies removed; inclusive input/output split |
 | pi | native Swift | Entry-ID deduplication, not response-ID-only deduplication; includes operation usage |
 | oh-my-pi | native Swift | Entry-ID deduplication; reasoning tokens split from inclusive output |
 | Qoder | not token-counted | Credits only; tokens unavailable |
 | Cursor | deferred | Account credentials, network access, and exact account-scoped dedup require separate approval and validation |
+| Amp, Warp, Trae, Antigravity desktop cache | not collected | Their tokscale clients read data synced from an online account; out of scope for device-local collection |
 
 These rules describe the collection design, not acceptance of every source as reconciled. Source coverage and intentional deviations remain governed by [ADR-0003](../decisions/0003-usage-engine.md).
 
@@ -46,7 +53,7 @@ These rules describe the collection design, not acceptance of every source as re
 - v1 has day, week (Monday start, 7 daily buckets Monday–Sunday with future days marked), month, year, and all-time views.
 - Model IDs are trimmed and lowercased without guessing aliases. Retain the raw exported model ID; for tokscale, the pre-engine original ID is not recoverable from the export. Further aliases require versioned mappings and MUST NOT discard the retained raw ID. A collapsed key retains a deterministic representative raw spelling.
 - The Day summary's totals, categories, costs, and breakdowns use daily records. Its chart uses actual hourly rows, never a synthetic redistribution of daily totals. The chart may omit reasoning for tokscale sources and differ from the daily total; never rescale it to hide that difference.
-- Request hourly output per tokscale client since the local date two days ago. On successful refresh, keep the current hour and 47 preceding absolute hourly intervals per device/source. Retain stale cached rows after failure rather than erasing them.
+- Request hourly output per source, with all of its tokscale clients in one run, since the local date two days ago. On successful refresh, keep the current hour and 47 preceding absolute hourly intervals per device/source. Retain stale cached rows after failure rather than erasing them.
 - A complete successful local collection establishes coverage for those 48 hours, including explicit zero rows for hours with no activity. A partial read with skipped records MUST NOT manufacture zero coverage. An unavailable or failed read establishes no new coverage.
 - Hourly series use the viewer's local hours and actual DST day length (23/24/25 hours where applicable). A missing hour is unknown: `SeriesPoint.isKnown=false` and absent `bySource` keys denote missing coverage, not confirmed zero; a numeric total of zero in such a point is only a placeholder. Fully known points require coverage for all device/source pairs contributing the day's daily rows.
 - tokscale's local hourly labels have no UTC offset; repeated fall-back hours cannot be distinguished reliably. Hourly aggregates cannot be split exactly when viewer-zone boundaries fall inside an original hour, including different fractional UTC offsets. Daily cross-zone labels and hourly absolute-time attribution can therefore disagree beyond the reasoning difference.

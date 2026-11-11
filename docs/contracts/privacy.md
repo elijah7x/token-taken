@@ -14,6 +14,7 @@ Status: Implemented v1 (2026-11-11)
 - v1 network access is allowed only for:
   - account-scoped source APIs after explicit opt-in for that source; and
   - iCloud Drive through system services after sync opt-in.
+- Settings > About offers a manual Check for Updates that sends one standard HTTPS request to the GitHub releases API for this repository. It runs only when the user clicks it; there are no automatic or background checks, and nothing is sent beyond the standard request.
 - No other outbound product traffic is permitted in v1. Engine behavior MUST NOT bypass these boundaries.
 - There MUST be no telemetry, analytics, or third-party crash reporting.
 - Account API access and iCloud sync are independent choices; enabling one MUST NOT implicitly enable the other.

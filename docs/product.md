@@ -64,7 +64,7 @@ token-taken models --period month --json
 ### Collection and statistics
 
 - Reuse the pinned `tokscale` 4.21.0 usage engine through a thin adapter, combined with native Swift collectors where required by [ADR-0003](decisions/0003-usage-engine.md) and [ADR-0005](decisions/0005-collection-granularity.md).
-- Target agents: Claude Code, Codex, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Factory Droid, and Grok CLI; Cursor (account credentials, network access, and cross-device deduplication) and Qoder (credits only, no token counts) are deferred ([ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md)).
+- Target agents: Claude Code, Codex, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Factory Droid, Grok CLI, Devin (CLI and desktop), Antigravity (CLI and IDE extension), DeepSeek Harness, and fx; Cursor (account credentials, network access, and cross-device deduplication) and Qoder (credits only, no token counts) are deferred ([ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md)).
 - All v1 sources are device-local and parsed from logs or databases on the current Mac. Account-scoped sources fetched from a provider account and deduplicated across Macs are deferred.
 - Report uncached input as `input`, plus `cacheRead`, `cacheWrite`, `output`, and `reasoning` categories, with `uncategorized` for known totals whose category split is unavailable ([ADR-0005](decisions/0005-collection-granularity.md)).
 - Refresh on launch, on demand, and with a fixed 4-hour fallback while running, with no user-configurable interval, to keep background cost minimal (owner decision 2026-11-10); use incremental collection where the engine supports it.

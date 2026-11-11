@@ -1,0 +1,289 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-11T00:00:00+00:00",
+    "version": "4.21.0",
+    "dateRange": {
+      "start": "2026-11-09",
+      "end": "2026-11-10"
+    }
+  },
+  "summary": {
+    "totalTokens": 15520,
+    "totalCost": 0.0,
+    "totalDays": 2,
+    "activeDays": 2,
+    "averagePerDay": 0.0,
+    "maxCostInSingleDay": 0.0,
+    "clients": [
+      "antigravity-cli",
+      "antigravity-extension",
+      "devin-cli",
+      "devin-desktop",
+      "dsh",
+      "fx"
+    ],
+    "models": [
+      "compactor",
+      "deepseek-v4",
+      "gemini-3-flash",
+      "gemini-3-pro",
+      "gpt-6-astra",
+      "swe-2",
+      "swe-2-high"
+    ],
+    "costProvenance": {
+      "kind": "unknown"
+    }
+  },
+  "years": [
+    {
+      "year": "2026",
+      "totalTokens": 15520,
+      "totalCost": 0.0,
+      "range": {
+        "start": "2026-11-09",
+        "end": "2026-11-10"
+      },
+      "costProvenance": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "contributions": [
+    {
+      "date": "2026-11-09",
+      "totals": {
+        "tokens": 9290,
+        "cost": 0.0,
+        "messages": 11,
+        "costProvenance": {
+          "kind": "unknown"
+        }
+      },
+      "intensity": 4,
+      "tokenBreakdown": {
+        "input": 5300,
+        "output": 1320,
+        "cacheRead": 2450,
+        "cacheWrite": 0,
+        "reasoning": 220
+      },
+      "clients": [
+        {
+          "client": "devin-cli",
+          "modelId": "swe-2",
+          "providerId": "devin",
+          "tokens": {
+            "input": 1200,
+            "output": 300,
+            "cacheRead": 800,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0,
+          "messages": 3,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "devin-desktop",
+          "modelId": "swe-2",
+          "providerId": "devin",
+          "tokens": {
+            "input": 400,
+            "output": 100,
+            "cacheRead": 200,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "devin-cli",
+          "modelId": "compactor",
+          "providerId": "devin",
+          "tokens": {
+            "input": 900,
+            "output": 150,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "antigravity-cli",
+          "modelId": "gemini-3-pro",
+          "providerId": "google",
+          "tokens": {
+            "input": 1000,
+            "output": 250,
+            "cacheRead": 400,
+            "cacheWrite": 0,
+            "reasoning": 90
+          },
+          "cost": 0.0,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "antigravity-extension",
+          "modelId": "gemini-3-pro",
+          "providerId": "google",
+          "tokens": {
+            "input": 600,
+            "output": 140,
+            "cacheRead": 300,
+            "cacheWrite": 0,
+            "reasoning": 40
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "dsh",
+          "modelId": "deepseek-v4",
+          "providerId": "deepseek",
+          "tokens": {
+            "input": 700,
+            "output": 220,
+            "cacheRead": 500,
+            "cacheWrite": 0,
+            "reasoning": 60
+          },
+          "cost": 0.0,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "fx",
+          "modelId": "gpt-6-astra",
+          "providerId": "openai",
+          "tokens": {
+            "input": 500,
+            "output": 160,
+            "cacheRead": 250,
+            "cacheWrite": 0,
+            "reasoning": 30
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        }
+      ]
+    },
+    {
+      "date": "2026-11-10",
+      "totals": {
+        "tokens": 6230,
+        "cost": 0.0,
+        "messages": 8,
+        "costProvenance": {
+          "kind": "unknown"
+        }
+      },
+      "intensity": 4,
+      "tokenBreakdown": {
+        "input": 3250,
+        "output": 950,
+        "cacheRead": 1900,
+        "cacheWrite": 0,
+        "reasoning": 130
+      },
+      "clients": [
+        {
+          "client": "antigravity-extension",
+          "modelId": "gemini-3-flash",
+          "providerId": "google",
+          "tokens": {
+            "input": 300,
+            "output": 90,
+            "cacheRead": 100,
+            "cacheWrite": 0,
+            "reasoning": 20
+          },
+          "cost": 0.0,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "devin-cli",
+          "modelId": "swe-2-high",
+          "providerId": "devin",
+          "tokens": {
+            "input": 1500,
+            "output": 420,
+            "cacheRead": 900,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "dsh",
+          "modelId": "deepseek-v4",
+          "providerId": "deepseek",
+          "tokens": {
+            "input": 800,
+            "output": 260,
+            "cacheRead": 600,
+            "cacheWrite": 0,
+            "reasoning": 70
+          },
+          "cost": 0.0,
+          "messages": 3,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        },
+        {
+          "client": "fx",
+          "modelId": "gpt-6-astra",
+          "providerId": "openai",
+          "tokens": {
+            "input": 650,
+            "output": 180,
+            "cacheRead": 300,
+            "cacheWrite": 0,
+            "reasoning": 40
+          },
+          "cost": 0.0,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "unknown"
+          }
+        }
+      ]
+    }
+  ],
+  "timeMetrics": {
+    "totalActiveTimeMs": 0,
+    "longestContinuousMs": 0,
+    "maxConcurrentSessions": 1,
+    "sessionCount": 9
+  }
+}

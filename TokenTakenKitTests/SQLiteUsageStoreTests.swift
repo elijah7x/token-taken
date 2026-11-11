@@ -212,6 +212,20 @@ final class SQLiteUsageStoreTests: XCTestCase {
         XCTAssertTrue(try store.records().contains(cachedRecord))
     }
 
+    func testInstalledSourceWithoutUsageIsHealthyNotFailed() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let runner = CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [MultiSourceCollector(sourceIDs: ["fx"], batch: CollectionBatch())]
+        )
+        _ = await runner.runAll(now: now)
+        let health = try XCTUnwrap(try store.health().first { $0.sourceID == "fx" })
+        XCTAssertNotEqual(health.state, .failed)
+        XCTAssertNil(health.errorMessage)
+        XCTAssertEqual(health.recordCount, 0)
+    }
+
     func testRunnerSanitizesPathsFromHealthErrorMessages() async throws {
         let store = try SQLiteUsageStore(url: databaseURL)
         let runner = CollectionRunner(

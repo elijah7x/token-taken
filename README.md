@@ -16,7 +16,7 @@ A small, beautiful token-usage dashboard for macOS with native Liquid Glass.
 - English and Simplified Chinese app interfaces through a String Catalog.
 - Cost estimates from a versioned price table (`tokscale-4.21.0-2026-11-10+alias-v3`). Estimates are not bills.
 
-Supported device-local sources in v1: Claude Code, Codex, Zcode, oh-my-pi, pi, Kimi Code, Grok, OpenCode, Gemini CLI, and Factory Droid. Cursor and Qoder are deferred; see [ADR-0003](docs/decisions/0003-usage-engine.md) and [ADR-0005](docs/decisions/0005-collection-granularity.md).
+Supported device-local sources in v1: Claude Code, Codex, Zcode, oh-my-pi, pi, Kimi Code, Grok, OpenCode, Gemini CLI, Factory Droid, Devin (CLI and desktop), Antigravity (CLI and IDE extension), DeepSeek Harness, and fx. Cursor and Qoder are deferred; see [ADR-0003](docs/decisions/0003-usage-engine.md) and [ADR-0005](docs/decisions/0005-collection-granularity.md).
 
 ## Privacy
 

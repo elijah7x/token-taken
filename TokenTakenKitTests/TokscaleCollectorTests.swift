@@ -418,6 +418,169 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertEqual(try store.hourly().filter { $0.sourceID == "codex" }, [cachedHourly])
         XCTAssertEqual(try store.records().filter { $0.sourceID == "claude" }, [fresh])
     }
+
+    func testNewClientsMapToMergedSourcesAndFields() throws {
+        let bundle = Bundle(for: TokscaleFixtureBundleToken.self)
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        func fixture(_ name: String) throws -> Data {
+            let url = try XCTUnwrap(bundle.url(forResource: name, withExtension: "json"))
+            return try Data(contentsOf: url)
+        }
+        let clients = ["devin-cli", "devin-desktop", "antigravity-cli", "antigravity-extension", "dsh", "fx"]
+        let daily = try TokscaleCollector.parse(data: fixture("tokscale-new-clients-graph"), clients: clients,
+            deviceID: "device-a", timeZone: zone)
+        let mappedSources = TokscaleCollector(executableURL: URL(fileURLWithPath: "/unused"),
+            configDirectory: URL(fileURLWithPath: "/unused"), clients: clients, deviceID: "device-a").sourceIDs
+        XCTAssertEqual(mappedSources, ["devin", "antigravity", "dsh", "fx"])
+        XCTAssertEqual(Set(daily.map(\.sourceID)), Set(mappedSources))
+        // Devin CLI and Desktop, and both Antigravity clients, sum into one source per day and model.
+        let expected: [(day: String, sourceID: String, modelID: String, counts: TokenCounts, events: Int64)] = [
+            ("2026-11-09", "devin", "swe-2",
+                TokenCounts(input: 1_600, cacheRead: 1_000, cacheWrite: 0, output: 400, reasoning: 0), 4),
+            ("2026-11-09", "devin", "compactor",
+                TokenCounts(input: 900, cacheRead: 0, cacheWrite: 0, output: 150, reasoning: 0), 1),
+            ("2026-11-09", "antigravity", "gemini-3-pro",
+                TokenCounts(input: 1_600, cacheRead: 700, cacheWrite: 0, output: 390, reasoning: 130), 3),
+            ("2026-11-09", "dsh", "deepseek-v4",
+                TokenCounts(input: 700, cacheRead: 500, cacheWrite: 0, output: 220, reasoning: 60), 2),
+            ("2026-11-09", "fx", "gpt-6-astra",
+                TokenCounts(input: 500, cacheRead: 250, cacheWrite: 0, output: 160, reasoning: 30), 1),
+            ("2026-11-10", "antigravity", "gemini-3-flash",
+                TokenCounts(input: 300, cacheRead: 100, cacheWrite: 0, output: 90, reasoning: 20), 1),
+            ("2026-11-10", "devin", "swe-2-high",
+                TokenCounts(input: 1_500, cacheRead: 900, cacheWrite: 0, output: 420, reasoning: 0), 2),
+            ("2026-11-10", "dsh", "deepseek-v4",
+                TokenCounts(input: 800, cacheRead: 600, cacheWrite: 0, output: 260, reasoning: 70), 3),
+            ("2026-11-10", "fx", "gpt-6-astra",
+                TokenCounts(input: 650, cacheRead: 300, cacheWrite: 0, output: 180, reasoning: 40), 2),
+        ]
+        XCTAssertEqual(daily.count, expected.count)
+        for entry in expected {
+            let matches = daily.filter {
+                $0.day == entry.day && $0.sourceID == entry.sourceID && $0.modelID == entry.modelID
+            }
+            XCTAssertEqual(matches.count, 1, "\(entry.day) \(entry.sourceID) \(entry.modelID)")
+            XCTAssertEqual(matches.first?.counts, entry.counts, "\(entry.day) \(entry.modelID)")
+            XCTAssertEqual(matches.first?.eventCount, entry.events, "\(entry.day) \(entry.modelID)")
+        }
+
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-10T16:30:00Z"))
+        let hourly = try TokscaleCollector.parseHourly(data: fixture("tokscale-new-clients-hourly-antigravity"),
+            client: "antigravity-extension", deviceID: "device-a", timeZone: zone, now: now)
+        XCTAssertEqual(hourly.map(\.hourStart),
+            ["2026-11-09T06:00:00Z", "2026-11-10T01:00:00Z"].compactMap { ISO8601DateFormatter().date(from: $0) })
+        XCTAssertEqual(hourly.map(\.counts), [TokenCounts(input: 1_600, cacheRead: 700, cacheWrite: 0, output: 390),
+                                              TokenCounts(input: 300, cacheRead: 100, cacheWrite: 0, output: 90)])
+        XCTAssertTrue(hourly.allSatisfy { $0.sourceID == "antigravity" })
+        XCTAssertEqual(TokscaleCollector.defaultSourceIDs.suffix(4), ["devin", "antigravity", "dsh", "fx"])
+    }
+
+    func testClientsSharingASourceAreCollectedTogether() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let invocationsURL = dir.appendingPathComponent("invocations.log")
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-groups.sh")
+        let script = """
+            #!/bin/sh
+            echo "$*" >> "\(invocationsURL.path)"
+            if [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; out="$1"; fi
+                shift
+              done
+              printf '%s' '{"contributions":[{"date":"2026-11-09","clients":[{"client":"claude","modelId":"m","messages":1,"tokens":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":0}},{"client":"devin-cli","modelId":"swe-2","messages":1,"tokens":{"input":2,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":0}},{"client":"antigravity-cli","modelId":"g","messages":1,"tokens":{"input":3,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":0}}]}]}' > "$out"
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let sizes = FingerprintBox()
+        let clients = ["claude", "devin-cli", "devin-desktop", "antigravity-cli", "antigravity-extension"]
+        func makeCollector(available: Set<String>) -> TokscaleCollector {
+            TokscaleCollector(
+                executableURL: scriptURL,
+                configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+                clients: clients,
+                deviceID: "device-a",
+                isClientAvailable: { available.contains($0) },
+                stateDirectory: dir.appendingPathComponent("state", isDirectory: true),
+                fingerprint: { sizes.fingerprint(for: $0) }
+            )
+        }
+        func invocations() throws -> [String] {
+            guard FileManager.default.fileExists(atPath: invocationsURL.path) else { return [] }
+            return try String(contentsOf: invocationsURL, encoding: .utf8).split(separator: "\n").map(String.init)
+        }
+
+        // A source with one installed client is available.
+        let partial = try await makeCollector(available: ["claude", "devin-desktop", "antigravity-extension"]).collect()
+        XCTAssertTrue(partial.unavailableSourceIDs.isEmpty)
+        try FileManager.default.removeItem(at: invocationsURL)
+
+        let all = Set(clients)
+        let first = try await makeCollector(available: all).collect()
+        for commit in first.stateCommits { try commit() }
+        XCTAssertEqual(Set(first.daily.map(\.sourceID)), ["claude", "devin", "antigravity"])
+        let firstHourly = try invocations().filter { $0.hasPrefix("hourly ") }
+        XCTAssertEqual(firstHourly.count, 3)
+        XCTAssertTrue(firstHourly.contains { $0.contains("-c devin-cli,devin-desktop ") })
+        XCTAssertTrue(firstHourly.contains { $0.contains("-c antigravity-cli,antigravity-extension ") })
+        try FileManager.default.removeItem(at: invocationsURL)
+
+        // A change in one Devin client re-collects both, so Desktop sessions stay deduplicated against the CLI.
+        sizes.bump("devin-desktop")
+        let changed = try await makeCollector(available: all).collect()
+        XCTAssertEqual(changed.unchangedSourceIDs, ["claude", "antigravity"])
+        let lines = try invocations()
+        XCTAssertEqual(lines.filter { $0.hasPrefix("graph ") }.count, 1)
+        XCTAssertTrue(lines.contains { $0.hasPrefix("graph -c devin-cli,devin-desktop ") })
+        XCTAssertEqual(lines.filter { $0.hasPrefix("hourly ") }.map { $0.contains("-c devin-cli,devin-desktop ") }, [true])
+    }
+
+    func testFingerprintCoversKimiCodeSessionsAndSQLiteSiblings() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func withEnvironment(_ name: String, _ value: String, _ body: () throws -> Void) rethrows {
+            let previous = ProcessInfo.processInfo.environment[name]
+            setenv(name, value, 1)
+            defer { if let previous { setenv(name, previous, 1) } else { unsetenv(name) } }
+            try body()
+        }
+
+        let kimiCode = dir.appendingPathComponent("kimi-code", isDirectory: true)
+        let session = kimiCode.appendingPathComponent("sessions/synthetic-session", isDirectory: true)
+        try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
+        let wire = session.appendingPathComponent("wire.jsonl")
+        try Data("{}\n".utf8).write(to: wire)
+        try withEnvironment("KIMI_CODE_HOME", kimiCode.path) {
+            let before = TokscaleCollector.fingerprint(client: "kimi")
+            XCTAssertGreaterThanOrEqual(before.fileCount, 1)
+            try Data("{}\n{}\n".utf8).write(to: wire)
+            let after = TokscaleCollector.fingerprint(client: "kimi")
+            XCTAssertNotEqual(before, after)
+            XCTAssertEqual(after.totalSize - before.totalSize, 3)
+        }
+
+        let data = dir.appendingPathComponent("data", isDirectory: true)
+        let devin = data.appendingPathComponent("devin/cli", isDirectory: true)
+        try FileManager.default.createDirectory(at: devin, withIntermediateDirectories: true)
+        try Data(count: 64).write(to: devin.appendingPathComponent("sessions.db"))
+        try withEnvironment("XDG_DATA_HOME", data.path) {
+            let before = TokscaleCollector.fingerprint(client: "devin-cli")
+            XCTAssertEqual(before.fileCount, 1)
+            XCTAssertEqual(before.totalSize, 64)
+            // SQLite writes land in the write-ahead log first.
+            try Data(count: 16).write(to: devin.appendingPathComponent("sessions.db-wal"))
+            let after = TokscaleCollector.fingerprint(client: "devin-cli")
+            XCTAssertEqual(after.fileCount, 2)
+            XCTAssertEqual(after.totalSize, 80)
+        }
+    }
 }
 
 private final class AvailabilityProbe: @unchecked Sendable {

@@ -252,7 +252,7 @@ final class RefreshCoordinator {
     }
 
     private struct UnavailableEngineCollector: UsageCollector {
-        let sourceIDs = TokscaleCollector.defaultClients.map { $0 == "droid" ? "factory" : $0 }
+        let sourceIDs = TokscaleCollector.defaultSourceIDs
         func collect() async throws -> CollectionBatch { throw CollectorError.sourceUnavailable }
     }
 

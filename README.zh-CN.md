@@ -16,7 +16,7 @@
 - 通过 String Catalog 提供英文和简体中文界面。
 - 根据带版本的价格表（`tokscale-4.21.0-2026-11-10+alias-v3`）估算费用。估算结果不是账单。
 
-v1 支持的本机来源：Claude Code、Codex、Zcode、oh-my-pi、pi、Kimi Code、Grok、OpenCode、Gemini CLI 和 Factory Droid。Cursor 与 Qoder 暂缓纳入 v1，见 [ADR-0003](docs/decisions/0003-usage-engine.md) 和 [ADR-0005](docs/decisions/0005-collection-granularity.md)。
+v1 支持的本机来源：Claude Code、Codex、Zcode、oh-my-pi、pi、Kimi Code、Grok、OpenCode、Gemini CLI、Factory Droid、Devin（CLI 与桌面版）、Antigravity（CLI 与 IDE 扩展）、DeepSeek Harness 和 fx。Cursor 与 Qoder 暂缓纳入 v1，见 [ADR-0003](docs/decisions/0003-usage-engine.md) 和 [ADR-0005](docs/decisions/0005-collection-granularity.md)。
 
 ## 隐私
 

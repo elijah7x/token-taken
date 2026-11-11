@@ -234,6 +234,14 @@ enum Palette {
             return Color(light: "#3A93AE", dark: "#4FB0CD")
         case "factory", "droid":
             return Color(light: "#A87B5A", dark: "#C79875")
+        case "devin", "devin-cli", "devin-desktop":
+            return Color(light: "#2F8F8A", dark: "#4AABA6")
+        case "antigravity", "antigravity-cli", "antigravity-extension":
+            return Color(light: "#A35CC0", dark: "#BD78D9")
+        case "dsh":
+            return Color(light: "#8F9A3A", dark: "#ABB656")
+        case "fx":
+            return Color(light: "#C0505A", dark: "#DB6C75")
         default:
             let hash = fnv1a64(id.lowercased())
             return sourceFallbackColors[Int(hash % UInt64(sourceFallbackColors.count))]
@@ -323,6 +331,10 @@ struct SourceMonogramBadge: View {
         case "opencode": "OC"
         case "gemini", "gemini-cli": "GM"
         case "factory", "droid": "FD"
+        case "devin", "devin-cli", "devin-desktop": "DV"
+        case "antigravity", "antigravity-cli", "antigravity-extension": "AG"
+        case "dsh": "DS"
+        case "fx": "FX"
         default: String(name.prefix(2)).uppercased()
         }
     }

@@ -75,8 +75,13 @@ public actor CollectionRunner {
                             now: now, message: message, state: .failed)
                     } else if !batch.daily.contains(where: { $0.sourceID == sourceID })
                         && !batch.hourly.contains(where: { $0.sourceID == sourceID }) {
-                        health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
-                            now: now, message: "Collection produced no source data", state: .failed)
+                        // An installed source with no usage yet is healthy. Once it has history, an empty
+                        // result is treated as a failure so a parser regression cannot erase stored usage.
+                        health = hasHistory
+                            ? failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                                now: now, message: "Collection produced no source data", state: .failed)
+                            : SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
+                                recordCount: 0, skippedRecords: 0)
                     } else {
                         do {
                             let scoped = sourceBatch(batch, sourceID: sourceID, now: now)

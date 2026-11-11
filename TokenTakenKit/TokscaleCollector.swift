@@ -2,8 +2,14 @@ import Foundation
 import os
 
 public struct TokscaleCollector: UsageCollector {
-    public static let defaultClients = ["claude", "codex", "grok", "kimi", "opencode", "gemini", "droid"]
+    public static let defaultClients = [
+        "claude", "codex", "grok", "kimi", "opencode", "gemini", "droid",
+        "devin-cli", "devin-desktop", "antigravity-cli", "antigravity-extension", "dsh", "fx",
+    ]
 
+    /// Engine client id to Token Taken source id. Clients sharing a source are always collected in one engine run:
+    /// tokscale drops Devin Desktop sessions already in the Devin CLI database and deduplicates the Antigravity
+    /// family by response id only across clients requested together.
     private static let sourceMap = [
         "claude": "claude",
         "codex": "codex",
@@ -12,7 +18,19 @@ public struct TokscaleCollector: UsageCollector {
         "opencode": "opencode",
         "gemini": "gemini",
         "droid": "factory",
+        "devin-cli": "devin",
+        "devin-desktop": "devin",
+        "antigravity-cli": "antigravity",
+        "antigravity-extension": "antigravity",
+        "dsh": "dsh",
+        "fx": "fx",
     ]
+
+    /// Source ids the default clients produce, in client order.
+    public static var defaultSourceIDs: [String] {
+        var seen = Set<String>()
+        return defaultClients.compactMap { sourceMap[$0] }.filter { seen.insert($0).inserted }
+    }
 
     private let executableURL: URL
     private let configDirectory: URL
@@ -24,7 +42,7 @@ public struct TokscaleCollector: UsageCollector {
     private let fingerprint: @Sendable (String) -> ClientFingerprint
 
     /// Bump when the per-client fingerprint or output mapping changes.
-    static let stateFormatVersion = 2
+    static let stateFormatVersion = 3
     /// Must match engine/engine.lock.json; a new engine forces a full collection.
     static let engineVersion = "4.21.0"
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
@@ -121,9 +139,9 @@ public struct TokscaleCollector: UsageCollector {
         let mappedClients = clients.filter { Self.sourceMap[$0] != nil }
         let availability = mappedClients.map { ($0, isClientAvailable($0)) }
         let availableClients = availability.filter { $0.1 }.map { $0.0 }
-        let unavailableSourceIDs = Set(
-            availability.filter { !$0.1 }.compactMap { Self.sourceMap[$0.0] }
-        )
+        let availableSourceIDs = Set(availableClients.compactMap { Self.sourceMap[$0] })
+        // A source is unavailable only when none of its clients is installed.
+        let unavailableSourceIDs = Set(mappedClients.compactMap { Self.sourceMap[$0] }).subtracting(availableSourceIDs)
         guard !availableClients.isEmpty else {
             throw CollectorError.sourceUnavailable
         }
@@ -132,8 +150,11 @@ public struct TokscaleCollector: UsageCollector {
         let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, engineVersion: Self.engineVersion, timeZone: zone)
         let fingerprints = stateFile == nil ? [:] : Dictionary(uniqueKeysWithValues: availableClients.map { ($0, fingerprint($0)) })
         let previous = stateFile?.load().flatMap { $0.stamp == stamp ? $0.clients : nil } ?? [:]
-        let changedClients = availableClients.filter { previous[$0] == nil || previous[$0] != fingerprints[$0] }
-        let unchangedSourceIDs = Set(availableClients.filter { !changedClients.contains($0) }.compactMap { Self.sourceMap[$0] })
+        // A change in any client re-collects every client of its source, so engine-side dedup stays intact.
+        let changedSourceIDs = Set(availableClients.filter { previous[$0] == nil || previous[$0] != fingerprints[$0] }
+            .compactMap { Self.sourceMap[$0] })
+        let changedClients = availableClients.filter { Self.sourceMap[$0].map(changedSourceIDs.contains) ?? false }
+        let unchangedSourceIDs = availableSourceIDs.subtracting(changedSourceIDs)
         let stateFile = stateFile
         func commit(_ succeeded: [String]) -> [@Sendable () throws -> Void] {
             guard let stateFile else { return [] }
@@ -176,23 +197,35 @@ public struct TokscaleCollector: UsageCollector {
         calendar.timeZone = zone
         let since = UsageDay.string(from: calendar.date(byAdding: .day, value: -2, to: now)!, in: zone)
         async let graphData = run(arguments: ["graph", "-c", availableClients.joined(separator: ",")], timeZone: zone, graph: true)
+        // One hourly run per source, with all of its clients, so the engine deduplicates within the source.
+        var sourceGroups: [[String]] = []
+        var groupIndex: [String: Int] = [:]
+        for client in availableClients {
+            guard let sourceID = Self.sourceMap[client] else { continue }
+            if let index = groupIndex[sourceID] {
+                sourceGroups[index].append(client)
+            } else {
+                groupIndex[sourceID] = sourceGroups.count
+                sourceGroups.append([client])
+            }
+        }
         let maxConcurrent = 3
-        let hourly = await withTaskGroup(of: (client: String, rows: [HourlyUsage], errorMessage: String?).self) { group in
-            var iterator = availableClients.makeIterator()
-            for _ in 0..<min(maxConcurrent, availableClients.count) {
-                if let client = iterator.next() {
-                    group.addTask { await hourlyOutcome(client: client, since: since, timeZone: zone, now: now) }
+        let hourly = await withTaskGroup(of: (clients: [String], rows: [HourlyUsage], errorMessage: String?).self) { group in
+            var iterator = sourceGroups.makeIterator()
+            for _ in 0..<min(maxConcurrent, sourceGroups.count) {
+                if let clients = iterator.next() {
+                    group.addTask { await hourlyOutcome(clients: clients, since: since, timeZone: zone, now: now) }
                 }
             }
             var rows: [HourlyUsage] = []
             var failedSourceIDs: [String: String] = [:]
             while let result = await group.next() {
                 rows += result.rows
-                if let message = result.errorMessage, let sourceID = Self.sourceMap[result.client] {
+                if let message = result.errorMessage, let sourceID = result.clients.first.flatMap({ Self.sourceMap[$0] }) {
                     failedSourceIDs[sourceID] = message
                 }
-                if let client = iterator.next() {
-                    group.addTask { await hourlyOutcome(client: client, since: since, timeZone: zone, now: now) }
+                if let clients = iterator.next() {
+                    group.addTask { await hourlyOutcome(clients: clients, since: since, timeZone: zone, now: now) }
                 }
             }
             return (rows: rows, failedSourceIDs: failedSourceIDs)
@@ -201,19 +234,21 @@ public struct TokscaleCollector: UsageCollector {
         return CollectionBatch(daily: daily, hourly: hourly.rows, failedSourceIDs: hourly.failedSourceIDs)
     }
 
+    /// `clients` all map to one source.
     private func hourlyOutcome(
-        client: String,
+        clients: [String],
         since: String,
         timeZone: TimeZone,
         now: Date
-    ) async -> (client: String, rows: [HourlyUsage], errorMessage: String?) {
+    ) async -> (clients: [String], rows: [HourlyUsage], errorMessage: String?) {
         do {
-            let data = try await run(arguments: ["hourly", "--json", "-c", client, "--since", since], timeZone: timeZone)
-            let rows = try Self.parseHourly(data: data, client: client, deviceID: deviceID, timeZone: timeZone, now: now)
-            return (client, rows, nil)
+            let data = try await run(arguments: ["hourly", "--json", "-c", clients.joined(separator: ","), "--since", since],
+                                     timeZone: timeZone)
+            let rows = try Self.parseHourly(data: data, client: clients[0], deviceID: deviceID, timeZone: timeZone, now: now)
+            return (clients, rows, nil)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
-            return (client, [], CollectionRunner.sanitizeErrorMessage(message))
+            return (clients, [], CollectionRunner.sanitizeErrorMessage(message))
         }
     }
 
@@ -340,6 +375,9 @@ public struct TokscaleCollector: UsageCollector {
         case "kimi":
             return [home.appendingPathComponent(
                 "Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/home/sessions")]
+        case "devin-desktop":
+            // The desktop parser resolves sessions through the CLI database; its own fingerprint is the CLI's.
+            return roots(client: "devin-cli")
         case "codex":
             if let path = environment["TOKSCALE_HEADLESS_DIR"], !path.isEmpty { return [URL(fileURLWithPath: path)] }
             return [home.appendingPathComponent(".config/tokscale/headless"),
@@ -361,12 +399,27 @@ public struct TokscaleCollector: UsageCollector {
             let base = root("CODEX_HOME", ".codex")
             return [base.appendingPathComponent("sessions"), base.appendingPathComponent("archived_sessions")]
         case "grok": return [root("GROK_HOME", ".grok").appendingPathComponent("sessions")]
-        case "kimi": return [home.appendingPathComponent(".kimi/sessions")]
+        case "kimi":
+            // Kimi CLI and Kimi Code (`KIMI_CODE_HOME`, default ~/.kimi-code) share the engine's kimi client.
+            return [home.appendingPathComponent(".kimi/sessions"),
+                    root("KIMI_CODE_HOME", ".kimi-code").appendingPathComponent("sessions")]
         case "gemini": return [root("GEMINI_CLI_HOME", ".gemini").appendingPathComponent("tmp")]
         case "droid": return [home.appendingPathComponent(".factory/sessions")]
         case "opencode":
             let base = root("XDG_DATA_HOME", ".local/share").appendingPathComponent("opencode")
             return [base.appendingPathComponent("storage/message"), base.appendingPathComponent("opencode.db")]
+        // A single SQLite file is fingerprinted by the size and mtime of the file and its -wal/-shm siblings only;
+        // Devin's database can exceed 1 GB and is never opened here.
+        case "devin-cli": return [root("XDG_DATA_HOME", ".local/share").appendingPathComponent("devin/cli/sessions.db")]
+        case "devin-desktop":
+            return [home.appendingPathComponent("Library/Application Support/Devin/User/acp-events"),
+                    home.appendingPathComponent(".config/Devin/User/acp-events"),
+                    home.appendingPathComponent(".config/devin/User/acp-events")]
+        case "antigravity-cli":
+            return [root("GEMINI_CLI_HOME", ".gemini").appendingPathComponent("antigravity-cli/conversations")]
+        case "antigravity-extension": return [home.appendingPathComponent(".gemini/antigravity/conversations")]
+        case "dsh": return [root("DSH_HOME", ".dsh").appendingPathComponent("sessions")]
+        case "fx": return [home.appendingPathComponent(".fx/sessions")]
         default: return []
         }
     }
@@ -397,7 +450,8 @@ public struct TokscaleCollector: UsageCollector {
         process.executableURL = executableURL
         process.arguments = arguments + ["--offline", "--no-spinner"] + (graph ? ["--output", outputURL.path] : [])
         var environment = ["TOKSCALE_CONFIG_DIR": configDirectory.path, "TZ": timeZone.identifier]
-        for key in ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "GEMINI_CLI_HOME", "XDG_DATA_HOME"] {
+        for key in ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "GEMINI_CLI_HOME", "XDG_DATA_HOME",
+                    "KIMI_CODE_HOME", "DSH_HOME"] {
             if let value = ProcessInfo.processInfo.environment[key] { environment[key] = value }
         }
         process.environment = environment

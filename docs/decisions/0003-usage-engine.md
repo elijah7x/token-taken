@@ -77,6 +77,17 @@ Both engines ran offline on one Mac's real data (Cursor excluded). Raw samples a
 
 Leading hypothesis before round 1 (superseded by the Decision): option A with a small, recorded tokscale patch or adapter step that exposes UTC-timestamped events with dedup keys, plus Zcode and Cursor semantics ported from TokenTracker. Option B remains the comparison baseline for numbers.
 
+## Added tokscale clients (2026-11-11)
+
+The pinned engine (4.21.0, `b26c433d`) already parses these device-local clients; the adapter now requests them. No reconciliation round has been run for them, so they carry the engine's accuracy, not a verified one.
+
+- Devin: `devin-cli` (request-level metrics in `~/.local/share/devin/cli/sessions.db`) and `devin-desktop` (`~/Library/Application Support/Devin/User/acp-events`), one source `devin`. Devin's own models (`swe-2`, `swe-2-high`, `compactor`) have no entry in the price table and stay unpriced, never zero-cost.
+- Antigravity: `antigravity-cli` and `antigravity-extension` (per-conversation SQLite databases under `~/.gemini`), one source `antigravity`. The engine deduplicates the family by provider response ID only across clients requested in the same run, so the adapter always requests both together.
+- DeepSeek Harness (`dsh`, `~/.dsh/sessions`) and fx (`fx`, `~/.fx/sessions`).
+- Kimi Code's `~/.kimi-code/sessions` (engine client `kimi`) now participates in availability and change detection.
+- Not added: clients that read data synced from an online account (Cursor, Amp, Warp, Trae, and the Antigravity desktop cache under the tokscale config directory).
+- Devin's database can exceed 1 GB. Change detection uses file metadata only; when it changes, the engine re-reads it, which raises that refresh's cost.
+
 ## Consequences
 
 - Engine-dependent agent coverage, packaging, refresh behavior, and sync timestamp support remain open.
