@@ -119,6 +119,50 @@ final class TokscaleCollectorTests: XCTestCase {
         }
     }
 
+    func testCodexGrokKimiOpencodeMapToSourcesAndFields() throws {
+        let bundle = Bundle(for: TokscaleFixtureBundleToken.self)
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let url = try XCTUnwrap(bundle.url(forResource: "tokscale-four-clients-graph", withExtension: "json"))
+        let clients = ["codex", "grok", "kimi", "opencode"]
+        let daily = try TokscaleCollector.parse(data: Data(contentsOf: url), clients: clients,
+            deviceID: "device-a", timeZone: zone)
+        // The expected source ids come from the collector's sourceMap, not from the client names.
+        let mappedSources = TokscaleCollector(executableURL: URL(fileURLWithPath: "/unused"),
+            configDirectory: URL(fileURLWithPath: "/unused"), clients: clients, deviceID: "device-a").sourceIDs
+        let expected: [(day: String, sourceID: String, modelID: String, counts: TokenCounts, events: Int64)] = [
+            ("2026-11-09", "codex", "gpt-6-astra",
+                TokenCounts(input: 1_000, cacheRead: 800, cacheWrite: 0, output: 400, reasoning: 250), 3),
+            ("2026-11-09", "grok", "grok-4.7",
+                TokenCounts(input: 500, cacheRead: 120, cacheWrite: 0, output: 180, reasoning: 0), 2),
+            ("2026-11-09", "kimi", "k3.1-pro",
+                TokenCounts(input: 700, cacheRead: 300, cacheWrite: 0, output: 260, reasoning: 0), 4),
+            ("2026-11-09", "opencode", "claude-opus-5-5",
+                TokenCounts(input: 900, cacheRead: 600, cacheWrite: 150, output: 320, reasoning: 0), 5),
+            ("2026-11-10", "codex", "gpt-6-astra",
+                TokenCounts(input: 1_200, cacheRead: 950, cacheWrite: 0, output: 520, reasoning: 300), 4),
+            ("2026-11-10", "grok", "grok-4.7",
+                TokenCounts(input: 640, cacheRead: 160, cacheWrite: 0, output: 210, reasoning: 0), 1),
+            ("2026-11-10", "kimi", "k3.1-pro",
+                TokenCounts(input: 880, cacheRead: 420, cacheWrite: 0, output: 300, reasoning: 0), 3),
+            ("2026-11-10", "opencode", "claude-opus-5-5",
+                TokenCounts(input: 1_100, cacheRead: 700, cacheWrite: 0, output: 360, reasoning: 0), 2),
+        ]
+        XCTAssertEqual(daily.count, expected.count)
+        XCTAssertEqual(Set(daily.map(\.sourceID)), Set(mappedSources))
+        for entry in expected {
+            let matches = daily.filter {
+                $0.day == entry.day && $0.sourceID == entry.sourceID && $0.modelID == entry.modelID
+            }
+            XCTAssertEqual(matches.count, 1, "\(entry.day) \(entry.sourceID) \(entry.modelID)")
+            let record = try XCTUnwrap(matches.first)
+            XCTAssertEqual(record.counts, entry.counts, "\(entry.day) \(entry.modelID)")
+            XCTAssertEqual(record.eventCount, entry.events, "\(entry.day) \(entry.modelID)")
+            XCTAssertEqual(record.rawModelID, entry.modelID, "\(entry.day) \(entry.modelID)")
+            XCTAssertEqual(record.timeZoneID, "Asia/Shanghai")
+            XCTAssertEqual(record.deviceID, "device-a")
+        }
+    }
+
     func testRejectsNonexistentDSTHour() throws {
         let data = Data(#"{"entries":[{"hour":"2026-03-08 02:00","input":1,"output":0,"cacheRead":0,"cacheWrite":0,"messageCount":1}]}"#.utf8)
         XCTAssertThrowsError(try TokscaleCollector.parseHourly(data: data, client: "claude", deviceID: "test",

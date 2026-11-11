@@ -1,0 +1,245 @@
+{
+  "meta": {
+    "generatedAt": "2026-11-11T00:00:00+00:00",
+    "version": "4.21.0",
+    "dateRange": {
+      "start": "2026-11-09",
+      "end": "2026-11-10"
+    }
+  },
+  "summary": {
+    "totalTokens": 14220,
+    "totalCost": 0.0703,
+    "totalDays": 2,
+    "activeDays": 2,
+    "averagePerDay": 0.03515,
+    "maxCostInSingleDay": 0.0378,
+    "clients": [
+      "codex",
+      "grok",
+      "kimi",
+      "opencode"
+    ],
+    "models": [
+      "claude-opus-5-5",
+      "gpt-6-astra",
+      "grok-4.7",
+      "k3.1-pro"
+    ],
+    "costProvenance": {
+      "kind": "mixed",
+      "estimateSource": "catalog"
+    }
+  },
+  "years": [
+    {
+      "year": "2026",
+      "totalTokens": 14220,
+      "totalCost": 0.0703,
+      "range": {
+        "start": "2026-11-09",
+        "end": "2026-11-10"
+      },
+      "costProvenance": {
+        "kind": "mixed",
+        "estimateSource": "catalog"
+      }
+    }
+  ],
+  "contributions": [
+    {
+      "date": "2026-11-09",
+      "totals": {
+        "tokens": 6480,
+        "cost": 0.0325,
+        "messages": 14,
+        "costProvenance": {
+          "kind": "mixed",
+          "estimateSource": "catalog"
+        }
+      },
+      "intensity": 3,
+      "tokenBreakdown": {
+        "input": 3100,
+        "output": 1160,
+        "cacheRead": 1820,
+        "cacheWrite": 150,
+        "reasoning": 250
+      },
+      "clients": [
+        {
+          "client": "codex",
+          "modelId": "gpt-6-astra",
+          "providerId": "openai",
+          "tokens": {
+            "input": 1000,
+            "output": 400,
+            "cacheRead": 800,
+            "cacheWrite": 0,
+            "reasoning": 250
+          },
+          "cost": 0.0123,
+          "messages": 3,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "grok",
+          "modelId": "grok-4.7",
+          "providerId": "xai",
+          "tokens": {
+            "input": 500,
+            "output": 180,
+            "cacheRead": 120,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0045,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "kimi",
+          "modelId": "k3.1-pro",
+          "providerId": "moonshot",
+          "tokens": {
+            "input": 700,
+            "output": 260,
+            "cacheRead": 300,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0067,
+          "messages": 4,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "opencode",
+          "modelId": "claude-opus-5-5",
+          "providerId": "anthropic",
+          "tokens": {
+            "input": 900,
+            "output": 320,
+            "cacheRead": 600,
+            "cacheWrite": 150,
+            "reasoning": 0
+          },
+          "cost": 0.009,
+          "messages": 5,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        }
+      ]
+    },
+    {
+      "date": "2026-11-10",
+      "totals": {
+        "tokens": 7740,
+        "cost": 0.0378,
+        "messages": 10,
+        "costProvenance": {
+          "kind": "mixed",
+          "estimateSource": "catalog"
+        }
+      },
+      "intensity": 4,
+      "tokenBreakdown": {
+        "input": 3820,
+        "output": 1390,
+        "cacheRead": 2230,
+        "cacheWrite": 0,
+        "reasoning": 300
+      },
+      "clients": [
+        {
+          "client": "codex",
+          "modelId": "gpt-6-astra",
+          "providerId": "openai",
+          "tokens": {
+            "input": 1200,
+            "output": 520,
+            "cacheRead": 950,
+            "cacheWrite": 0,
+            "reasoning": 300
+          },
+          "cost": 0.015,
+          "messages": 4,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "grok",
+          "modelId": "grok-4.7",
+          "providerId": "xai",
+          "tokens": {
+            "input": 640,
+            "output": 210,
+            "cacheRead": 160,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0052,
+          "messages": 1,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "kimi",
+          "modelId": "k3.1-pro",
+          "providerId": "moonshot",
+          "tokens": {
+            "input": 880,
+            "output": 300,
+            "cacheRead": 420,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0074,
+          "messages": 3,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        },
+        {
+          "client": "opencode",
+          "modelId": "claude-opus-5-5",
+          "providerId": "anthropic",
+          "tokens": {
+            "input": 1100,
+            "output": 360,
+            "cacheRead": 700,
+            "cacheWrite": 0,
+            "reasoning": 0
+          },
+          "cost": 0.0102,
+          "messages": 2,
+          "costProvenance": {
+            "kind": "estimated",
+            "estimateSource": "catalog"
+          }
+        }
+      ]
+    }
+  ],
+  "timeMetrics": {
+    "totalActiveTimeMs": 0,
+    "longestContinuousMs": 0,
+    "maxConcurrentSessions": 1,
+    "sessionCount": 8
+  }
+}
