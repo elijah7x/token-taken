@@ -85,7 +85,9 @@ struct SummaryRail: View {
                     // A remote Mac whose snapshot could not be read adds no rows; keep it visible, not silently absent.
                     ForEach(missingRemoteDevices, id: \.deviceID) { remote in
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: remote.displayName).foregroundStyle(Palette.muted).lineLimit(1)
+                            // An unreadable identity leaves only the device ID, which the CLI also names "Unknown Mac".
+                            (remote.displayName == remote.deviceID ? Text("Unknown Mac") : Text(verbatim: remote.displayName))
+                                .foregroundStyle(Palette.muted).lineLimit(1)
                             Text(remote.state == .stale ? "Stale" : "Unavailable")
                                 .font(.system(size: 10))
                                 .foregroundStyle(Palette.muted)
