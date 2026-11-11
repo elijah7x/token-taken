@@ -509,9 +509,9 @@ Retained from each crate's own `LICENSE*`, `COPYING` or `UNLICENSE` file, for cr
 | `dispatch2` | 0.3.0 | Copyright (c) Mads Marquart, Mary (crate ships no licence file; notice from the crate's declared authors; MIT text below; upstream https://github.com/madsmtm/objc2) |
 | `displaydoc` | 0.2.5 | Copyright (c) Jane Lusby (licence files carry no copyright line; notice from the crate's declared authors; MIT text below; upstream https://github.com/yaahc/displaydoc) |
 | `document-features` | 0.2.12 | Copyright (c) 2020 Olivier Goffart <ogoffart@sixtyfps.io> |
-| `either` | 1.15.0 | Copyright (c) 2015 |
+| `either` | 1.15.0 | Copyright (c) 2015 (holder not named in the crate's LICENSE-MIT; bluss, declared crate author) |
 | `encode_unicode` | 1.0.0 | Copyright (c) Torbjørn Birch Moltu (licence files carry no copyright line; notice from the crate's declared authors; MIT text below; upstream https://github.com/tormol/encode_unicode) |
-| `equivalent` | 1.0.2 | Copyright (c) 2016--2023 |
+| `equivalent` | 1.0.2 | Copyright (c) 2016--2023 (holder not named in the crate's LICENSE-MIT; the indexmap-rs contributors, upstream project; no author declared) |
 | `errno` | 0.3.14 | Copyright (c) 2014 Chris Wong |
 | `euclid` | 0.22.13 | Copyright (c) 2012-2013 Mozilla Foundation |
 | `fallible-iterator` | 0.3.0 | Copyright (c) 2015 The rust-openssl-verify Developers |
@@ -562,7 +562,7 @@ Retained from each crate's own `LICENSE*`, `COPYING` or `UNLICENSE` file, for cr
 | `image-webp` | 0.2.4 | Copyright (c) the image-webp contributors (licence files carry no copyright line; notice from the crate's declared authors; MIT text below; upstream https://github.com/image-rs/image-webp) |
 | `imageproc` | 0.25.0 | Copyright (c) 2015 PistonDevelopers |
 | `imagesize` | 0.13.0 | Copyright (c) 2017 Maiddog |
-| `indexmap` | 2.13.0 | Copyright (c) 2016--2017 |
+| `indexmap` | 2.13.0 | Copyright (c) 2016--2017 (holder not named in the crate's LICENSE-MIT; the indexmap-rs contributors, upstream project; no author declared) |
 | `indicatif` | 0.17.11 | Copyright (c) 2017 Armin Ronacher <armin.ronacher@active-4.com> |
 | `indoc` | 2.0.7 | Copyright (c) David Tolnay (licence files carry no copyright line; notice from the crate's declared authors; MIT text below; upstream https://github.com/dtolnay/indoc) |
 | `inout` | 0.1.4 | Copyright (c) 2022 The RustCrypto Project Developers<br>Copyright (c) 2022 Artyom Pavlov |
@@ -570,8 +570,8 @@ Retained from each crate's own `LICENSE*`, `COPYING` or `UNLICENSE` file, for cr
 | `integer-encoding` | 4.1.0 | Copyright (c) 2016 Google Inc. (lewinb@google.com) -- though not an official Google product or in any way related!<br>Copyright (c) 2018-2020 Lewin Bormann (lbo@spheniscida.de) |
 | `ipnet` | 2.11.0 | Copyright 2017 Juniper Networks, Inc. |
 | `iri-string` | 0.7.10 | Copyright 2019-2024 YOSHIOKA Takuma |
-| `itertools` | 0.12.1 | Copyright (c) 2015 |
-| `itertools` | 0.13.0 | Copyright (c) 2015 |
+| `itertools` | 0.12.1 | Copyright (c) 2015 (holder not named in the crate's LICENSE-MIT; bluss, declared crate author) |
+| `itertools` | 0.13.0 | Copyright (c) 2015 (holder not named in the crate's LICENSE-MIT; bluss, declared crate author) |
 | `itoa` | 1.0.17 | Copyright (c) David Tolnay (licence files carry no copyright line; notice from the crate's declared authors; MIT text below; upstream https://github.com/dtolnay/itoa) |
 | `jobserver` | 0.1.34 | Copyright (c) 2014 Alex Crichton |
 | `kurbo` | 0.11.3 | Copyright (c) 2018 Raph Levien |
@@ -647,7 +647,7 @@ Retained from each crate's own `LICENSE*`, `COPYING` or `UNLICENSE` file, for cr
 | `rand_distr` | 0.4.3 | Copyright 2018 Developers of the Rand project |
 | `rand_pcg` | 0.10.2 | Copyright (c) 2014-2017 Melissa O'Neill and PCG Project contributors<br>Copyright 2018 Developers of the Rand project |
 | `ratatui` | 0.29.0 | Copyright (c) 2016-2022 Florian Dehau<br>Copyright (c) 2023-2024 The Ratatui Developers |
-| `rawpointer` | 0.2.1 | Copyright (c) 2015 |
+| `rawpointer` | 0.2.1 | Copyright (c) 2015 (holder not named in the crate's LICENSE-MIT; bluss, declared crate author) |
 | `rayon` | 1.11.0 | Copyright (c) 2010 The Rust Project Developers |
 | `rayon-core` | 1.13.0 | Copyright (c) 2010 The Rust Project Developers |
 | `ref-cast` | 1.0.25 | Copyright (c) David Tolnay (licence files carry no copyright line; notice from the crate's declared authors; MIT text below; upstream https://github.com/dtolnay/ref-cast) |
