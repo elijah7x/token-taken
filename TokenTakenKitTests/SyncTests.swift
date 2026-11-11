@@ -774,11 +774,15 @@ final class SyncTests: XCTestCase {
 
     func testReaderDropsHourlyRowsOutsideWriterWindowWithoutMakingDevicePartial() throws {
         try publish(other)
+        // A writer in a half-hour zone (e.g. UTC+5:30) starts its current hour at :30 UTC; it must survive.
+        let halfHour = HourlyUsage(hourStart: now, deviceID: other.id, sourceID: "claude",
+            counts: TokenCounts(input: 2, output: 3, uncategorized: 1), eventCount: 2, reasoningKnown: false)
         let backend = SyncBackend(root: directory)
         let rows = [
             hour(device: other, offset: -48),
             hour(device: other, offset: -47),
             hour(device: other),
+            halfHour,
             hour(device: other, offset: 1),
         ]
         let hourlyData = try SyncSnapshot.encode(HourlySyncSnapshot(records: rows))
@@ -799,7 +803,7 @@ final class SyncTests: XCTestCase {
         try backend.write(SyncSnapshot.encode(updated), to: metadataPath)
 
         let remote = try XCTUnwrap(read().first)
-        XCTAssertEqual(Set(remote.hourly), Set([hour(device: other, offset: -47), hour(device: other)]))
+        XCTAssertEqual(Set(remote.hourly), Set([hour(device: other, offset: -47), hour(device: other), halfHour]))
         XCTAssertEqual(remote.daily, [record(device: other)])
         XCTAssertEqual(remote.status.state, .ok)
     }

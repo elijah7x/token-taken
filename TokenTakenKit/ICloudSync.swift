@@ -199,7 +199,10 @@ public enum ICloudSync {
                               Set(snapshot.records.map { "\($0.sourceID)\u{0}\($0.hourStart.timeIntervalSince1970)" }).count == snapshot.records.count else {
                             throw SyncError.invalidSnapshot
                         }
-                        hourly = snapshot.records.filter { hourlyWindow(now: now).contains($0.hourStart) }
+                        // Use absolute age: the writer's hours may start at a fractional offset (e.g. :30 UTC)
+                        // that the reader's own hour rounding would wrongly cut off.
+                        let oldest = now.addingTimeInterval(-48 * 3_600)
+                        hourly = snapshot.records.filter { $0.hourStart > oldest && $0.hourStart <= now }
                         hourlyAvailable = true
                     } else {
                         let snapshot = try SyncSnapshot.decode(DailySyncSnapshot.self, from: data)
