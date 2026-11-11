@@ -8,13 +8,13 @@ enum CLI {
 
     static let usage = """
         Usage:
-          token-taken summary [options]
-          token-taken sources [options]
-          token-taken models [options]
-          token-taken devices [options]
-          token-taken export [--format json|csv] [--output FILE] [options]
+          token-taken summary  [options]
+          token-taken sources  [options]
+          token-taken models   [options]
+          token-taken devices  [options]
+          token-taken export   [--format json|csv] [--output FILE] [options]
           token-taken --version
-          token-taken --schema
+          token-taken --schema [VERSION]
 
         Options:
           --period day|week|month|year|all  Named range ending today (default: month)
@@ -27,6 +27,9 @@ enum CLI {
           --json                      JSON output
           --synthetic                 Read the bundled fixture instead of the store
           --local-only                Skip synced devices from iCloud Drive
+          --schema [VERSION]          Print JSON schema version or select VERSION
+          --format json|csv           Export format; csv overrides --json (export only)
+          --output FILE               Write export to FILE instead of stdout (export only)
         """
 }
 

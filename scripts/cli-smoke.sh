@@ -206,6 +206,213 @@ else
     fail "e: --local-only" "exit $local_status"
 fi
 
+# (f) --version exits 0 and prints the CLI version string.
+run "$outputs/version.out" "$outputs/version.err" "$bin" --version
+version_status=$last_status
+if [ "$version_status" -eq 0 ] && [ ! -s "$outputs/version.err" ] && "$python" -I -c '
+import sys
+parts = sys.stdin.read().strip().split()
+assert len(parts) == 2 and parts[0] == "token-taken" and parts[1], parts
+' < "$outputs/version.out"; then
+    pass "f: --version exits 0 and prints the CLI version"
+else
+    fail "f: --version" "exit $version_status"
+fi
+
+# (g) An unknown flag exits 2 with usage text on stderr.
+run "$outputs/unknown-flag.out" "$outputs/unknown-flag.err" "$bin" summary --json --unknown-flag
+unknown_flag_status=$last_status
+if [ "$unknown_flag_status" -eq 2 ] && [ ! -s "$outputs/unknown-flag.out" ] && "$python" -I -c '
+import sys
+err = sys.stdin.read()
+assert "--unknown-flag" in err and "Usage:" in err, err
+' < "$outputs/unknown-flag.err"; then
+    pass "g: unknown flag exits 2 with usage on stderr"
+else
+    fail "g: unknown flag" "exit $unknown_flag_status"
+fi
+
+# Seed local device metadata and fresh source health for sources/devices checks.
+now_epoch=$(date +%s)
+"$sqlite" "$database" <<SQL
+INSERT INTO devices VALUES ('smoke-device', 'Smoke Mac', $now_epoch.0);
+INSERT INTO health VALUES ('claude', $now_epoch.0, $now_epoch.0, 1, NULL, 0, 'ok');
+SQL
+
+# (h) sources --json reports seeded local source health with a null range.
+run "$outputs/sources.json" "$outputs/sources.err" "$bin" sources --json --local-only --tz "$zone"
+sources_status=$last_status
+if [ "$sources_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert doc["schemaVersion"] == 1, doc["schemaVersion"]
+assert doc["range"].get("from") is None and doc["range"].get("to") is None, doc["range"]
+sources = doc["data"]["sources"]
+assert len(sources) == 1, sources
+entry = sources[0]
+assert entry["id"] == "claude" and entry["state"] == "ok", entry
+assert entry["records"] == 1 and entry["skippedRecords"] == 0 and entry.get("error") is None, entry
+assert isinstance(entry["lastSuccess"], str) and entry["lastSuccess"].endswith("Z"), entry
+' < "$outputs/sources.json"; then
+    pass "h: sources --json reports seeded source health"
+else
+    fail "h: sources --json" "exit $sources_status"
+fi
+
+# (i) devices --json --local-only lists the local device and its token total.
+run "$outputs/devices.json" "$outputs/devices.err" "$bin" devices --json --local-only --tz "$zone"
+devices_status=$last_status
+if [ "$devices_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert doc["schemaVersion"] == 1, doc["schemaVersion"]
+devices = doc["data"]["devices"]
+assert len(devices) == 1, devices
+dev = devices[0]
+assert dev["id"] == "smoke-device" and dev["name"] == "Smoke Mac", dev
+assert dev["local"] is True and dev["total"] == 148, dev
+assert dev.get("state") is None and dev.get("lastWrite") is None, dev
+' < "$outputs/devices.json"; then
+    pass "i: devices --json --local-only lists the local device and its total"
+else
+    fail "i: devices --json --local-only" "exit $devices_status"
+fi
+
+# (j) export: JSON envelope, default-range CSV, and --output file writing.
+run "$outputs/export.json" "$outputs/export-json.err" "$bin" export --format json --local-only --tz "$zone"
+export_json_status=$last_status
+if [ "$export_json_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+today = sys.argv[1]
+assert doc["schemaVersion"] == 1, doc["schemaVersion"]
+assert doc["range"]["to"] == today, doc["range"]
+rows = doc["data"]["rows"]
+assert [(r["sourceID"], r["modelID"], r["total"]) for r in rows] == [
+    ("claude", "smoke-model-a", 139),
+    ("codex", "smoke-model-b", 9),
+], rows
+' "$today" < "$outputs/export.json"; then
+    pass "j1: export --format json wraps daily rows in the standard envelope"
+else
+    fail "j1: export --format json" "exit $export_json_status"
+fi
+
+run "$outputs/export-month.csv" "$outputs/export-month.err" "$bin" export --format csv --local-only --tz "$zone"
+export_csv_status=$last_status
+if [ "$export_csv_status" -eq 0 ] && "$python" -I -c '
+import csv, sys
+path = sys.argv[1]
+with open(path, "rb") as handle:
+    raw = handle.read()
+assert b"\r\n" in raw, "CSV must use CRLF line endings"
+with open(path, newline="", encoding="utf-8") as handle:
+    rows = list(csv.reader(handle))
+assert len(rows) == 3 and rows[0][0] == "day", rows
+assert {row[4]: int(row[12]) for row in rows[1:]} == {"smoke-model-a": 139, "smoke-model-b": 9}, rows
+' "$outputs/export-month.csv"; then
+    pass "j2: export --format csv writes default-range RFC 4180 CSV rows"
+else
+    fail "j2: export --format csv" "exit $export_csv_status"
+fi
+
+out_file="$outputs/written-export.json"
+run "$outputs/export-out.stdout" "$outputs/export-out.err" "$bin" export --format json --output "$out_file" --local-only --tz "$zone"
+export_out_status=$last_status
+if [ "$export_out_status" -eq 0 ] && [ -s "$out_file" ] && [ ! -s "$outputs/export-out.stdout" ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert doc["schemaVersion"] == 1, doc["schemaVersion"]
+assert len(doc["data"]["rows"]) == 2, doc["data"]["rows"]
+' < "$out_file"; then
+    pass "j3: export --output writes a non-empty file and leaves stdout empty"
+else
+    fail "j3: export --output" "exit $export_out_status"
+fi
+
+# (k) An unwritable --output path exits 1 as documented in cli.md.
+run "$outputs/unwritable.out" "$outputs/unwritable.err" "$bin" export --format json --output "$outputs/nonexistent-dir/x.json" --local-only --tz "$zone"
+unwritable_status=$last_status
+if [ "$unwritable_status" -eq 1 ] && [ ! -s "$outputs/unwritable.out" ] && "$python" -I -c '
+import sys
+err = sys.stdin.read()
+assert "could not write output file" in err, err
+' < "$outputs/unwritable.err"; then
+    pass "k: unwritable --output path exits 1 with an error on stderr"
+else
+    fail "k: unwritable --output" "exit $unwritable_status"
+fi
+
+# Seed an earlier row on a second device so custom date ranges and device filters exclude real data.
+"$sqlite" "$database" <<SQL
+INSERT INTO daily_usage VALUES
+    ('smoke-device-2', 'codex', 'smoke-model-b', 'smoke-model-b', '2025-06-15', '$zone', 30, 0, 0, 5, 0, 0, 2);
+SQL
+
+# (l) --since/--until bounds custom ranges and clears the named period.
+run "$outputs/range.json" "$outputs/range.err" "$bin" summary --json --since 2025-06-01 --until 2025-06-30 --local-only --tz "$zone"
+range_status=$last_status
+run "$outputs/range-today.json" "$outputs/range-today.err" "$bin" summary --json --since "$today" --until "$today" --local-only --tz "$zone"
+range_today_status=$last_status
+if [ "$range_status" -eq 0 ] && [ "$range_today_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+past_path, today_path, today = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(past_path, encoding="utf-8") as handle:
+    past = json.load(handle)
+with open(today_path, encoding="utf-8") as handle:
+    curr = json.load(handle)
+assert past["range"] == {"from": "2025-06-01", "to": "2025-06-30"}, past["range"]
+assert past["data"].get("period") is None, past["data"]
+assert past["data"]["total"]["total"] == 35, past["data"]["total"]
+assert curr["range"] == {"from": today, "to": today}, curr["range"]
+assert curr["data"].get("period") is None, curr["data"]
+assert curr["data"]["total"]["total"] == 148, curr["data"]["total"]
+' "$outputs/range.json" "$outputs/range-today.json" "$today"; then
+    pass "l: --since/--until bounds custom ranges and omits named period"
+else
+    fail "l: --since/--until" "past=$range_status today=$range_today_status"
+fi
+
+# (m) --source, --model, and --device filters restrict records before aggregation.
+run "$outputs/filter-source.json" "$outputs/filter-source.err" "$bin" summary --json --period all --source claude --local-only --tz "$zone"
+filter_source_status=$last_status
+if [ "$filter_source_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert doc["data"]["total"]["total"] == 139, doc["data"]["total"]
+assert [g["id"] for g in doc["data"]["bySource"]] == ["claude"], doc["data"]["bySource"]
+' < "$outputs/filter-source.json"; then
+    pass "m1: --source filter restricts totals and breakdowns to claude"
+else
+    fail "m1: --source filter" "exit $filter_source_status"
+fi
+
+run "$outputs/filter-model.json" "$outputs/filter-model.err" "$bin" summary --json --period all --model smoke-model-a --local-only --tz "$zone"
+filter_model_status=$last_status
+if [ "$filter_model_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert doc["data"]["total"]["total"] == 139, doc["data"]["total"]
+assert [g["id"] for g in doc["data"]["byModel"]] == ["smoke-model-a"], doc["data"]["byModel"]
+' < "$outputs/filter-model.json"; then
+    pass "m2: --model filter restricts totals and breakdowns to smoke-model-a"
+else
+    fail "m2: --model filter" "exit $filter_model_status"
+fi
+
+run "$outputs/filter-device.json" "$outputs/filter-device.err" "$bin" summary --json --period all --device smoke-device --local-only --tz "$zone"
+filter_device_status=$last_status
+if [ "$filter_device_status" -eq 0 ] && "$python" -I -c '
+import json, sys
+doc = json.load(sys.stdin)
+assert doc["data"]["total"]["total"] == 148, doc["data"]["total"]
+assert [g["id"] for g in doc["data"]["byDevice"]] == ["smoke-device"], doc["data"]["byDevice"]
+' < "$outputs/filter-device.json"; then
+    pass "m3: --device filter restricts totals and breakdowns to smoke-device"
+else
+    fail "m3: --device filter" "exit $filter_device_status"
+fi
+
 if [ "$failures" -ne 0 ]; then
     exit 1
 fi

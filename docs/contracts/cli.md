@@ -54,7 +54,7 @@ Aggregates usage for the effective range: total counts by category, breakdowns b
 - Table output shows total, categories, breakdowns, and the price-table note. JSON carries the same values.
 - `range.from` and `range.to` are the effective inclusive days of the named period. For a custom range they are the supplied bounds, with `null` for an omitted endpoint.
 - `data.period` is the period name, or `null` when a custom range overrides it.
-- Cost semantics are those in [statistics.md](statistics.md): `estimatedUSD` covers priced tokens only and `unpricedTokens` counts what no rate covered.
+- Cost semantics are those in [statistics.md](statistics.md): `estimatedUSD` covers priced tokens only and `unpricedTokens` counts what no rate covered. `summary` JSON rounds `estimatedUSD` to 2 decimal places while the store and shared aggregator keep unrounded values.
 
 ### `sources`
 
@@ -177,7 +177,7 @@ Warnings are machine-readable objects with a stable `code` and a human-readable 
 - Adding a response field keeps the current `schemaVersion`. Removing or renaming a field, or changing its meaning, MUST increment `schemaVersion`.
 - The previous schema MUST remain selectable with `--schema N` for at least one minor release after a new schema becomes the default. Only schema 1 exists today.
 - Human-readable output is not a stable interface; scripts MUST use the versioned JSON or documented CSV interface.
-- For the same store snapshot, price-table version, range, time zone, and filters, CLI and UI MUST report identical numbers. This is the binding P4 acceptance rule.
+- For the same store snapshot, price-table version, range, time zone, and filters, CLI and UI MUST report identical numbers; cost equality between app and CLI holds at that 2-decimal-place displayed precision. This is the binding P4 acceptance rule.
 
 ## Exit codes
 
