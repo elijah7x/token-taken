@@ -220,7 +220,7 @@ struct FieldShareCard: View {
     }
 
     private var field: some View {
-        FieldLandscapeView(items: items, highlight: .constant(focusID))
+        FieldLandscapeView(items: items, highlight: .constant(focusID), interactive: false)
     }
 
     private var composition: some View {

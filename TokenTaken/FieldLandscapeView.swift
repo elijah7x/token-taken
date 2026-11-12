@@ -67,6 +67,8 @@ struct FieldSceneModel {
 struct FieldLandscapeView: View {
     let items: [Breakdown]
     @Binding var highlight: String?
+    /// Share cards pass false: their highlight is the fixed scope, so hover must not drive it or the tooltip.
+    var interactive = true
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.locale) private var locale
@@ -82,6 +84,7 @@ struct FieldLandscapeView: View {
                 FieldPainter(ctx: ctx, model: model, isDark: scheme == .dark, season: .of(Date()), highlight: highlight, chinese: chinese).paint()
             }
             .onContinuousHover { phase in
+                guard interactive else { return }
                 switch phase {
                 case .active(let location):
                     hoverPoint = location
@@ -92,7 +95,7 @@ struct FieldLandscapeView: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if let point = hoverPoint, let id = highlight, let plot = model.plots.first(where: { $0.id == id }) {
+                if interactive, let point = hoverPoint, let id = highlight, let plot = model.plots.first(where: { $0.id == id }) {
                     FieldTooltip(plot: plot, total: model.total, chinese: chinese)
                         .offset(x: min(point.x + 14, proxy.size.width - 230), y: point.y + 16)
                         .allowsHitTesting(false)
