@@ -29,9 +29,12 @@ extension Color {
     }
 
     /// Appearance-aware color. With Increase Contrast the `contrast` variant wins.
-    init(light: String, dark: String, contrastLight: String? = nil, contrastDark: String? = nil) {
+    init(light: String, dark: String, contrastLight: String? = nil, contrastDark: String? = nil, fieldLight: String? = nil, fieldDark: String? = nil) {
         self.init(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            if ThemeRuntime.isField, let fieldLight, let fieldDark {
+                return NSColor(Color(hex: isDark ? fieldDark : fieldLight))
+            }
             let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
             let hex = switch (isDark, increased) {
             case (false, false): light
@@ -51,25 +54,29 @@ enum Palette {
         light: "#131A24",
         dark: "#EEF2F8",
         contrastLight: "#090E14",
-        contrastDark: "#FFFFFF"
+        contrastDark: "#FFFFFF",
+        fieldLight: "#2B2A24", fieldDark: "#ECE6D6"
     )
     static let ink2 = Color(
         light: "#465264",
         dark: "#A9B5C7",
         contrastLight: "#283241",
-        contrastDark: "#D4DCE8"
+        contrastDark: "#D4DCE8",
+        fieldLight: "#55524A", fieldDark: "#C4BDAB"
     )
     static let ink3 = Color(
         light: "#6C788A",
         dark: "#7B889C",
         contrastLight: "#465264",
-        contrastDark: "#B0BCCF"
+        contrastDark: "#B0BCCF",
+        fieldLight: "#6B675B", fieldDark: "#A9A392"
     )
 
     // MARK: Surfaces & borders
 
     static let cardSurface = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#262A23" : "#FBF8F0")) }
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if reduceTransparency {
             return isDark
@@ -83,6 +90,7 @@ enum Palette {
 
     static let sidebarSurface = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#22261F" : "#EFE9DA")) }
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if reduceTransparency {
             return isDark
@@ -97,6 +105,7 @@ enum Palette {
     /// The floating tray: a lighter, nearly opaque pane lifted off the frosted base.
     static let traySurface = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#262A23" : "#FBF8F0")) }
         if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             return isDark
                 ? NSColor(srgbRed: 34 / 255, green: 42 / 255, blue: 55 / 255, alpha: 1)
@@ -108,13 +117,15 @@ enum Palette {
     })
 
     static let trayRim = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isField { return NSColor(Color(hex: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "#3E4337" : "#D9D2C0")) }
+        return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10)
             : NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 0.08)
     })
 
     static let barTrack = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#353A30" : "#E6DFCD")) }
         let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         if isDark {
             return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: increased ? 0.16 : 0.08)
@@ -124,6 +135,7 @@ enum Palette {
 
     static let hairline = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#3E4337" : "#D9D2C0")) }
         let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         if isDark {
             return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: increased ? 0.30 : 0.095)
@@ -132,7 +144,7 @@ enum Palette {
     })
 
     /// Opaque base window surface (`--win-bg`), also used under Reduce Transparency.
-    static let solid = Color(light: "#F4F6FA", dark: "#0D121A")
+    static let solid = Color(light: "#F4F6FA", dark: "#0D121A", fieldLight: "#F5F1E6", fieldDark: "#1E211C")
 
     // MARK: Semantic roles & health
 
@@ -140,7 +152,8 @@ enum Palette {
         light: "#0068D6",
         dark: "#56A8FF",
         contrastLight: "#004FA3",
-        contrastDark: "#82BEFF"
+        contrastDark: "#82BEFF",
+        fieldLight: "#A94E2A", fieldDark: "#E28A62"
     )
     static let healthOK = Color(
         light: "#178750",
@@ -169,7 +182,8 @@ enum Palette {
 
     /// Category order matches `TokenCategory.allCases`: input, cacheRead, cacheWrite, output, reasoning.
     static func color(for category: TokenCategory) -> Color {
-        switch category {
+        if ThemeRuntime.isField { return FieldCrop.color(for: category) }
+        return switch category {
         case .input:
             Color(light: "#CF6B85", dark: "#E2829B")
         case .cacheRead:
@@ -213,6 +227,7 @@ enum Palette {
     ]
 
     static func color(forSource id: String) -> Color {
+        if ThemeRuntime.isField { return FieldCrop.color(forSource: id) }
         switch id.lowercased() {
         case "claude", "claude-code":
             return Color(light: "#D47353", dark: "#E4896A")
@@ -250,6 +265,7 @@ enum Palette {
 
     /// Assigns distinct hues across `ids`, resolving hash collisions in sorted-ID order so colors stay stable across periods.
     static func modelColors(for ids: [String]) -> [String: Color] {
+        if ThemeRuntime.isField { return FieldCrop.colors(forModels: ids) }
         let count = modelPalette.count
         guard count > 0, !ids.isEmpty else { return [:] }
 
@@ -366,7 +382,9 @@ struct WindowBackdrop: View {
 
     var body: some View {
         Group {
-            if reduceTransparency || theme != .liquidGlass {
+            if theme == .field {
+                FieldPalette.paper
+            } else if reduceTransparency || theme != .liquidGlass {
                 Palette.solid
             } else if opacity >= 0.98 {
                 ZStack {
@@ -422,6 +440,26 @@ struct WindowBackdrop: View {
 }
 
 extension View {
+    /// Native glass, or under the Field theme a solid paper panel with a ruled edge.
+    @ViewBuilder
+    func themedGlass<S: Shape>(_ glass: Glass = .regular, in shape: S) -> some View {
+        if ThemeRuntime.isField {
+            background { shape.fill(FieldPalette.panel) }
+                .overlay { shape.stroke(FieldPalette.rule, lineWidth: 1) }
+        } else {
+            glassEffect(glass, in: shape)
+        }
+    }
+
+    @ViewBuilder
+    func themedGlassButton() -> some View {
+        if ThemeRuntime.isField {
+            buttonStyle(FieldButtonStyle())
+        } else {
+            buttonStyle(.glass)
+        }
+    }
+
     /// Floating tooltip surface: glass normally, an opaque Palette surface with a hairline under Reduce Transparency.
     @ViewBuilder
     func tooltipSurface(reduceTransparency: Bool, cornerRadius: CGFloat = Radius.inner) -> some View {
@@ -435,7 +473,7 @@ extension View {
                     }
             }
         } else {
-            glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+            themedGlass(.regular, in: .rect(cornerRadius: cornerRadius))
         }
     }
 

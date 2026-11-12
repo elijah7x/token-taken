@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added manual-first refresh with launch collection and a fixed 4-hour sleep-tolerant fallback timer.
 - Added `scripts/update-prices.py`, which regenerates `TokenTakenKit/PriceSnapshot.swift` offline from the newest `engine/price-snapshot-*.json` (stdlib only, runs on the macOS system Python 3.9). `--check` reports drift, and `scripts/release.sh` now fails a release when the generated table is stale.
 
+- Added the Field theme (theme ID `sketchbook`): a hand-drawn farm where each source or model is a plot whose area and plant count follow tokens, with ten crops, seasonal scenery, day and night skies, serif type, paper surfaces in place of Liquid Glass, a Field share card, and a 田 Dock icon.
+- Added a Follow System, Light, or Dark setting that applies to every window and the menu bar extra.
+
 ### Changed
 
 - Ship the price table inside the app: the bundled version is now `<snapshot>+alias-<n>` (currently `tokscale-4.21.0-2026-11-10+alias-v3`), so alias-table changes also change the version recorded with every cost estimate.

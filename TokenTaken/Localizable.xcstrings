@@ -841,6 +841,22 @@
         }
       }
     },
+    "Dark" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dark"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深色"
+          }
+        }
+      }
+    },
     "Data collection" : {
       "localizations" : {
         "en" : {
@@ -978,6 +994,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "失败"
+          }
+        }
+      }
+    },
+    "Field" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Field"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "田野"
           }
         }
       }
@@ -1234,6 +1266,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "许可证"
+          }
+        }
+      }
+    },
+    "Light" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浅色"
+          }
+        }
+      }
+    },
+    "Light or dark" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light or dark"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深浅模式"
           }
         }
       }
@@ -1876,6 +1940,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "部分数据"
+          }
+        }
+      }
+    },
+    "Plot area and plant count follow tokens · read from local logs only" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plot area and plant count follow tokens · read from local logs only"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "面积与株数按 Token 计 · 只读本机日志"
           }
         }
       }
@@ -2592,6 +2672,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "主题与桌面透出程度。"
+          }
+        }
+      }
+    },
+    "Theme, language, and number units." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Theme, language, and number units."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主题、语言与数字单位。"
           }
         }
       }

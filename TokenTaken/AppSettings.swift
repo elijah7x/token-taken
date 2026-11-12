@@ -7,6 +7,7 @@ import TokenTakenKit
 
 enum AppTheme: String, CaseIterable {
     case liquidGlass = "liquid-glass"
+    case field = "sketchbook"
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -38,6 +39,31 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppAppearance: String, CaseIterable, Identifiable {
+    case system
+    case light
+    case dark
+
+    var id: Self { self }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .system: "Follow System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    /// nil follows the system.
+    var nsAppearance: NSAppearance? {
+        switch self {
+        case .system: nil
+        case .light: NSAppearance(named: .aqua)
+        case .dark: NSAppearance(named: .darkAqua)
+        }
+    }
+}
+
 enum NumberUnits: String, CaseIterable, Identifiable {
     case automatic
     case international
@@ -63,6 +89,9 @@ final class AppSettings {
         didSet {
             guard theme != oldValue else { return }
             defaults.set(theme.rawValue, forKey: Keys.theme)
+            ThemeRuntime.isField = theme == .field
+            FieldAppIconSwitcher.apply(theme)
+            formatRevision &+= 1
         }
     }
 
@@ -71,6 +100,20 @@ final class AppSettings {
             guard interfaceTransparency != oldValue else { return }
             defaults.set(interfaceTransparency, forKey: Keys.interfaceTransparency)
         }
+    }
+
+    var appearance: AppAppearance {
+        didSet {
+            guard appearance != oldValue else { return }
+            defaults.set(appearance.rawValue, forKey: Keys.appearance)
+            applyAppearance()
+        }
+    }
+
+    /// Applies the light/dark choice to every window, the menu bar panel and the Dock icon.
+    func applyAppearance() {
+        NSApp?.appearance = appearance.nsAppearance
+        FieldAppIconSwitcher.apply(theme)
     }
 
     var language: AppLanguage {
@@ -178,7 +221,10 @@ final class AppSettings {
             Keys.syncEnabled: false,
         ])
 
-        theme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
+        appearance = AppAppearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
+        let storedTheme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
+        theme = storedTheme
+        ThemeRuntime.isField = storedTheme == .field
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
         language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .system
         numberUnits = NumberUnits(rawValue: defaults.string(forKey: Keys.numberUnits) ?? "") ?? .automatic
@@ -209,6 +255,7 @@ final class AppSettings {
 
     private enum Keys {
         static let theme = "theme"
+        static let appearance = "appearance"
         static let interfaceTransparency = "interfaceTransparency"
         static let language = "appLanguage"
         static let numberUnits = "numberUnits"

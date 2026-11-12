@@ -79,12 +79,14 @@ struct TokenTakenApp: App {
                 .environment(refreshCoordinator)
                 .environment(router)
                 .environment(\.locale, locale)
+                .fontDesign(settings.theme == .field ? .serif : nil)
         } else {
             content
                 .environment(settings)
                 .environment(model)
                 .environment(router)
                 .environment(\.locale, locale)
+                .fontDesign(settings.theme == .field ? .serif : nil)
         }
     }
 }

@@ -1261,9 +1261,17 @@ struct ShareCardView: View {
     private var isDark: Bool { scheme == .dark }
 
     var body: some View {
+        if ThemeRuntime.isField {
+            FieldShareCard(data: data, aspect: aspect, showCost: showCost, showComposition: showComposition)
+        } else {
+            tideCard
+        }
+    }
+
+    private var tideCard: some View {
         let geometry = TideGeometry(data: data, aspect: aspect, showComposition: showComposition)
 
-        ZStack(alignment: .topLeading) {
+        return ZStack(alignment: .topLeading) {
             ShareTideVesselCanvas(
                 data: data,
                 geometry: geometry,
@@ -1907,7 +1915,7 @@ private struct ShareRoundButtonSurface: ViewModifier {
                 .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: 1) }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .circle)
+                .themedGlass(.regular.interactive(), in: .circle)
         }
     }
 }
@@ -1929,7 +1937,7 @@ private struct SharePillSurface: ViewModifier {
                 }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.inner))
+                .themedGlass(.regular.interactive(), in: .rect(cornerRadius: Radius.inner))
                 .overlay {
                     if isSelected {
                         shape.strokeBorder(Palette.roleAccent.opacity(0.45), lineWidth: 1)
@@ -1953,7 +1961,7 @@ private struct ShareSegmentSurface: ViewModifier {
                 .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .themedGlass(.regular.interactive(), in: .capsule)
                 .glassEffectID("shareAspect", in: namespace)
         }
     }
@@ -1979,13 +1987,13 @@ private struct ShareActionButtonSurface: ViewModifier {
         } else if isProminent {
             content
                 .background { shape.fill(Palette.roleAccent.opacity(0.14)) }
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.inner))
+                .themedGlass(.regular.interactive(), in: .rect(cornerRadius: Radius.inner))
                 .overlay {
                     shape.strokeBorder(Palette.roleAccent.opacity(0.45), lineWidth: 1)
                 }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: Radius.inner))
+                .themedGlass(.regular.interactive(), in: .rect(cornerRadius: Radius.inner))
         }
     }
 }

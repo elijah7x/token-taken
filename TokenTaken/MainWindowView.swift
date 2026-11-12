@@ -68,6 +68,8 @@ struct MainWindowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dimension: BreakdownDimension = .sources
     @State private var isPresentingShare = false
+    @State private var fieldHighlight: String?
+    @Environment(\.colorScheme) private var colorScheme
 
     private var isFirstLaunchCollecting: Bool {
         model.isEmpty && refreshCoordinator?.isRefreshing == true
@@ -97,6 +99,13 @@ struct MainWindowView: View {
         .sheet(isPresented: $isPresentingShare) {
             ShareExportSheet()
         }
+        .fontDesign(settings.theme == .field ? .serif : nil)
+        .onAppear { settings.applyAppearance() }
+        .onChange(of: colorScheme) { FieldAppIconSwitcher.apply(settings.theme) }
+    }
+
+    private var fieldItems: [Breakdown] {
+        dimension == .sources ? model.summary.bySource : model.summary.byModel
     }
 
     @ViewBuilder
@@ -118,16 +127,27 @@ struct MainWindowView: View {
                 .padding(.top, 18)
                 .padding(.bottom, 6)
 
-                ConfluenceView(summary: model.summary, dimension: dimension)
-                    .padding(.horizontal, 8)
-                    .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
+                if settings.theme == .field {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 18) {
+                            FieldLandscapeView(items: fieldItems, highlight: $fieldHighlight)
+                            FieldBreakdownList(items: fieldItems, total: model.summary.total.total, highlight: $fieldHighlight)
+                        }
+                        .padding(.horizontal, 28)
+                        .padding(.top, 8)
+                    }
+                } else {
+                    ConfluenceView(summary: model.summary, dimension: dimension)
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
 
-                Rectangle().fill(Palette.hairline).frame(height: 1)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 24)
+                    Rectangle().fill(Palette.hairline).frame(height: 1)
+                        .padding(.horizontal, 28)
+                        .padding(.vertical, 24)
 
-                BreakdownCard(summary: model.summary, dimension: dimension)
-                    .padding(.horizontal, 28)
+                    BreakdownCard(summary: model.summary, dimension: dimension)
+                        .padding(.horizontal, 28)
+                }
             }
             .padding(.bottom, 24)
         }
@@ -234,7 +254,7 @@ private struct DimensionSegmentSurface: ViewModifier {
                 .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .themedGlass(.regular.interactive(), in: .capsule)
                 .glassEffectID("breakdownDimension", in: namespace)
         }
     }
@@ -260,8 +280,10 @@ private struct Tray: View {
 
             switch router.route {
             case .dashboard:
-                PeriodSlider()
-                    .padding(.top, 22)
+                Group {
+                    if ThemeRuntime.isField { FieldPeriodPicker() } else { PeriodSlider() }
+                }
+                .padding(.top, 22)
 
                 SummaryRail(summary: model.summary, isCollecting: isFirstLaunchCollecting)
                     .padding(.top, 28)
@@ -478,7 +500,7 @@ private struct RoundGlassControlSurface: ViewModifier {
                 .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: 1) }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .circle)
+                .themedGlass(.regular.interactive(), in: .circle)
         }
     }
 }
@@ -582,7 +604,7 @@ private struct CollectingVesselGlyph: View {
             if !reduceTransparency {
                 Color.clear
                     .padding(4)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 16))
+                    .themedGlass(.regular, in: .rect(cornerRadius: 16))
                     .opacity(0.35)
             }
 
@@ -630,7 +652,7 @@ private struct DashboardEmptyStateCard: View {
                     .controlSize(.regular)
             } else {
                 Button("Open Settings…", action: openSettings)
-                    .buttonStyle(.glass)
+                    .themedGlassButton()
                     .controlSize(.regular)
             }
         }
@@ -1004,7 +1026,7 @@ private struct LiquidMeniscusHead: View {
     }
 }
 
-private extension Period {
+extension Period {
     var shortcutKey: KeyEquivalent {
         switch self {
         case .day: "1"

@@ -85,7 +85,7 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 ### Presentation and themes
 
 - Provides main-window view models and SwiftUI views for day, week (Monday start), month, year, and all-time periods, with model, source, and enabled device breakdowns.
-- Ships theme ID `liquid-glass` in v1. Reserves `geek` and `sketchbook` for later themes without shipping those themes in v1.
+- Ships theme IDs `liquid-glass` and `sketchbook` (Field) in v1 and reserves `geek`. `ThemeRuntime` mirrors the active theme for dynamic palette colors and glass helpers; changing theme rebuilds every scene. Field rendering lives in `FieldTheme.swift`, `FieldLandscapeView.swift`, and `FieldSurfaces.swift`.
 - Preserves loading, empty, stale, and error states rather than displaying missing data as zero.
 - Follows `docs/contracts/themes.md` for theme boundaries.
 

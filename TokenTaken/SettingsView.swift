@@ -211,7 +211,7 @@ struct GlassToggleStyle: ToggleStyle {
             ZStack {
                 Capsule()
                     .fill(Palette.barTrack)
-                    .glassEffect(.regular, in: .capsule)
+                    .themedGlass(.regular, in: .capsule)
                     .opacity(isOn ? 0 : 1)
                 Capsule()
                     .fill(Palette.roleAccent)
@@ -233,7 +233,7 @@ struct GlassToggleStyle: ToggleStyle {
             Circle()
                 .fill(Color.white.opacity(0.85))
                 .frame(width: 20, height: 20)
-                .glassEffect(.regular.interactive(), in: .circle)
+                .themedGlass(.regular.interactive(), in: .circle)
         }
     }
 }
@@ -425,7 +425,7 @@ private struct SettingsActionPillSurface: ViewModifier {
                 .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
         } else {
             content
-                .glassEffect(.regular.interactive(), in: .capsule)
+                .themedGlass(.regular.interactive(), in: .capsule)
         }
     }
 }
@@ -485,7 +485,7 @@ private struct GeneralSettingsTab: View {
             VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
                     title: "Appearance",
-                    description: "Theme, transparency, language, and number units."
+                    description: settings.theme == .field ? LocalizedStringKey("Theme, language, and number units.") : LocalizedStringKey("Theme, transparency, language, and number units.")
                 )
 
                 SettingsRowsGroup {
@@ -494,9 +494,23 @@ private struct GeneralSettingsTab: View {
                             switch settings.theme {
                             case .liquidGlass:
                                 Text("Liquid Glass")
+                            case .field:
+                                Text("Field")
                             }
                         } options: {
                             Text("Liquid Glass").tag(AppTheme.liquidGlass)
+                            Text("Field").tag(AppTheme.field)
+                        }
+                    }
+
+                    SettingsHairline()
+                    SettingsControlRow(title: "Light or dark") {
+                        GlassMenuPicker("Light or dark", selection: $settings.appearance) {
+                            Text(settings.appearance.title)
+                        } options: {
+                            ForEach(AppAppearance.allCases) { appearance in
+                                Text(appearance.title).tag(appearance)
+                            }
                         }
                     }
 
@@ -532,7 +546,7 @@ private struct GeneralSettingsTab: View {
                                     .controlSize(.small)
                             } else {
                                 Button("Relaunch") { settings.relaunch() }
-                                    .buttonStyle(.glass)
+                                    .themedGlassButton()
                                     .controlSize(.small)
                             }
                         }
@@ -589,7 +603,7 @@ private struct GeneralSettingsTab: View {
                                     .controlSize(.small)
                             } else {
                                 Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                                    .buttonStyle(.glass)
+                                    .themedGlassButton()
                                     .controlSize(.small)
                             }
                         }
@@ -1245,7 +1259,7 @@ private struct AboutSettingsTab: View {
                             .controlSize(.small)
                     } else {
                         Button("Install Command-Line Tool", action: install)
-                            .buttonStyle(.glass)
+                            .themedGlassButton()
                             .controlSize(.small)
                     }
                 }
@@ -1289,7 +1303,7 @@ private struct AboutSettingsTab: View {
                             .controlSize(.small)
                     } else {
                         Link("Download", destination: url)
-                            .buttonStyle(.glass)
+                            .themedGlassButton()
                             .controlSize(.small)
                     }
                 }
@@ -1305,7 +1319,7 @@ private struct AboutSettingsTab: View {
                     Button("Check for Updates") {
                         Task { await updateChecker.check() }
                     }
-                    .buttonStyle(.glass)
+                    .themedGlassButton()
                     .controlSize(.small)
                     .disabled(updateChecker.isChecking)
                 }
