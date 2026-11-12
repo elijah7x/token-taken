@@ -63,6 +63,12 @@ final class RefreshCoordinator {
                 self.onChange?()
             }
         }
+        // Enabling account-wide collection is a user action worth a fresh read; disabling keeps the
+        // account device's cached rows, which stay visible and stop being replaced.
+        settings.onCursorAccountCollectionChange = { [weak self] in
+            guard let self, self.settings.cursorAccountCollection else { return }
+            Task { [weak self] in await self?.refresh() }
+        }
     }
 
     func start() {
@@ -147,7 +153,7 @@ final class RefreshCoordinator {
             else { return snapshot }
             return RemoteDeviceSnapshot(device: cached.device, daily: cached.daily, hourly: cached.hourly, status: RemoteDeviceStatus(
                 deviceID: cached.device.id, displayName: cached.device.name,
-                lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state))
+                lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state), accounts: cached.accounts)
         }
         updateRemoteRetry(isRetry: isRetry)
         onChange?()
@@ -196,7 +202,7 @@ final class RefreshCoordinator {
     private func markRemotesUnavailable() {
         remoteSnapshots = remoteSnapshots.map { snapshot in
             RemoteDeviceSnapshot(device: snapshot.device, daily: snapshot.daily, hourly: snapshot.hourly, status: RemoteDeviceStatus(
-                deviceID: snapshot.device.id, displayName: snapshot.device.name, lastWrite: snapshot.status.lastWrite, state: .unavailable))
+                deviceID: snapshot.device.id, displayName: snapshot.device.name, lastWrite: snapshot.status.lastWrite, state: .unavailable), accounts: snapshot.accounts)
         }
     }
 
@@ -253,6 +259,9 @@ final class RefreshCoordinator {
         collectors.append(AntigravityCollector(deviceID: device.id, stateDirectory: state))
         collectors.append(MiniMaxCodeCollector(deviceID: device.id, stateDirectory: state))
         collectors.append(DeepSeekCollector(deviceID: device.id, stateDirectory: state))
+        if settings.cursorAccountCollection {
+            collectors.append(CursorCollector(deviceID: device.id, stateDirectory: state))
+        }
         return collectors
     }
 

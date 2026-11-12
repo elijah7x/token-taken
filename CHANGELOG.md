@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added opt-in Cursor account collection: a native collector reads Cursor's own sign-in on this Mac, downloads the account's usage export once per refresh, and writes it to an `account` device so several signed-in Macs count the account once (ADR-0010). Device kinds (`mac`, `account`) follow into the store, the synced-device views, the summary breakdowns, and `token-taken devices` (`kind`, with `local` never true for an account).
+
 - Initialized the project specification, architecture, decision records, and contracts.
 - Added a Developer ID release pipeline with hardened-runtime signing, DMG packaging, and notarization; v0.1 updates are manual.
 - Added the app icon (a staggered stack of blue glass coins on a pale plate, with dedicated 16 and 32 pt renders) and a matching menu bar template glyph.

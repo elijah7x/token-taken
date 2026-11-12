@@ -135,13 +135,34 @@ public struct HourlyUsage: Hashable, Codable, Sendable {
     }
 }
 
+/// A device is either this Mac or other Macs (`mac`) or one account whose usage Cursor reports centrally
+/// (`account`). Account devices are not hardware: several Macs signed in to the same account store the same
+/// rows under the same account device id.
+public enum DeviceKind: String, Codable, Sendable, Hashable {
+    case mac, account
+}
+
 public struct Device: Hashable, Codable, Sendable, Identifiable {
     public let id: String
     public let name: String
+    public let kind: DeviceKind
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, kind: DeviceKind = .mac) {
         self.id = id
         self.name = name
+        self.kind = kind
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, kind
+    }
+
+    /// Snapshots and caches written before schema 5 have no `kind`; every device they held was a Mac.
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        kind = try values.decodeIfPresent(DeviceKind.self, forKey: .kind) ?? .mac
     }
 }
 

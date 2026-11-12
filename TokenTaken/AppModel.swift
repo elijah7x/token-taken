@@ -38,6 +38,17 @@ final class AppModel {
         return refreshCoordinator?.remoteSnapshots.map(\.status) ?? []
     }
 
+    /// `account` devices stand for one account across every Mac that published it, not for a Mac.
+    func deviceKind(for deviceID: String) -> DeviceKind {
+        if let device = refreshCoordinator?.remoteSnapshots.first(where: { $0.device.id == deviceID })?.device {
+            return device.kind
+        }
+        if let device = summary.devices.first(where: { $0.id == deviceID }) {
+            return device.kind
+        }
+        return .mac
+    }
+
     var dataIssues: DataIssues {
         let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
         var failed = 0
@@ -51,7 +62,7 @@ final class AppModel {
             case .ok, .notInstalled: break
             }
         }
-        let devices = remoteDevices.filter { $0.state != .ok }.count
+        let devices = remoteDevices.filter { $0.state != .ok && deviceKind(for: $0.deviceID) == .mac }.count
         let skipped = health.reduce(0) { $0 + $1.skippedRecords }
         return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped, devices: devices,
             isPartial: failed + unavailable + stale + devices > 0 || skipped > 0 || storageError != nil || readError != nil

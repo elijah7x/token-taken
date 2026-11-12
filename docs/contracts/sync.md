@@ -16,16 +16,27 @@ Token Taken/
         device.json
         usage-YYYY-MM.json
         hourly.json
+        account-<32hex>-usage-YYYY-MM.json
+        account-<32hex>-hourly.json
 ```
 
 - Every JSON envelope carries `schemaVersion: 1`. JSON object keys are sorted; daily rows are sorted by day/device/source/model, hourly rows by instant/device/source, and source health by source ID. Dates are ISO 8601 UTC strings with second precision.
-- `device.json` contains `deviceId`, `displayName`, `appVersion`, `schemaVersion`, `lastWriteUTC`, a boolean `tombstone`, a `files` dictionary mapping record-kind filenames to SHA-256 hashes of their exact bytes, and `sources`.
+- `device.json` contains `deviceId`, `displayName`, `appVersion`, `schemaVersion`, `lastWriteUTC`, a boolean `tombstone`, a `files` dictionary mapping record-kind filenames to SHA-256 hashes of their exact bytes, `sources`, and `accounts`.
 - Each `sources` entry contains only `sourceID`, `lastSuccess`, `state`, and `skippedRecords`. Never serialize the local diagnostic/error message. This exposes source failures and partial reads independently of a recent device write.
 - Monthly and hourly envelopes contain `schemaVersion` and a `records` array. The manifest is authoritative: unreferenced historical files and temporary files never contribute data. An empty daily manifest is an explicitly published empty daily history, not evidence inferred from missing files.
 - Each monthly usage file contains daily records keyed by `(deviceID, sourceID, modelID, day)`, partitioned by the record's `YYYY-MM` date label, not UTC month. Records retain `day` (`YYYY-MM-DD`), `timeZoneID`, normalized `modelID`, `rawModelID`, counts (`input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`), and `eventCount`.
 - `hourly.json` is a separate rolling activity snapshot keyed by `(deviceID, sourceID, hourStart)`. `hourStart` is an absolute UTC instant; each row retains counts, `eventCount`, and `reasoningKnown`. It has no model field. Publication includes only the current collecting-device hour and 47 preceding absolute hourly intervals per source. Local storage may retain older rows after failure, but these aged-out rows are not published; sanitized source health and missing recent hourly coverage expose the failure.
 - Daily files hold complete history. Hourly rows describe activity shape only and MUST NOT be added to daily totals or used to replace missing daily history. This replaces the earlier draft's UTC-hour-by-model layout under [ADR-0005](../decisions/0005-collection-granularity.md); no released sync format is being silently migrated.
 - A monthly snapshot replaces that device/month's previous snapshot; an hourly snapshot replaces that device's previous rolling hourly snapshot. Readers MUST NOT add repeated or cumulative snapshots together.
+
+## Account publications
+
+- Account-scoped sources are fetched from an account, not from the local machine, so every Mac signed into the same account parses the same rows. Their rows belong to a synthetic account device (`account-<source>-<32 lowercase hex>`), never to the collecting Mac.
+- The Mac that collects an account source publishes that account's full history as an additional record kind inside its own device folder: `account-<32hex>-usage-YYYY-MM.json` (the `DailySyncSnapshot` envelope) and `account-<32hex>-hourly.json` (the `HourlySyncSnapshot` envelope). The `<32hex>` suffix is the account device ID's trailing 32 hex characters and MUST match it.
+- `device.json` lists those files in an `accounts` array, never in the top-level `files` dictionary. Each entry carries `deviceId`, `displayName`, `kind` (`"account"`), `sources`, `collectedAtUTC`, and its own `files` hash dictionary. The split keeps the top-level record-kind whitelist unchanged, so a reader that predates account publications ignores them instead of rejecting the whole device.
+- `collectedAtUTC` is the latest successful collection time of that account's published sources, from the publishing Mac's local source health. A Mac with no successful account collection publishes nothing for that account; stale account files on disk stay unreferenced and never contribute.
+- Account rows retain the daily and hourly row shapes, with `deviceID` set to the account device ID and `day`/`hourStart` labelled in UTC by the collector. Identical bytes are not rewritten, and withdrawing an account publication follows the ordinary rules: the manifest drops the files, previously written files remain on disk and are ignored.
+- A publication is usable only if every listed file is readable, hash-valid, and internally valid: `kind` is `"account"`, each declared source is account-scoped, every row's `deviceID` equals the publication's `deviceId`, every row's `sourceID` is one of its declared sources, daily rows match their month file, and hourly `(sourceID, hourStart)` pairs are unique. Any unreadable, undownloaded, mismatched, or missing file makes that publication unusable — omitted entirely, never published as an empty or partial history — and never affects the Mac's own rows in the same folder.
 
 ## Ownership and identity
 
@@ -38,7 +49,7 @@ Token Taken/
 ## Write protocol
 
 - After a collection pass with at least one successfully persisted source, capture immutable daily/hourly data off the main actor before admitting another refresh. Debounce publication by one second, not once per parsed event. A dedicated worker actor serializes app reads and writes off the main actor.
-- Publish only rows belonging to the local device ID; never write another device's folder. Read the previous identity first and refuse unreadable, unknown-version, or tombstoned identities rather than reviving them.
+- Publish only rows belonging to the local device ID, plus account rows of the account devices this Mac collected (see *Account publications*); never write another device's folder. Read the previous identity first and refuse unreadable, unknown-version, or tombstoned identities rather than reviving them.
 - Encode every current month and the rolling hourly snapshot. Compare exact bytes with the existing file and write only changed payloads, preserving unchanged monthly modification times.
 - Write a complete hidden temporary file in the destination folder, then atomically replace (or initially move into) the destination inside an `NSFileCoordinator` write accessor. Propagate both accessor errors and coordination errors. Remove this operation's temporary file on exit. Apple's [synchronous coordination API](https://developer.apple.com/documentation/foundation/nsfilecoordinator/coordinate(writingitemat:options:error:byaccessor:)) requires using the accessor's URL and handling the case where the accessor never runs.
 - Publish `device.json` last, with the new hashes and `lastWriteUTC`, only after every payload write succeeds. A failed publication leaves the previous manifest in place. A later attempt compares/repairs the payloads and republishes the manifest.
@@ -61,8 +72,11 @@ Token Taken/
 
 ## Merge and removal
 
-- Device-local sources remain attributed to their device and MUST NOT be cross-device deduplicated.
-- The current aggregates do not contain per-event identity and cannot support exact account-scoped cross-device deduplication. Do not approximate it with `(source, day, model)` or `(source, hour)` keys, or claim the result is exact. Cursor remains deferred until a privacy-preserving identity contract and collection path are separately accepted.
+- Device-local sources remain attributed to their device and MUST NOT be cross-device deduplicated. Summing two Macs' `claude` or `codex` rows is correct: each row came from that Mac's own logs.
+- Account-scoped sources are the exception, and the exception is about data ownership rather than a guessed identity. Deduplication is whole-publication: for each account device ID, at most one publication contributes, chosen by latest `collectedAtUTC`, then the local store, then the lowest publisher device ID. The unchosen publications' daily and hourly rows — including the local store's own rows for that account when a peer wins — are excluded entirely.
+- Whole-publication selection is required because an account history has exactly one authority. Rows in different publications describe the same CSV export at different collection times; mixing them picks rows from different exports and can double count or resurrect deleted rows. Selecting one publication keeps daily and hourly consistent with each other and with the export it came from.
+- This is not the forbidden approximation. A `(source, day, model)` or `(source, hour)` key is still not a valid way to collapse rows from different Macs' local sources, and MUST NOT be used to infer account identity from machine-local history. Account rows are already attributed to an account device by the collector; a publication is the same export re-published, not a guess about which Mac produced it.
+- `MergedUsageStore` therefore keeps three parts: local rows that are not account rows, one publication per account device ID as described above, and each remote Mac's rows filtered to its own `deviceID`. Its `devices` list holds local devices, remote Mac devices, and each account device exactly once.
 - No prompts, responses, conversation content, or raw events may be added to recover account-scoped identity.
 - A device whose readable identity has `tombstone: true` is excluded even if its old payload files remain or reappear. The writer refuses that identity. v1 has no removal, adoption, or re-enablement UI; rolling back the identity file itself cannot be detected by this stateless transport.
 - Schema versioning uses the `v1/` folder. Once v1 ships, a breaking layout change requires a new version folder; readers MUST NOT interpret an unknown version as v1.
@@ -81,12 +95,12 @@ Token Taken/
 - `SyncBackend(root:)` exposes `list(_:)`, `read(_:)`, and `write(_:to:)` over an explicit root URL. Paths cannot escape the root, including through symlinks. Tests use temporary directories only. Future S3 and WebDAV implementations must preserve statistics semantics.
 - `ICloudSync.defaultRoot` resolves the user-visible `Token Taken` folder only when the parent iCloud Drive folder already exists; it returns `nil` otherwise and never creates the parent Drive folder.
 - `ICloudSync.write(local:device:root:appVersion:health:now:)` publishes local snapshots. `readRemote(root:excludingDeviceID:)` returns device metadata, daily/hourly rows, and status; an overload accepts `now` for deterministic freshness tests.
-- `MergedUsageStore(local:remote:)` implements `UsageStore`, adds local and remote daily/hourly rows without cross-device deduplication, and exposes remote display names through `devices`. Duplicate remote IDs and IDs already present in the local device catalog are ignored. It never stores remote rows in the local collection database.
+- `MergedUsageStore(local:remote:)` implements `UsageStore`, adds local and remote Mac rows without cross-device deduplication, resolves account rows to one publication per account device ID, and exposes remote display names through `devices`. Duplicate remote IDs and IDs already present in the local device catalog are ignored. It never stores remote rows in the local collection database.
 - The persisted app `syncEnabled` preference defaults to false. Enabling reads remotes immediately; refresh reads remotes before collection and after publication. Disabling uses the plain local store. Settings lists other Macs, relative last-write times, stale/unavailable indicators, and missing iCloud Drive. Partial devices use the unavailable label for their incomplete coverage. `AppModel.remoteDevices` exposes statuses; remote problems also contribute to `dataIssues`.
 
 ## Open questions
 
-- Privacy-preserving account-scoped identity, still unsupported by the current export.
+- Durable remote offline caching of account publications, and account-scoped identity for sources whose export exposes no stable account ID.
 - A durable remote offline cache, download-completion notifications, configurable staleness, and identity rollback protection are deferred. Current reads never wait for placeholder downloads; freshness is fixed at 24 hours.
 - Real multi-Mac validation of coordination, eviction/download behavior, interrupted publication recovery, and opt-out during an in-flight write remains required.
 - Explicit adoption of an old device folder after reinstall.

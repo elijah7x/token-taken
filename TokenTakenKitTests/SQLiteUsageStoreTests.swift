@@ -114,7 +114,7 @@ final class SQLiteUsageStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
         defer { sqlite3_finalize(version) }
         XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
-        XCTAssertEqual(sqlite3_column_int(version, 0), 4)
+        XCTAssertEqual(sqlite3_column_int(version, 0), 5)
     }
 
     func testFailedAndUnavailableCollectorsPreserveBothCaches() async throws {

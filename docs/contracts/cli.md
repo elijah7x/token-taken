@@ -33,7 +33,7 @@ Every command accepts the same range and filter options. `--format` and `--outpu
 | `--tz <IANA id>` | Viewer time zone. Default: the system zone. An invalid identifier is a usage error. |
 | `--source <id>` | Repeatable source filter. |
 | `--model <id>` | Repeatable filter on the normalized `modelID`. |
-| `--device <id>` | Repeatable device filter. |
+| `--device <id>` | Repeatable device filter. Account device ids (`account-cursor-…`) are valid values. |
 | `--json` | JSON output. For `export`, equal to `--format json`. |
 | `--synthetic` | Read the bundled fixture instead of the store. |
 | `--local-only` | Do not read synced-device folders. |
@@ -77,10 +77,11 @@ Lists normalized model IDs seen in the filtered daily records within the active 
 
 Lists devices that have usage in range, local devices known to the store, and readable synced devices.
 
-- `local` is true when the device is served from the local store; false for synced snapshots.
+- `kind` is `mac` or `account`. An `account` device stands for one account (today only Cursor) whose usage belongs to the account rather than to the Mac that collected it.
+- `local` is true when the device is served from the local store; false for synced snapshots and always false for `account` devices, which are not this Mac.
 - `state` and `lastWrite` describe sync freshness and are `null` for local devices.
-- Totals follow the active filters and range.
-- Empty selection prints `No devices recorded`.
+- Totals follow the active filters and range. Account rows are counted once per account, not once per publishing Mac.
+- Empty selection prints `No devices recorded`. Table output uses the columns `device`, `name`, `kind`, `origin` (`local` or `synced`), `state`, `last write`, and `total`.
 
 ### `export`
 
@@ -95,7 +96,7 @@ Writes one row per daily record after filtering, with no further grouping.
 
 - Unless `--local-only` is set, the CLI reads `<iCloud root>/v1/devices` when it exists and merges readable device snapshots through `MergedUsageStore`. A missing root, missing `v1/devices`, or unreadable placeholder is not an error.
 - The local device folder is excluded from the remote set so this Mac is never counted twice.
-- Synced totals are attributed to their collecting device. The current aggregates cannot deduplicate the same account across devices; the CLI MUST NOT claim account-scoped accuracy.
+- Synced totals are attributed to their collecting device. Account-level sources (Cursor) are folded to one whole publication per account before totals form, so the CLI reports an account once while device-local sources keep per-device attribution ([ADR-0010](../decisions/0010-cursor-account-usage.md)).
 
 ## JSON envelope
 
@@ -135,7 +136,7 @@ All JSON output, including `export --format json`, uses one envelope:
                "uncategorized": 0, "total": 0 }] }
 
 // devices
-{ "devices": [{ "id": "…", "name": "MacBook Pro", "local": true, "lastWrite": null,
+{ "devices": [{ "id": "…", "name": "MacBook Pro", "kind": "mac", "local": true, "lastWrite": null,
                 "state": null, "total": 0 }] }
 
 // export

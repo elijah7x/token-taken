@@ -758,10 +758,14 @@ private struct SourceLedgerEntry: Identifiable {
 
 private struct SourcesSettingsTab: View {
     @Environment(AppModel.self) private var model
+    @Environment(AppSettings.self) private var settings
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsNotInstalled = false
     @State private var localMonthBySource: [String: Int64] = [:]
+
+    /// Account-scoped sources have no local log folder, so they never enter the installed/not-installed ledger.
+    private static let accountSourceIDs = SourceCatalog.accountSourceIDs
 
     private static let dataLocations = [
         "claude": [".claude"],
@@ -780,9 +784,11 @@ private struct SourcesSettingsTab: View {
         "fx": [".fx"],
         "mcode": [".minimax/v2/sessions"],
         "deepseek-cli": [".deepseek/sessions"],
+        "cursor": ["Library/Application Support/Cursor/User/globalStorage/state.vscdb"],
     ]
 
     var body: some View {
+        @Bindable var settings = settings
         TimelineView(.everyMinute) { context in
             let ledger = makeLedger(now: context.date)
             VStack(alignment: .leading, spacing: 36) {
@@ -813,6 +819,17 @@ private struct SourcesSettingsTab: View {
 
                 if !ledger.notInstalled.isEmpty {
                     notInstalledGroup(ledger.notInstalled)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    SettingsGroupCaption(
+                        title: "Account sources",
+                        description: "Usage that belongs to an account rather than to this Mac."
+                    )
+
+                    SettingsRowsGroup {
+                        cursorAccountRow(isOn: $settings.cursorAccountCollection, now: context.date)
+                    }
                 }
 
                 Text("Sources are identified automatically from local logs; no manual setup is needed.")
@@ -859,6 +876,7 @@ private struct SourcesSettingsTab: View {
         var notInstalled: [SourceInfo] = []
 
         for (index, source) in SourceCatalog.all.enumerated() {
+            if Self.accountSourceIDs.contains(source.id) { continue }
             if let health = healthByID[source.id] {
                 let currentHealth = health.markingStale(now: now)
                 if currentHealth.state == .notInstalled {
@@ -935,6 +953,60 @@ private struct SourcesSettingsTab: View {
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
         .help(entry.health.errorMessage ?? "")
+    }
+
+    /// Cursor has no local log folder to detect: it reads Cursor's own sign-in and the account's export.
+    private func cursorAccountRow(isOn: Binding<Bool>, now: Date) -> some View {
+        let source = SourceCatalog.info(for: "cursor")
+        let health = refreshCoordinator?.health.first(where: { $0.sourceID == source.id })?.markingStale(now: now)
+        return HStack(spacing: 12) {
+            HStack(spacing: 9) {
+                SourceMonogramBadge(sourceID: source.id, name: source.name)
+                Text(verbatim: source.name)
+                    .font(.system(size: 13, weight: .regular))
+                    .foregroundStyle(Palette.ink1)
+                    .lineLimit(1)
+            }
+            .frame(width: 176, alignment: .leading)
+
+            Text("Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(spacing: 8) {
+                HStack(spacing: 8) {
+                    if isOn.wrappedValue {
+                        if let health {
+                            SourceHealthLabel(state: health.state)
+                            Text(verbatim: health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.ink3)
+                                .monospacedDigit()
+                        } else {
+                            Text("Not collected yet")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.ink3)
+                        }
+                    } else {
+                        Text("Off")
+                            .font(.system(size: 11.5, weight: .medium))
+                            .foregroundStyle(Palette.ink3)
+                    }
+                }
+                .lineLimit(1)
+                .frame(width: 192, alignment: .trailing)
+
+                Toggle("Cursor account usage", isOn: isOn)
+                    .labelsHidden()
+                    .toggleStyle(GlassToggleStyle())
+                    .accessibilityLabel(Text("Cursor account usage"))
+            }
+        }
+        .frame(minHeight: 48)
+        .help(health?.errorMessage ?? "")
     }
 
     private func notInstalledGroup(_ sources: [SourceInfo]) -> some View {
@@ -1179,11 +1251,18 @@ private struct SyncSettingsTab: View {
     }
 
     private func remoteRow(_ device: RemoteDeviceStatus) -> some View {
-        HStack(spacing: 16) {
+        let isAccount = model.deviceKind(for: device.deviceID) == .account
+        return HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
-                (device.displayName == device.deviceID ? Text("Unknown Mac") : Text(verbatim: device.displayName))
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(Palette.ink1)
+                HStack(spacing: 6) {
+                    (device.displayName == device.deviceID ? Text("Unknown Mac") : Text(verbatim: device.displayName))
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Palette.ink1)
+                    // An account published from this Mac is one account counted once, not another Mac.
+                    if isAccount {
+                        AccountBadge()
+                    }
+                }
                 if let lastWrite = device.lastWrite {
                     Text("Last synced \(Self.relativeFormatter.localizedString(for: lastWrite, relativeTo: .now))")
                         .font(.system(size: 11.5))
@@ -1206,6 +1285,21 @@ private struct SyncSettingsTab: View {
         formatter.unitsStyle = .full
         return formatter
     }()
+}
+
+private struct AccountBadge: View {
+    var body: some View {
+        Text("Account")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Palette.ink2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background {
+                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
+                    .fill(Palette.ink1.opacity(0.06))
+            }
+            .fixedSize()
+    }
 }
 
 private struct RemoteStatusLabel: View {

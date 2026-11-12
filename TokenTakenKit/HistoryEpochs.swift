@@ -9,11 +9,12 @@ import Foundation
 /// forever. tokscale-collected sources also carry the pinned engine version, so an engine upgrade rebaselines
 /// their recent days.
 public enum HistoryEpochs {
-    /// Every source starts at revision 1; only an intentional correction changes this table.
-    /// Devin moves to 2 because its turns are now dated by the request stamp rather than the row write
-    /// time, which shifts usage between local days (ADR-0009). Antigravity moves to 2 because it no longer
-    /// counts the fixed per-model preamble as input, which lowers already-counted tokens (ADR-0009).
-    private static let revisions: [String: Int] = ["devin": 2, "antigravity": 2]
+    /// Every source starts at revision 1; only an intentional correction changes this table. Devin moves to 2
+    /// because its turns are now dated by the request stamp rather than the row write time, which shifts usage
+    /// between local days (ADR-0009). Antigravity moves to 2 because it no longer counts the fixed per-model
+    /// preamble as input, which lowers already-counted tokens (ADR-0009). Cursor is listed at its first revision
+    /// so the account-scoped collector's epoch is visible here rather than implied.
+    private static let revisions: [String: Int] = ["devin": 2, "antigravity": 2, "cursor": 1]
 
     public static func epoch(for sourceID: String) -> String {
         let revision = revisions[sourceID] ?? 1

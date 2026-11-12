@@ -13,6 +13,12 @@ public struct CollectionBatch: Sendable {
     /// Persists collector state. The runner calls these only after every source of the batch was stored successfully,
     /// so a failed collection or write leaves the previous state in place and the next refresh collects again.
     public var stateCommits: [@Sendable () throws -> Void]
+    /// Set by an account-scoped collector: its rows are stored under this synthetic account device instead of the
+    /// collecting Mac (ADR-0010).
+    public var accountDevice: Device?
+    /// Sources whose batch is a complete authoritative snapshot of their history, so days it reports are adopted
+    /// exactly, including smaller corrections, from its earliest day on.
+    public var authoritativeSourceIDs: Set<String>
 
     public init(
         daily: [UsageRecord] = [],
@@ -21,7 +27,9 @@ public struct CollectionBatch: Sendable {
         unavailableSourceIDs: Set<String> = [],
         failedSourceIDs: [String: String] = [:],
         unchangedSourceIDs: Set<String> = [],
-        stateCommits: [@Sendable () throws -> Void] = []
+        stateCommits: [@Sendable () throws -> Void] = [],
+        accountDevice: Device? = nil,
+        authoritativeSourceIDs: Set<String> = []
     ) {
         self.daily = daily
         self.hourly = hourly
@@ -30,6 +38,8 @@ public struct CollectionBatch: Sendable {
         self.failedSourceIDs = failedSourceIDs
         self.unchangedSourceIDs = unchangedSourceIDs
         self.stateCommits = stateCommits
+        self.accountDevice = accountDevice
+        self.authoritativeSourceIDs = authoritativeSourceIDs
     }
 }
 

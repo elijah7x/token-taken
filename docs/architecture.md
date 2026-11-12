@@ -40,9 +40,9 @@ TokenTakenCLI ────────┘
 
 - Runs the pinned usage engine and adapts its output into Token Taken's canonical model.
 - Returns `CollectionBatch` with complete-history local-day/model records, rolling 48-hour per-source records, and skipped-record counts. Daily records preserve collection-zone and raw-model identifiers; hourly instants are absolute and carry reasoning knowledge.
-- tokscale handles Claude Code, Codex, Grok, Kimi Code, OpenCode, Gemini CLI, and Factory Droid. Native Swift collectors handle Zcode, pi, and oh-my-pi; pi/oh-my-pi are not also counted by tokscale.
+- tokscale handles Claude Code, Codex, Grok, Kimi Code, OpenCode, Gemini CLI, and Factory Droid. Native Swift collectors handle Zcode, pi, and oh-my-pi; pi/oh-my-pi are not also counted by tokscale. The opt-in Cursor collector is native, account-level, and never requested from the engine.
 - Explicitly sets the process `TZ` to the collecting device's current IANA zone, runs offline with an isolated config directory, and uses a 300-second timeout. Graph supplies daily/model totals; concurrent per-client hourly exports have merged models and omit reasoning.
-- Retains device attribution. Account-scoped collection and exact cross-device event deduplication remain deferred.
+- Retains device attribution and device kinds (`mac`, `account`). Account-level usage is collected only for Cursor, only when the user opts in, and only by its native collector; its publications from several Macs collapse to one whole publication per account. Device-local sources are never cross-device deduplicated.
 - Reads agent logs read-only. Raw prompts, responses, paths, project names, and credentials do not enter sync output.
 - Contains no upstream parser forks beyond separately reviewed patches. Engine upgrades pin a new version and rerun contract and reconciliation checks.
 
@@ -51,9 +51,9 @@ The engine interface is selected by [ADR-0003](decisions/0003-usage-engine.md), 
 ### Store
 
 - Owns the local database under `~/Library/Application Support/Token Taken/`.
-- SQLite schema version 2 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
+- SQLite schema version 5 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices (with their `mac` or `account` kind), history epochs, and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
 - Rebuilds usage-cache tables when migrating an older version, retaining devices and health metadata and marking health stale. Rejects newer unknown schemas. The CLI opens read-only and asks the app to migrate an old cache.
-- Replaces both usage tables for one source/device in a single transaction. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()` and `hourly()` throw on failed reads.
+- Merges one source/device's daily history and replaces its 48-hour hourly snapshot in a single transaction. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()` and `hourly()` throw on failed reads.
 - Preserves cached rows and last success on failed/unavailable collection. Source health tracks skipped records and `ok`, `unavailable`, `failed`, `stale`, and `notInstalled` states; health read/write errors remain visible through throwing reads and runner results.
 
 See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merge rules follow `docs/contracts/sync.md`.
@@ -75,7 +75,7 @@ See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merg
 - Writes only `Token Taken/v1/devices/<deviceId>/`, containing `device.json`, atomically rewritten monthly daily-history `usage-YYYY-MM.json` snapshots, and a rolling per-source `hourly.json`. Each folder has one writer.
 - Reads and merges every device folder. A removed device leaves a tombstone and does not resurrect unless the user re-enables it.
 - Preserves daily local-date labels and collection zones per model; preserves absolute hourly instants per source without model attribution. Both kinds include event counts and uncategorized tokens; hourly rows preserve reasoning knowledge and explicit zero coverage. Hourly activity is never added to daily totals.
-- Never cross-deduplicates device-local sources. Aggregate-only export cannot support exact account-scoped deduplication; Cursor and that capability remain deferred.
+- Never cross-deduplicates device-local sources. Account-level sources (today only Cursor) are folded to one whole publication per account before totals form, so a signed-in Mac never counts the account a second time; see [ADR-0010](decisions/0010-cursor-account-usage.md).
 - Never syncs prompts, responses, file paths, project or repository names, credentials, or cost.
 - Defines a backend interface so local folder, S3, and WebDAV implementations can reuse the layout later. V1 ships iCloud Drive only.
 - For testing and diagnostics, `TOKEN_TAKEN_SYNC_ROOT` points the app and CLI at an existing test sync folder, like `TOKEN_TAKEN_SUPPORT_DIR` overrides local support storage.
@@ -105,12 +105,12 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 ## Data flow
 
 1. Collectors return daily and hourly batches with device attribution. Missing locations throw `sourceUnavailable`, never a successful empty snapshot.
-2. The runner replaces each successful source/device's two tables transactionally and records source health. Complete reads establish 48 hours of explicit hourly coverage; partial reads do not invent missing zero rows. Failures preserve cached data.
-3. Opt-in sync (off by default) writes daily history and a separate rolling hourly snapshot to this Mac's folder and reads other device folders, preserving single-writer ownership and tombstones. Exact account-scoped deduplication is not supported by these aggregates.
+2. The runner merges each successful source/device's daily history and replaces its 48-hour hourly snapshot transactionally, then records source health. Complete reads establish 48 hours of explicit hourly coverage; partial reads do not invent missing zero rows. Failures preserve cached data.
+3. Opt-in sync (off by default) writes daily history and a separate rolling hourly snapshot to this Mac's folder and reads other device folders, preserving single-writer ownership and tombstones. An account-level source's rows are published inside that folder and collapse to one whole publication per account when read; device-local sources keep per-device attribution.
 4. `TokenTakenKit` applies viewer-calendar period boundaries to original daily date labels for totals and breakdowns, without shifting them. The Day chart instead reads actual hourly rows in viewer-local hours, including DST and coverage gaps; it can differ from the daily total because hourly reasoning is unavailable or zones/coverage differ. Pricing adds versioned estimates at read time.
 5. The main window, menu bar extra, and CLI query that shared pipeline. They do not implement separate aggregation rules.
 
-Exact account-scoped deduplication remains unsupported without privacy-preserving event identity. ADR-0005 and the statistics/sync contracts record that limitation rather than assuming aggregates can recover it.
+Approximating an account-level source from device-local aggregates remains unsupported: account identity comes from the source itself (Cursor's own account device), not from `(source, day, model)` keys. ADR-0005 and the statistics/sync contracts record where that boundary sits.
 
 ## Refresh policy
 
@@ -124,6 +124,6 @@ Exact account-scoped deduplication remains unsupported without privacy-preservin
 
 | Question | Required decision point |
 | --- | --- |
-| Can a future privacy-preserving identity export enable exact account-scoped deduplication? | ADR-0005 and `docs/contracts/sync.md`; unsupported today |
+| Can a future privacy-preserving identity export enable exact account-scoped deduplication of device-local sources? | ADR-0005 and `docs/contracts/sync.md`; account-level sources already collapse per account ([ADR-0010](decisions/0010-cursor-account-usage.md)) |
 
 Engine selection, collection granularity, and incremental refresh are resolved by [ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md), and [ADR-0006](decisions/0006-incremental-collection.md); sync publication and bundled pricing follow `docs/contracts/sync.md` and `docs/contracts/statistics.md`; Developer ID signing, notarization, and release mechanics are resolved by [ADR-0004](decisions/0004-distribution.md).

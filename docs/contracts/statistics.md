@@ -22,7 +22,7 @@ Status: Implemented v1 (2026-11-11)
 - A source is available when the root of any of its clients exists. Change detection reads file metadata (path, size, modification time) only, including a single SQLite database with its `-wal`/`-shm` siblings. The native Devin collector opens that database read-only and streams its rows, because it can exceed 1 GB.
 - Native collectors deduplicate before forming aggregates using stable native IDs or documented deterministic fingerprints. Ingestion time and read order MUST NOT become event identity.
 - tokscale performs its own source-specific deduplication before export; its graph and hourly output do not expose per-event dedup keys. Aggregate natural keys identify snapshot rows, not individual calls.
-- Device-local sources are attributed to their collecting device and MUST NOT be cross-device deduplicated. Exact account-scoped cross-device deduplication is not supported by these aggregates. Cursor remains deferred and opt-in; do not claim account-scoped accuracy.
+- Device-local sources are attributed to their collecting device and MUST NOT be cross-device deduplicated. Account-level sources are the opposite case: an account has one true value, so its publications from several Macs MUST collapse to exactly one whole publication before totals are formed, and the survivor is chosen as a unit, never by merging rows column by column ([ADR-0010](../decisions/0010-cursor-account-usage.md)). Approximating an account from a device-local source's `(source, day, model)` rows remains unsupported.
 
 | Source | Collector | Reasoning and identity rules |
 | --- | --- | --- |
@@ -43,14 +43,14 @@ Status: Implemented v1 (2026-11-11)
 | pi | native Swift | Entry-ID deduplication, not response-ID-only deduplication; includes operation usage |
 | oh-my-pi | native Swift | Entry-ID deduplication; reasoning tokens split from inclusive output |
 | Qoder | not token-counted | Credits only; tokens unavailable |
-| Cursor | deferred | Account credentials, network access, and exact account-scoped dedup require separate approval and validation |
+| Cursor | native Swift, opt-in (`cursorAccountCollection`), account device | Cursor's own sign-in in `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` and the account id in `~/.cursor/cli-config.json`, both read-only and in memory only; one whole-history CSV from `cursor.com` per collection. Columns are located by header name, and `input` is `Input (w/o Cache Write)`, `cacheWrite` the non-negative difference of the two input columns, `cacheRead`, and `output`; `reasoning` is 0. The CSV's `Total Tokens` and `Cost` columns are never used. No session-level identity, so usage is dated on the collecting Mac's local day and attributed to `account-cursor-<hash32>`, with the account identifier hashed and never published |
 | Amp, Warp, Trae, Antigravity desktop cache | not collected | Their tokscale clients read data synced from an online account; out of scope for device-local collection |
 
 These rules describe the collection design, not acceptance of every source as reconciled. Source coverage and intentional deviations remain governed by [ADR-0003](../decisions/0003-usage-engine.md).
 
 ## Time, models, and series
 
-- `day` is a `YYYY-MM-DD` label in the collecting device's zone, not a UTC timestamp. Every daily record MUST retain its IANA `timeZoneID`. Explicitly pass that identifier as `TZ` to tokscale subprocesses.
+- `day` is a `YYYY-MM-DD` label in the collecting device's zone, not a UTC timestamp. Every daily record MUST retain its IANA `timeZoneID`. Explicitly pass that identifier as `TZ` to tokscale subprocesses. Account-level rows follow the same rule: the publishing Mac's local day, so Macs in different zones can label the same instant differently ([ADR-0010](../decisions/0010-cursor-account-usage.md)).
 - `UsageDay.string(from:in:)` labels native timestamped events in the collecting zone. `UsageRecord.dayInterval` resolves start and exclusive end in that zone, including DST.
 - Day, week, month, year, and all-time boundaries use the viewer's calendar and time zone. Week runs from Monday `00:00` through the end of today regardless of locale `firstWeekday`. Place daily rows on their original calendar-date labels without shifting dates. This is exact only when collection and viewer zones match: each Mac's daily records use that Mac's local calendar day, so a merged day can mix zones. This limitation is documented in `README.md` and `README.zh-CN.md`, and CLI JSON output MUST report the viewer `timeZone`.
 - v1 has day, week (Monday start, 7 daily buckets Monday–Sunday with future days marked), month, year, and all-time views.
@@ -99,6 +99,8 @@ These rules describe the collection design, not acceptance of every source as re
 
 Daily history is a floor, not a snapshot ([ADR-0008](../decisions/0008-retained-history.md)). Agents prune, rotate and rewrite their own logs, so a later collection can report less than an earlier one. Counted usage MUST NOT be lost when that happens, and nothing may be counted twice.
 
+An account-level source's whole-history export is authoritative, not prunable, so it is the one recorded exception to that floor: with `E` the earliest day of a complete export, days from `E` onwards adopt the export exactly, including a smaller value, and earlier days keep their stored values ([ADR-0010](../decisions/0010-cursor-account-usage.md)). An empty, incomplete, or unparsable export writes nothing and keeps the stored history.
+
 - A day total is `input + cacheRead + cacheWrite + output + reasoning + uncategorized` summed over every model row of that `(deviceID, sourceID, day)`.
 - A day present in both the batch and the store is replaced only when the batch total is not smaller. A smaller day keeps its stored rows whole, including every model row and `eventCount`. A stored day the batch no longer reports is kept, and a day only the batch reports is inserted. Stored and batch rows are never mixed within one day, so a renamed model cannot leave a stale row behind and no day is counted twice.
 - A rebaseline replaces that rule when the source's history epoch changed or the batch's collection time zone differs from a stored row's `timeZoneID` for that device/source. With `E` the earliest day in the batch, days after `E` adopt the batch exactly, including deleting stored days it no longer reports; days up to and including `E` keep the floor rule. The new epoch is stored on success.
@@ -109,4 +111,4 @@ Daily history is a floor, not a snapshot ([ADR-0008](../decisions/0008-retained-
 ## Open questions
 
 - Recovering genuinely total-only legacy Codex data: the pinned engine does not expose it as uncategorized usage; see ADR-0005's source inspection. No recovery counts are assumed.
-- Exact privacy-preserving account-scoped cross-device deduplication remains unsupported.
+- Exact privacy-preserving account-scoped cross-device deduplication of device-local sources remains unsupported. Account-level sources collapse to one whole publication per account instead ([ADR-0010](../decisions/0010-cursor-account-usage.md)).

@@ -125,10 +125,12 @@ public enum ICloudSync {
                 throw SyncError.unavailable
             }
         }
-        let daily = try local.records().filter { $0.deviceID == device.id }
+        let allDaily = try local.records()
+        let allHourly = try local.hourly()
+        let daily = allDaily.filter { $0.deviceID == device.id }
         guard daily.allSatisfy({ $0.dayInterval != nil }) else { throw SyncError.invalidSnapshot }
         let window = hourlyWindow(now: now)
-        let hourly = try local.hourly().filter {
+        let hourly = allHourly.filter {
             $0.deviceID == device.id && window.contains($0.hourStart)
         }
         var payloads: [String: Data] = [:]
@@ -136,6 +138,57 @@ public enum ICloudSync {
             payloads["usage-\(month).json"] = try SyncSnapshot.encode(DailySyncSnapshot(records: records))
         }
         payloads["hourly.json"] = try SyncSnapshot.encode(HourlySyncSnapshot(records: hourly))
+        let files = try publish(payloads, folder: folder, backend: backend)
+        let accounts = try accountPublications(
+            devices: local.devices, daily: allDaily, hourly: allHourly, window: window,
+            health: health, folder: folder, backend: backend
+        )
+        let metadata = DeviceSyncSnapshot(device: device, appVersion: appVersion, lastWriteUTC: now,
+            files: files, sources: health.map(SyncSourceHealth.init), accounts: accounts)
+        try backend.write(SyncSnapshot.encode(metadata), to: metadataPath)
+    }
+
+    /// Publishes account rows this Mac collected, inside its own folder: the device folder keeps exactly
+    /// one writer, and readers pick one publication per account device ID.
+    private static func accountPublications(
+        devices: [Device], daily: [UsageRecord], hourly: [HourlyUsage], window: ClosedRange<Date>,
+        health: [SourceHealth], folder: String, backend: SyncBackend
+    ) throws -> [AccountPublication] {
+        var accounts: [AccountPublication] = []
+        for account in devices where account.kind == .account {
+            guard let shortID = AccountDeviceID.shortID(account.id) else { continue }
+            let rows = daily.filter {
+                $0.deviceID == account.id && SourceCatalog.accountSourceIDs.contains($0.sourceID)
+            }
+            let hours = hourly.filter {
+                $0.deviceID == account.id && SourceCatalog.accountSourceIDs.contains($0.sourceID)
+                    && window.contains($0.hourStart)
+            }
+            guard !rows.isEmpty || !hours.isEmpty else { continue }
+            guard rows.allSatisfy({ $0.dayInterval != nil }) else { throw SyncError.invalidSnapshot }
+            let sources = Set(rows.map(\.sourceID)).union(hours.map(\.sourceID)).sorted()
+            // The newest success dates the whole publication. Without one, publish nothing rather than
+            // an empty history that could displace a peer's usable publication.
+            guard let collectedAt = sources
+                .compactMap({ id in health.first { $0.sourceID == id }?.lastSuccess })
+                .max()
+            else { continue }
+            var payloads: [String: Data] = [:]
+            for (month, records) in Dictionary(grouping: rows, by: { String($0.day.prefix(7)) }) {
+                payloads["account-\(shortID)-usage-\(month).json"] = try SyncSnapshot.encode(
+                    DailySyncSnapshot(records: records)
+                )
+            }
+            payloads["account-\(shortID)-hourly.json"] = try SyncSnapshot.encode(HourlySyncSnapshot(records: hours))
+            accounts.append(AccountPublication(
+                deviceId: account.id, displayName: account.name, sources: sources, collectedAtUTC: collectedAt,
+                files: try publish(payloads, folder: folder, backend: backend)
+            ))
+        }
+        return accounts
+    }
+
+    private static func publish(_ payloads: [String: Data], folder: String, backend: SyncBackend) throws -> [String: String] {
         var files: [String: String] = [:]
         for name in payloads.keys.sorted() {
             let data = payloads[name]!
@@ -143,9 +196,7 @@ public enum ICloudSync {
             let path = folder + "/" + name
             if (try? backend.read(path)) != data { try backend.write(data, to: path) }
         }
-        let metadata = DeviceSyncSnapshot(device: device, appVersion: appVersion, lastWriteUTC: now,
-            files: files, sources: health.map(SyncSourceHealth.init))
-        try backend.write(SyncSnapshot.encode(metadata), to: metadataPath)
+        return files
     }
 
     public static func readRemote(
@@ -232,8 +283,70 @@ public enum ICloudSync {
             else if !dailyAvailable || !hourlyAvailable || sourcePartial { state = .partial }
             else { state = .ok }
             return RemoteDeviceSnapshot(device: device, daily: daily, hourly: hourly,
-                status: RemoteDeviceStatus(deviceID: id, displayName: device.name, lastWrite: metadata.lastWriteUTC, state: state))
+                status: RemoteDeviceStatus(deviceID: id, displayName: device.name, lastWrite: metadata.lastWriteUTC, state: state),
+                accounts: accountPublications(metadata.accounts, publisherID: id, path: path, backend: backend,
+                    now: now, requestDownloads: requestDownloads))
         }
+    }
+
+    /// One unusable file drops the whole publication: account history is a single authority, so a
+    /// partial read is unavailable data, never a smaller history. Mac rows are unaffected.
+    private static func accountPublications(
+        _ published: [AccountPublication], publisherID: String, path: String, backend: SyncBackend,
+        now: Date, requestDownloads: Bool
+    ) -> [RemoteAccountPublication] {
+        let oldest = now.addingTimeInterval(-48 * 3_600)
+        return published.compactMap { publication -> RemoteAccountPublication? in
+            guard publication.kind == "account",
+                  let shortID = AccountDeviceID.shortID(publication.deviceId),
+                  !publication.files.isEmpty,
+                  !publication.sources.isEmpty,
+                  publication.sources.allSatisfy({ SourceCatalog.accountSourceIDs.contains($0) })
+            else { return nil }
+            let sources = Set(publication.sources)
+            var daily: [UsageRecord] = []
+            var hourly: [HourlyUsage] = []
+            for (name, hash) in publication.files.sorted(by: { $0.key < $1.key }) {
+                let month = accountMonth(name, shortID: shortID)
+                guard month != nil || name == "account-\(shortID)-hourly.json" else { return nil }
+                do {
+                    let data = try backend.read(path + "/" + name, requestDownloads: requestDownloads)
+                    guard try schemaVersion(data) == 1, digest(data) == hash else { return nil }
+                    if let month {
+                        let snapshot = try SyncSnapshot.decode(DailySyncSnapshot.self, from: data)
+                        guard snapshot.records.allSatisfy({
+                            $0.deviceID == publication.deviceId && sources.contains($0.sourceID)
+                                && $0.dayInterval != nil && $0.day.hasPrefix(month + "-")
+                        }),
+                              Set(snapshot.records.map { SyncSnapshot.dailyKey($0) }).count == snapshot.records.count
+                        else { return nil }
+                        daily.append(contentsOf: snapshot.records)
+                    } else {
+                        let snapshot = try SyncSnapshot.decode(HourlySyncSnapshot.self, from: data)
+                        guard snapshot.records.allSatisfy({
+                            $0.deviceID == publication.deviceId && sources.contains($0.sourceID)
+                        }),
+                              Set(snapshot.records.map { "\($0.sourceID)\u{0}\($0.hourStart.timeIntervalSince1970)" }).count
+                                == snapshot.records.count
+                        else { return nil }
+                        hourly = snapshot.records.filter { $0.hourStart > oldest && $0.hourStart <= now }
+                    }
+                } catch {
+                    return nil
+                }
+            }
+            return RemoteAccountPublication(
+                device: Device(id: publication.deviceId, name: publication.displayName, kind: .account),
+                publisherID: publisherID, collectedAt: publication.collectedAtUTC, daily: daily, hourly: hourly)
+        }
+    }
+
+    private static func accountMonth(_ name: String, shortID: String) -> String? {
+        let prefix = "account-\(shortID)-usage-"
+        guard name.hasPrefix(prefix), name.hasSuffix(".json") else { return nil }
+        let month = String(name.dropFirst(prefix.count).dropLast(".json".count))
+        guard month.range(of: #"^[0-9]{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil else { return nil }
+        return month
     }
 
     private static func unavailable(device: Device, lastWrite: Date? = nil) -> RemoteDeviceSnapshot {

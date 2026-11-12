@@ -593,7 +593,7 @@ final class SyncTests: XCTestCase {
         let deviceJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: deviceData) as? [String: Any])
         XCTAssertEqual(
             Set(deviceJSON.keys),
-            Set(["appVersion", "deviceId", "displayName", "files", "lastWriteUTC", "schemaVersion", "sources", "tombstone"])
+            Set(["accounts", "appVersion", "deviceId", "displayName", "files", "lastWriteUTC", "schemaVersion", "sources", "tombstone"])
         )
         let sourcesJSON = try XCTUnwrap(deviceJSON["sources"] as? [[String: Any]])
         XCTAssertEqual(Set(sourcesJSON[0].keys), Set(["lastSuccess", "skippedRecords", "sourceID", "state"]))

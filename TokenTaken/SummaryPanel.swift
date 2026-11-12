@@ -289,6 +289,7 @@ struct TrayDevices: View {
 
     private func deviceBlock(_ device: Breakdown, now: Date) -> some View {
         let isLocal = isLocalDevice(device)
+        let isAccount = deviceKind(device) == .account
         return Group {
             if ThemeRuntime.isCosmos {
                 VStack(alignment: .leading, spacing: 3) {
@@ -297,6 +298,9 @@ struct TrayDevices: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(CosmosPalette.ink)
                             .lineLimit(1)
+                        if isAccount {
+                            AccountBadge()
+                        }
                         if isLocal {
                             ThisMacBadge()
                         }
@@ -333,6 +337,9 @@ struct TrayDevices: View {
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(Palette.ink1)
                             .lineLimit(1)
+                        if isAccount {
+                            AccountBadge()
+                        }
                         if isLocal {
                             ThisMacBadge()
                         }
@@ -370,6 +377,8 @@ struct TrayDevices: View {
         isLocal: Bool,
         now: Date
     ) -> (text: Text, isWarning: Bool)? {
+        // An account device is neither this Mac nor another one; it has no local collection state.
+        if deviceKind(device) == .account { return nil }
         if isLocal {
             if model.storageError != nil || model.readError != nil {
                 return (Text("Storage unavailable"), true)
@@ -439,11 +448,21 @@ struct TrayDevices: View {
     private var hidesDeviceShare: Bool {
         guard model.dataIssues.devices > 0 else { return false }
         return !missingRemoteDevices.isEmpty
-            || summary.byDevice.count == 1
+            || macDeviceCount == 1
             || model.remoteDevices.contains { $0.state == .unavailable || $0.state == .partial }
     }
 
+    /// Account devices carry one account's usage, so they never make the Mac share look like a single Mac.
+    private var macDeviceCount: Int {
+        summary.byDevice.filter { deviceKind($0) == .mac }.count
+    }
+
+    private func deviceKind(_ device: Breakdown) -> DeviceKind {
+        summary.devices.first { $0.id == device.id }?.kind ?? .mac
+    }
+
     private func isLocalDevice(_ device: Breakdown) -> Bool {
+        if deviceKind(device) == .account { return false }
         if let storedID = LocalDevice.storedID(), summary.devices.contains(where: { $0.id == storedID }) {
             return device.id == storedID
         }
@@ -513,6 +532,25 @@ private struct ThisMacBadge: View {
         Text("This Mac")
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.accent : Palette.ink2)
+            .padding(.horizontal, ThemeRuntime.isCosmos ? 4 : 6)
+            .padding(.vertical, ThemeRuntime.isCosmos ? 0 : 2)
+            .background {
+                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+                    .fill(ThemeRuntime.isCosmos ? CosmosPalette.background : Palette.ink1.opacity(0.06))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+                    .strokeBorder(ThemeRuntime.isCosmos ? CosmosPalette.controlRule : .clear, lineWidth: 1)
+            }
+            .fixedSize()
+    }
+}
+
+private struct AccountBadge: View {
+    var body: some View {
+        Text("Account")
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.ink3 : Palette.ink2)
             .padding(.horizontal, ThemeRuntime.isCosmos ? 4 : 6)
             .padding(.vertical, ThemeRuntime.isCosmos ? 0 : 2)
             .background {

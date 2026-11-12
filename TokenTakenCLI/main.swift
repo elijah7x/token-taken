@@ -273,6 +273,7 @@ struct DevicesData: Encodable {
 struct DeviceEntry: Encodable {
     let id: String
     let name: String
+    let kind: String
     let local: Bool
     let lastWrite: String?
     let state: String?
@@ -346,6 +347,14 @@ func deviceStateLabel(_ status: RemoteDeviceStatus) -> String {
     }
 }
 
+/// Spelled without naming the case enum so the output stays a documented string.
+func deviceKindLabel(_ kind: DeviceKind) -> String {
+    switch kind {
+    case .mac: "mac"
+    case .account: "account"
+    }
+}
+
 func deviceWarnings(_ remote: [RemoteDeviceSnapshot]) -> [Warning] {
     remote
         .map(\.status)
@@ -367,12 +376,14 @@ func deviceWarnings(_ remote: [RemoteDeviceSnapshot]) -> [Warning] {
 }
 
 /// The app writes this Mac's device id to the shared support folder; the CLI only reads it. Before the
-/// app's first launch there is no local snapshot to exclude, so the local store's own device wins.
+/// app's first launch there is no local snapshot to exclude, so the local store's own device wins. An
+/// account device is never this Mac, even when its rows were collected here.
 func localDeviceID(store: any UsageStore) -> String {
     if let id = LocalDevice.storedID() { return id }
+    let accountIDs = Set(store.devices.filter { $0.kind == .account }.map(\.id))
     let records = (try? store.records()) ?? []
     var counts: [String: Int] = [:]
-    for record in records { counts[record.deviceID, default: 0] += 1 }
+    for record in records where !accountIDs.contains(record.deviceID) { counts[record.deviceID, default: 0] += 1 }
     return counts.sorted(by: { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }).first?.key ?? ""
 }
 
@@ -681,14 +692,20 @@ func deviceEntries(store: any UsageStore, remote: [RemoteDeviceSnapshot], filter
     var statuses: [String: RemoteDeviceStatus] = [:]
     for snapshot in remote { statuses[snapshot.status.deviceID] = snapshot.status }
     var names: [String: String] = [:]
-    for device in store.devices { names[device.id] = device.name }
+    var kinds: [String: DeviceKind] = [:]
+    for device in store.devices {
+        names[device.id] = device.name
+        kinds[device.id] = device.kind
+    }
     for (id, status) in statuses { names[id] = names[id] ?? status.displayName }
 
     let ids = Set(names.keys).union(totals.keys).union(statuses.keys)
     return ids.map { id in
         let status = statuses[id]
+        let kind = kinds[id] ?? .mac
         return DeviceEntry(
-            id: id, name: names[id] ?? id, local: status == nil,
+            id: id, name: names[id] ?? id, kind: deviceKindLabel(kind),
+            local: status == nil && kind == .mac,
             lastWrite: status?.lastWrite.map(rfc3339),
             state: status.map { deviceStateLabel($0) },
             total: totals[id] ?? 0
@@ -727,9 +744,9 @@ func runDevices(_ arguments: [String]) -> Never {
         write("No devices recorded\n", to: nil)
     } else {
         let rows = entries.map {
-            [$0.id, $0.name, $0.local ? "local" : "synced", $0.state ?? "-", $0.lastWrite ?? "-", TokenFormat.short($0.total)]
+            [$0.id, $0.name, $0.kind, $0.local ? "local" : "synced", $0.state ?? "-", $0.lastWrite ?? "-", TokenFormat.short($0.total)]
         }
-        let lines = table(["device", "name", "kind", "state", "last write", "total"], rows)
+        let lines = table(["device", "name", "kind", "origin", "state", "last write", "total"], rows)
         write(lines.joined(separator: "\n") + "\n", to: nil)
     }
     warnToStderr(selection.warnings)

@@ -171,6 +171,15 @@ final class AppSettings {
         }
     }
 
+    /// Opt-in: Cursor usage only exists behind the account's own sign-in on cursor.com.
+    var cursorAccountCollection: Bool {
+        didSet {
+            guard cursorAccountCollection != oldValue else { return }
+            defaults.set(cursorAccountCollection, forKey: Keys.cursorAccountCollection)
+            onCursorAccountCollectionChange?()
+        }
+    }
+
     func relaunch() {
         CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -212,6 +221,7 @@ final class AppSettings {
     private var launchAtLoginStatus: SMAppService.Status
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored var onSyncEnabledChange: (() -> Void)?
+    @ObservationIgnored var onCursorAccountCollectionChange: (() -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -222,6 +232,7 @@ final class AppSettings {
             Keys.language: AppLanguage.system.rawValue,
             Keys.numberUnits: NumberUnits.automatic.rawValue,
             Keys.syncEnabled: false,
+            Keys.cursorAccountCollection: false,
         ])
 
         appearance = AppAppearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
@@ -234,6 +245,7 @@ final class AppSettings {
         numberUnits = NumberUnits(rawValue: defaults.string(forKey: Keys.numberUnits) ?? "") ?? .automatic
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
+        cursorAccountCollection = defaults.bool(forKey: Keys.cursorAccountCollection)
         launchAtLoginStatus = SMAppService.mainApp.status
         applyUnitStyle(bumpRevision: false)
         // NSApp is not up yet while the app's state is built; apply once launch finishes so a session
@@ -270,5 +282,6 @@ final class AppSettings {
         static let refreshIntervalMinutes = "refreshIntervalMinutes"
         static let tokscalePathOverride = "tokscalePathOverride"
         static let syncEnabled = "syncEnabled"
+        static let cursorAccountCollection = "cursorAccountCollection"
     }
 }

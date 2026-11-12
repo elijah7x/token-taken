@@ -405,6 +405,38 @@
         }
       }
     },
+    "Account" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账号"
+          }
+        }
+      }
+    },
+    "Account sources" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Account sources"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "账号来源"
+          }
+        }
+      }
+    },
     "Acknowledgements" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1013,6 +1045,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前周期"
+          }
+        }
+      }
+    },
+    "Cursor account usage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cursor account usage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cursor 账号用量"
           }
         }
       }
@@ -1856,6 +1904,22 @@
         }
       }
     },
+    "Not collected yet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not collected yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未采集"
+          }
+        }
+      }
+    },
     "Not installed" : {
       "localizations" : {
         "en" : {
@@ -1966,6 +2030,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "占今天"
+          }
+        }
+      }
+    },
+    "Off" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Off"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭"
           }
         }
       }
@@ -2320,6 +2400,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在只读解析这台 Mac 上受支持的 Agent 日志，完成后自动呈现汇流图。"
+          }
+        }
+      }
+    },
+    "Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取这台 Mac 上 Cursor 自己的登录态，并从 cursor.com 下载该账号的用量导出。凭证不会离开本机；每台登录同一账号的 Mac 都会发布同一账号，Token Taken 只计一次。"
           }
         }
       }
@@ -3546,6 +3642,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "统计周期"
+          }
+        }
+      }
+    },
+    "Usage that belongs to an account rather than to this Mac." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage that belongs to an account rather than to this Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "属于账号而非本机的用量。"
           }
         }
       }

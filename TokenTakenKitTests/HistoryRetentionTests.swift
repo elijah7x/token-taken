@@ -240,14 +240,14 @@ final class HistoryRetentionTests: XCTestCase {
         ])
         let store = try SQLiteUsageStore(url: databaseURL)
         XCTAssertEqual(totals(try store.records()), ["2026-10-12": 100, "2026-10-13": 40])
-        XCTAssertEqual(schemaVersion(), 4)
+        XCTAssertEqual(Int(schemaVersion()), SQLiteUsageStore.schemaVersion)
     }
 
     func testMigrationFromVersion3AddsTheOneHourSubsetColumn() throws {
         seedVersion3([(day: "2026-11-09", model: "claude-sonnet-4-5", input: 10, cacheWrite: 500)],
                      epoch: "1+tokscale-4.21.0")
         let store = try SQLiteUsageStore(url: databaseURL)
-        XCTAssertEqual(schemaVersion(), 4)
+        XCTAssertEqual(Int(schemaVersion()), SQLiteUsageStore.schemaVersion)
         let migrated = try XCTUnwrap(try store.records().first)
         // Migrated rows know nothing about 1-hour writes, so the whole cache write keeps the 5-minute rate.
         XCTAssertEqual(migrated.counts.cacheWrite, 500)

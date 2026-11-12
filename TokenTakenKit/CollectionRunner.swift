@@ -13,21 +13,14 @@ public actor CollectionRunner {
 
     public func runAll(now: Date = .now) async -> [SourceHealth] {
         let previous: [String: SourceHealth]
-        let cachedRecordCounts: [String: Int]
-        let cachedHourlySources: Set<String>
+        // Every device's rows, so an account-scoped source can read back the rows it stored under the account id.
         let cachedDaily: [UsageRecord]
         let cachedHourly: [HourlyUsage]
         do {
             try store.upsert(device: device)
             previous = Dictionary(try store.health().map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
-            cachedDaily = try store.records().filter { $0.deviceID == device.id }
-            cachedHourly = try store.hourly().filter { $0.deviceID == device.id }
-            var counts: [String: Int] = [:]
-            for record in cachedDaily {
-                counts[record.sourceID, default: 0] += 1
-            }
-            cachedRecordCounts = counts
-            cachedHourlySources = Set(cachedHourly.map(\.sourceID))
+            cachedDaily = try store.records()
+            cachedHourly = try store.hourly()
         } catch {
             let message = Self.sanitizeErrorMessage(Self.message(for: error))
             return collectors.flatMap(\.sourceIDs).map {
@@ -35,29 +28,52 @@ public actor CollectionRunner {
             }
         }
         let outcomes = await collectAll()
+        // An account-scoped collector reports the device its rows belong to: the account, not this Mac (ADR-0010).
+        var accountDevices: [String: Device] = [:]
+        var accountUpsertErrors: [String: String] = [:]
+        for (collector, outcome) in zip(collectors, outcomes) {
+            guard let accountDevice = outcome.batch?.accountDevice else { continue }
+            let message: String?
+            do {
+                try store.upsert(device: accountDevice)
+                message = nil
+            } catch {
+                message = Self.message(for: error)
+            }
+            for sourceID in collector.sourceIDs {
+                accountDevices[sourceID] = accountDevice
+                if let message { accountUpsertErrors[sourceID] = message }
+            }
+        }
         var results: [SourceHealth] = []
         for (collector, outcome) in zip(collectors, outcomes) {
             var allStored = outcome.batch != nil
             for sourceID in collector.sourceIDs {
                 let existing = previous[sourceID]
-                let cachedCount = cachedRecordCounts[sourceID, default: 0]
+                let targetDeviceID = accountDevices[sourceID]?.id ?? device.id
+                let cached = cachedDaily.filter { $0.deviceID == targetDeviceID && $0.sourceID == sourceID }
+                let cachedHourlyRows = cachedHourly.filter { $0.deviceID == targetDeviceID && $0.sourceID == sourceID }
+                let cachedCount = cached.count
                 // "Unavailable" protects cached data; a missing source with nothing cached is simply not installed,
                 // even if an older build recorded a successful empty collection for it.
-                let hasHistory = cachedCount > 0 || cachedHourlySources.contains(sourceID)
+                let hasHistory = cachedCount > 0 || !cachedHourlyRows.isEmpty
                 var health: SourceHealth
-                if let batch = outcome.batch {
+                if let message = accountUpsertErrors[sourceID] {
+                    health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
+                        now: now, message: message, state: .failed)
+                } else if let batch = outcome.batch {
                     if batch.unchangedSourceIDs.contains(sourceID) {
                         // Unchanged inputs: the cached rows are the full-scan result; re-store them so the hourly
                         // window and zero-coverage rows advance exactly as a fresh collection would.
                         let skipped = existing?.skippedRecords ?? 0
-                        let cached = CollectionBatch(
-                            daily: cachedDaily.filter { $0.sourceID == sourceID },
-                            hourly: cachedHourly.filter { $0.sourceID == sourceID },
+                        let cachedBatch = CollectionBatch(
+                            daily: cached,
+                            hourly: cachedHourlyRows,
                             skippedRecords: skipped
                         )
                         do {
-                            let scoped = sourceBatch(cached, sourceID: sourceID, now: now)
-                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: device.id)
+                            let scoped = sourceBatch(cachedBatch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
+                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID)
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
                                 recordCount: scoped.daily.count, skippedRecords: skipped)
                         } catch {
@@ -84,8 +100,9 @@ public actor CollectionRunner {
                                 recordCount: 0, skippedRecords: 0)
                     } else {
                         do {
-                            let scoped = sourceBatch(batch, sourceID: sourceID, now: now)
-                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: device.id)
+                            let scoped = sourceBatch(batch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
+                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
+                                authoritative: batch.authoritativeSourceIDs.contains(sourceID))
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
                                 recordCount: scoped.daily.count, skippedRecords: batch.skippedRecords)
                         } catch {
@@ -127,7 +144,7 @@ public actor CollectionRunner {
         return results
     }
 
-    private func sourceBatch(_ batch: CollectionBatch, sourceID: String, now: Date) -> CollectionBatch {
+    private func sourceBatch(_ batch: CollectionBatch, sourceID: String, deviceID: String, now: Date) -> CollectionBatch {
         let calendar = Calendar.current
         let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
         let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
@@ -147,8 +164,9 @@ public actor CollectionRunner {
             for offset in 0..<48 {
                 let start = currentHour.addingTimeInterval(Double(-offset) * 3_600)
                 if hours[start] == nil {
-                    hours[start] = HourlyUsage(hourStart: start, deviceID: device.id, sourceID: sourceID,
-                        counts: .zero, eventCount: 0, reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode"].contains(sourceID))
+                    hours[start] = HourlyUsage(hourStart: start, deviceID: deviceID, sourceID: sourceID,
+                        counts: .zero, eventCount: 0,
+                        reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode", "cursor"].contains(sourceID))
                 }
             }
         }

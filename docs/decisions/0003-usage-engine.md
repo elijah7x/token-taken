@@ -29,7 +29,7 @@ Use a combined engine: pinned official tokscale as the base, with source rules p
   - oh-my-pi: read `reasoningTokens` as a breakdown inside output.
   - Codex legacy total-only records: keep as "total known, categories unknown".
 - **Not counted as tokens:** Qoder records carry credits only; show activity, mark tokens unavailable.
-- **Cursor:** deferred; needs account credentials and network, so it is opt-in and not part of v1 collection until separately approved.
+- **Cursor:** deferred; needs account credentials and network, so it is opt-in and not part of v1 collection until separately approved. Superseded 2026-11-12: [ADR-0010](0010-cursor-account-usage.md) accepts an opt-in native Cursor collector.
 - **Gap to close upstream or in the adapter:** tokscale has no per-event export. The adapter needs UTC-timestamped records with dedup keys for sync; first choice is an upstream `events --json` contribution, fallback a recorded local patch.
 
 The spike requirements below remain the acceptance bar for each source before it is marked supported.
@@ -91,6 +91,10 @@ The pinned engine (4.21.0, `b26c433d`) already parses these device-local clients
 ## Native Devin and Antigravity (2026-11-12)
 
 Devin and Antigravity move off the engine to native Swift collectors; [ADR-0009](0009-native-devin-antigravity.md) records the evidence and the rules this section keeps. The engine no longer requests `devin-cli` or `devin-desktop`, and Devin's history epoch is raised. `antigravity-cli` and `antigravity-extension` stay in the engine's client list until the native Antigravity collector replaces them; both collectors report the same source id, so they must never run in the same release. Nothing else above changes: native collectors still deduplicate before aggregating, still report through `SourceHealth`, and are still bounded by the reconciliation bar in this ADR.
+
+## Cursor account usage (2026-11-12)
+
+Cursor is no longer deferred. [ADR-0010](0010-cursor-account-usage.md) accepts a native, opt-in Swift collector that reads Cursor's own sign-in on this Mac, downloads the account's usage export once per collection, and writes it to an account device so two Macs on one account count it once. The engine still never requests Cursor, so the source is never collected twice. The rest of this ADR stands: the engine's client list, its pinned version, and the reconciliation bar in `docs/contracts/statistics.md`.
 
 ## Consequences
 

@@ -31,7 +31,12 @@ public enum SourceCatalog {
         SourceInfo(id: "fx", name: "fx", colorHex: "#EE9AA2"),
         SourceInfo(id: "mcode", name: "MiniMax Code", colorHex: "#E0A9C4"),
         SourceInfo(id: "deepseek-cli", name: "DeepSeek CLI", colorHex: "#9DB6CE"),
+        SourceInfo(id: "cursor", name: "Cursor", colorHex: "#C0CAD6"),
     ]
+
+    /// Sources whose usage belongs to an account rather than a Mac: every machine signed in to the same
+    /// account reports the same rows, so they are stored under one account device.
+    public static let accountSourceIDs: Set<String> = ["cursor"]
 
     private static let byID: [String: SourceInfo] = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
 
