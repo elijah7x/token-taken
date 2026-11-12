@@ -41,7 +41,11 @@ Status: Draft v0 (2026-11-09)
 
 - Field draws usage as a hand-drawn farm. Each source or model is one plot; plot area and plant count are proportional to tokens at a fixed planting density, and the crop identifies the source or model.
 - Only the plots carry data. River, canals, fence, buildings, trees, animals, season, and day or night are scenery and MUST NOT encode numbers. The season follows the current date and changes scenery only; crop colors never change with season.
-- Each plot shows its name, short token total, and share on a sign when it fits; exact values are always available in the list below the field and in the hover tooltip.
+- Each plot shows its name, short token total, and share on a sign when it fits; a plot too small for a sign gets a flag in its crop color. Exact values are always available in the list below the field and in the hover tooltip.
+- A source keeps the same crop and color in every view and period. The ten most used sources each own a crop; the remaining sources share one and move to a free crop only when they meet that crop's owner in the same view. Model crops are assigned per view and may differ between periods.
+- The water wheel, chimney smoke, and night fireflies move in the main window. They hold still under Reduce Motion, in the menu bar extra, and on share cards.
+- The menu bar extra shows today's field with crop flags instead of signs.
+- The Field share card can carry an inscription (up to 40 characters) and a signature (up to 24). Both are written on the card only and are never saved or synced.
 - Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), and swaps the Dock icon at runtime. The Finder icon stays the bundle icon.
 
 ## Open questions

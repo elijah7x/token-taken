@@ -13,7 +13,7 @@ enum FieldFont {
 }
 
 /// One plot of the farm: a source or model, its crop, and its place in the plan.
-struct FieldPlot: Identifiable {
+struct FieldPlot: Identifiable, Equatable {
     let id: String
     let name: String
     let value: Int64
@@ -23,7 +23,7 @@ struct FieldPlot: Identifiable {
 }
 
 /// Geometry shared by the painter and hit testing. The scene is a fixed 1200 × 720 picture scaled to fit.
-struct FieldSceneModel {
+struct FieldSceneModel: Equatable {
     static let size = CGSize(width: 1200, height: 720)
     static let plan = CGSize(width: 760, height: 540)
     static let gap: CGFloat = 16
@@ -31,6 +31,8 @@ struct FieldSceneModel {
 
     let plots: [FieldPlot]
     let total: Int64
+
+    static let empty = FieldSceneModel(items: [])
 
     init(items: [Breakdown]) {
         let active = items.filter { $0.counts.total > 0 }
@@ -69,20 +71,26 @@ struct FieldLandscapeView: View {
     @Binding var highlight: String?
     /// Share cards pass false: their highlight is the fixed scope, so hover must not drive it or the tooltip.
     var interactive = true
+    /// Small renderings (the menu bar panel) mark plots with crop-coloured flags instead of unreadable boards.
+    var compact = false
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.locale) private var locale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverPoint: CGPoint?
 
     var body: some View {
         let model = FieldSceneModel(items: items)
         let chinese = locale.language.languageCode == .chinese
+        let season = FieldSeason.of(Date())
         GeometryReader { proxy in
             let scale = proxy.size.width / FieldSceneModel.size.width
-            Canvas { ctx, _ in
-                ctx.scaleBy(x: scale, y: scale)
-                FieldPainter(ctx: ctx, model: model, isDark: scheme == .dark, season: .of(Date()), highlight: highlight, chinese: chinese).paint()
-            }
+            // Equatable, so pointer moves that do not change the highlighted plot skip repainting the farm.
+            FieldSceneCanvas(model: model, isDark: scheme == .dark, season: season, highlight: highlight, chinese: chinese, compact: compact)
+                .equatable()
+                .overlay {
+                    FieldAmbience(isDark: scheme == .dark, season: season, animate: interactive && !reduceMotion)
+                }
             .onContinuousHover { phase in
                 guard interactive else { return }
                 switch phase {
@@ -97,7 +105,7 @@ struct FieldLandscapeView: View {
             .overlay(alignment: .topLeading) {
                 if interactive, let point = hoverPoint, let id = highlight, let plot = model.plots.first(where: { $0.id == id }) {
                     FieldTooltip(plot: plot, total: model.total, chinese: chinese)
-                        .offset(x: min(point.x + 14, proxy.size.width - 230), y: point.y + 16)
+                        .offset(x: min(point.x + 14, proxy.size.width - 230), y: point.y + 64 > proxy.size.height ? point.y - 54 : point.y + 16)
                         .allowsHitTesting(false)
                 }
             }
@@ -107,6 +115,52 @@ struct FieldLandscapeView: View {
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(model.plots.map { "\($0.name), \($0.crop.label(chinese: chinese)), \(TokenFormat.short($0.value))" }.joined(separator: "; ")))
+    }
+}
+
+private struct FieldSceneCanvas: View, Equatable {
+    let model: FieldSceneModel
+    let isDark: Bool
+    let season: FieldSeason
+    let highlight: String?
+    let chinese: Bool
+    let compact: Bool
+
+    var body: some View {
+        Canvas { ctx, size in
+            let scale = size.width / FieldSceneModel.size.width
+            ctx.scaleBy(x: scale, y: scale)
+            FieldPainter(ctx: ctx, model: model, isDark: isDark, season: season, highlight: highlight, chinese: chinese, compact: compact).paint()
+        }
+    }
+}
+
+/// The moving parts of the scene: water wheel, chimney smoke and, at night, fireflies.
+/// Drawn as a light layer over the static farm; holds still with Reduce Motion and on share cards.
+private struct FieldAmbience: View {
+    let isDark: Bool
+    let season: FieldSeason
+    let animate: Bool
+
+    var body: some View {
+        Group {
+            if animate {
+                TimelineView(.animation(minimumInterval: 1.0 / 20)) { timeline in
+                    canvas(timeline.date.timeIntervalSinceReferenceDate)
+                }
+            } else {
+                canvas(0)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func canvas(_ t: Double) -> some View {
+        Canvas { ctx, size in
+            let scale = size.width / FieldSceneModel.size.width
+            ctx.scaleBy(x: scale, y: scale)
+            FieldPainter(ctx: ctx, model: .empty, isDark: isDark, season: season, highlight: nil, chinese: false).ambience(CGFloat(t))
+        }
     }
 }
 
@@ -172,14 +226,15 @@ private struct FieldPainter {
     let season: FieldSeason
     let highlight: String?
     let chinese: Bool
+    var compact = false
 
     private var c: FieldColors { FieldColors(isDark: isDark) }
     private var pal: SeasonPalette { SeasonPalette(season) }
     private let W = FieldSceneModel.size.width, H = FieldSceneModel.size.height
     private let wind: CGFloat = 1.3
 
-    init(ctx: GraphicsContext, model: FieldSceneModel, isDark: Bool, season: FieldSeason, highlight: String?, chinese: Bool) {
-        self.ctx = ctx; self.model = model; self.isDark = isDark; self.season = season; self.highlight = highlight; self.chinese = chinese
+    init(ctx: GraphicsContext, model: FieldSceneModel, isDark: Bool, season: FieldSeason, highlight: String?, chinese: Bool, compact: Bool = false) {
+        self.ctx = ctx; self.model = model; self.isDark = isDark; self.season = season; self.highlight = highlight; self.chinese = chinese; self.compact = compact
     }
 
     private var sun: CGFloat { isDark ? -1 : 1 }
@@ -416,11 +471,6 @@ private struct FieldPainter {
         fill(Path(CGRect(x: hx + 26, y: hy - 20, width: 12, height: 20)), c.post)
         for x in [hx + 8, hx + 45] { let p = Path(CGRect(x: x, y: hy - 26, width: 11, height: 10)); fill(p, win); stroke(p, line, 0.8) }
         poly([CGPoint(x: hx + 46, y: hy - hgt - 14), CGPoint(x: hx + 46, y: hy - hgt - 30), CGPoint(x: hx + 53, y: hy - hgt - 30), CGPoint(x: hx + 53, y: hy - hgt - 14)], wallSide)
-        var smoke = Path()
-        smoke.move(to: CGPoint(x: hx + 50, y: hy - hgt - 34))
-        smoke.addCurve(to: CGPoint(x: hx + 50, y: hy - hgt - 54), control1: CGPoint(x: hx + 44, y: hy - hgt - 42), control2: CGPoint(x: hx + 56, y: hy - hgt - 46))
-        smoke.addCurve(to: CGPoint(x: hx + 52, y: hy - hgt - 73), control1: CGPoint(x: hx + 45, y: hy - hgt - 61), control2: CGPoint(x: hx + 57, y: hy - hgt - 65))
-        ctx.stroke(smoke, with: .color((isDark ? FieldRGB("#56605E") : FieldRGB("#CFC8B7")).color), style: StrokeStyle(lineWidth: 3.2, lineCap: .round, dash: [4, 7]))
         // The silo echoes the granary.
         let sx: CGFloat = 1146, sw: CGFloat = 26, sh: CGFloat = 60
         poly([CGPoint(x: sx, y: hy), CGPoint(x: sx, y: hy - sh), CGPoint(x: sx + sw, y: hy - sh), CGPoint(x: sx + sw, y: hy)], wallSide)
@@ -439,14 +489,17 @@ private struct FieldPainter {
     private static let riverPoints: [CGPoint] = [(-20, 236), (60, 238), (116, 252), (150, 282), (140, 340), (116, 400), (134, 470), (152, 540), (128, 610), (96, 680), (66, 750), (36, 830)].map { CGPoint(x: $0.0, y: $0.1) }
     private static func riverWidth(_ y: CGFloat) -> CGFloat { 7 + max(0, y - 236) / 560 * 34 }
 
+    private static func riverX(_ y: CGFloat) -> CGFloat {
+        let pts = riverPoints
+        for i in 0..<(pts.count - 1) where y >= pts[i].y && y <= pts[i + 1].y {
+            return pts[i].x + (pts[i + 1].x - pts[i].x) * (y - pts[i].y) / (pts[i + 1].y - pts[i].y)
+        }
+        return pts[0].x
+    }
+
     private func river() -> (CGFloat) -> CGFloat {
         let pts = Self.riverPoints
-        let at: (CGFloat) -> CGFloat = { y in
-            for i in 0..<(pts.count - 1) where y >= pts[i].y && y <= pts[i + 1].y {
-                return pts[i].x + (pts[i + 1].x - pts[i].x) * (y - pts[i].y) / (pts[i + 1].y - pts[i].y)
-            }
-            return pts[0].x
-        }
+        let at: (CGFloat) -> CGFloat = Self.riverX
         var left: [CGPoint] = [], right: [CGPoint] = [], lb: [CGPoint] = [], rb: [CGPoint] = []
         for (i, p) in pts.enumerated() {
             let q = pts[min(pts.count - 1, i + 1)], pp = pts[max(0, i - 1)]
@@ -498,18 +551,6 @@ private struct FieldPainter {
         }
         ditches.addPath(Self.line(P(gap / 2, gap / 2), P(gap / 2, plan.height)))
         stroke(ditches, water.opacity(0.9), 2.4)
-        // Water wheel at the intake.
-        let wx = riverAt(296) + 16, wy: CGFloat = 296, wr: CGFloat = 17
-        var spokes = Path(), paddles = Path(), frame = Path()
-        for i in 0..<8 {
-            let a = CGFloat(i) / 8 * .pi * 2
-            spokes.addPath(Self.line(CGPoint(x: wx, y: wy), CGPoint(x: wx + cos(a) * wr, y: wy + sin(a) * wr)))
-            paddles.addPath(Self.line(CGPoint(x: wx + cos(a) * wr, y: wy + sin(a) * wr), CGPoint(x: wx + cos(a) * (wr + 5), y: wy + sin(a) * (wr + 5))))
-        }
-        frame.addLines([CGPoint(x: wx - 4, y: wy + 24), CGPoint(x: wx, y: wy), CGPoint(x: wx + 4, y: wy + 24)])
-        stroke(frame, c.post, 2.4)
-        stroke(Self.dot(wx, wy, wr), c.post, 2); stroke(spokes, c.post, 1.2); stroke(paddles, c.post, 3.2)
-        fill(Self.dot(wx, wy, 2.6), c.post)
         // Trodden ground under the farm.
         let plan2 = FieldSceneModel.plan
         fill(Self.blob([P(0, 0), P(plan2.width, 0), P(plan2.width, plan2.height), P(0, plan2.height)], seed: "farm", jitter: 2.5, step: 40, round: 12), tone(pal.meadow2).opacity(0.55))
@@ -905,19 +946,49 @@ private struct FieldPainter {
     }
 
     private func overlays() {
-        if isDark {
-            var r = FieldRNG("fireflies"), dots = Path()
-            for _ in 0..<26 { dots.addPath(Self.dot(60 + CGFloat(r.next()) * 1080, 500 + CGFloat(r.next()) * 210, 1.4 + CGFloat(r.next()))) }
-            var glow = ctx
-            glow.addFilter(.blur(radius: 2.4))
-            glow.fill(dots, with: .color(FieldRGB("#F4E58A").color))
-            fill(dots, FieldRGB("#F4E58A").opacity(0.7))
-        }
         if season == .winter {
             var r = FieldRNG("flakes"), flakes = Path()
             for _ in 0..<120 { flakes.addPath(Self.dot(CGFloat(r.next()) * W, CGFloat(r.next()) * H, 0.8 + CGFloat(r.next()) * 1.5)) }
             fill(flakes, FieldRGB("#FFFFFF").opacity(isDark ? 0.5 : 0.85))
         }
+    }
+
+    // MARK: Moving parts
+
+    func ambience(_ t: CGFloat) {
+        // Water wheel at the canal intake, turning slowly.
+        let wx = Self.riverX(296) + 16, wy: CGFloat = 296, wr: CGFloat = 17, turn = t * 0.55
+        var spokes = Path(), paddles = Path(), frame = Path()
+        for i in 0..<8 {
+            let a = CGFloat(i) / 8 * .pi * 2 + turn
+            spokes.addPath(Self.line(CGPoint(x: wx, y: wy), CGPoint(x: wx + cos(a) * wr, y: wy + sin(a) * wr)))
+            paddles.addPath(Self.line(CGPoint(x: wx + cos(a) * wr, y: wy + sin(a) * wr), CGPoint(x: wx + cos(a) * (wr + 5), y: wy + sin(a) * (wr + 5))))
+        }
+        frame.addLines([CGPoint(x: wx - 4, y: wy + 24), CGPoint(x: wx, y: wy), CGPoint(x: wx + 4, y: wy + 24)])
+        stroke(frame, c.post, 2.4)
+        stroke(Self.dot(wx, wy, wr), c.post, 2); stroke(spokes, c.post, 1.2); stroke(paddles, c.post, 3.2)
+        fill(Self.dot(wx, wy, 2.6), c.post)
+        // Chimney smoke: puffs rise, drift downwind and thin out.
+        let chimney = CGPoint(x: 1118, y: 230), smoke = isDark ? FieldRGB("#56605E") : FieldRGB("#CFC8B7")
+        for i in 0..<5 {
+            let phase = (t * 0.09 + CGFloat(i) / 5).truncatingRemainder(dividingBy: 1)
+            let x = chimney.x + sin(phase * 5 + CGFloat(i)) * 3 + phase * 14, y = chimney.y - phase * 58, r = 3 + phase * 6
+            fill(Self.dot(x, y, r), smoke.opacity(Double((1 - phase) * min(1, phase * 6)) * 0.8))
+        }
+        guard isDark else { return }
+        // Fireflies drift and pulse over the near meadow.
+        var r = FieldRNG("fireflies"), dim = Path(), lit = Path()
+        for _ in 0..<26 {
+            let x = 60 + CGFloat(r.next()) * 1080, y = 500 + CGFloat(r.next()) * 210, size = 1.4 + CGFloat(r.next())
+            let p1 = CGFloat(r.next()) * 6, p2 = CGFloat(r.next()) * 6, speed = 0.8 + CGFloat(r.next()) * 1.2
+            let d = Self.dot(x + sin(t * 0.35 + p1) * 8, y + cos(t * 0.3 + p2) * 5, size)
+            if sin(t * speed + p1) > 0 { lit.addPath(d) } else { dim.addPath(d) }
+        }
+        var glow = ctx
+        glow.addFilter(.blur(radius: 2.4))
+        glow.fill(lit, with: .color(FieldRGB("#F4E58A").color))
+        fill(lit, FieldRGB("#F4E58A").opacity(0.75))
+        fill(dim, FieldRGB("#F4E58A").opacity(0.3))
     }
 
     // MARK: Signs
@@ -927,6 +998,7 @@ private struct FieldPainter {
         for plot in model.plots.sorted(by: { $0.plan.maxY < $1.plan.maxY }) {
             var g = ctx
             if let highlight, highlight != plot.id { g.opacity = 0.3 }
+            if compact { pennant(plot, g, scale: 2.2); continue }
             let name = g.resolve(Text(verbatim: plot.name).font(FieldFont.serif(16)).foregroundStyle(c.ink.color))
             let num = g.resolve(Text(verbatim: "\(TokenFormat.short(plot.value)) · \(FieldFormat.percent(plot.value, of: model.total))").font(FieldFont.serif(13.5)).foregroundStyle(c.ink2.color))
             let screenW0 = plot.corners[2].x - plot.corners[3].x
@@ -940,7 +1012,7 @@ private struct FieldPainter {
             let full = screenW >= max(nameW, numW) + 70 && plot.plan.height >= 120
             let smallW = small.measure(in: CGSize(width: 600, height: 60)).width
             let bw = full ? max(nameW, numW) + 24 : smallW + (smallW + 18 > screenW ? 10 : 18), bh: CGFloat = full ? 46 : 26
-            guard screenW >= bw + 4, plot.plan.height >= 34 else { continue }
+            guard screenW >= bw + 4, plot.plan.height >= 34 else { pennant(plot, g); continue }
             let ny = P(plot.plan.minX, plot.plan.maxY + FieldSceneModel.gap * 0.25).y, nx = plot.corners[3].x + bw / 2 + (full ? 16 : max(2, min(6, (screenW - bw) / 2)))
             let top = ny - (full ? 12 : 6) - bh
             g.fill(Self.ellipse(nx - sun * 7, ny + 1, bw * 0.32, 3), with: .color(c.groundShadow.color))
@@ -964,6 +1036,23 @@ private struct FieldPainter {
                 t.draw(small, at: CGPoint(x: nx, y: top + bh / 2), anchor: .center)
             }
         }
+    }
+
+    /// Plots too small for a stake get a flag in the crop's colour, matching the swatch in the list below.
+    private func pennant(_ plot: FieldPlot, _ g: GraphicsContext, scale: CGFloat = 1) {
+        var g = g
+        let base = P(plot.plan.minX + min(10 * scale, plot.plan.width / 2), plot.plan.maxY)
+        g.translateBy(x: base.x, y: base.y); g.scaleBy(x: scale, y: scale); g.translateBy(x: -base.x, y: -base.y)
+        let top = CGPoint(x: base.x, y: base.y - 24)
+        g.fill(Self.ellipse(base.x - sun * 4, base.y + 1, 5, 1.6), with: .color(c.groundShadow.color))
+        g.stroke(Self.line(base, top), with: .color(c.post.color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+        var flag = Path()
+        flag.move(to: top)
+        flag.addQuadCurve(to: CGPoint(x: top.x + 14, y: top.y + 4.5), control: CGPoint(x: top.x + 7, y: top.y - 1))
+        flag.addQuadCurve(to: CGPoint(x: top.x, y: top.y + 9), control: CGPoint(x: top.x + 7, y: top.y + 7))
+        flag.closeSubpath()
+        g.fill(flag, with: .color(c.crops[plot.crop.rawValue].color))
+        g.stroke(flag, with: .color(c.post.color), lineWidth: 0.8)
     }
 }
 

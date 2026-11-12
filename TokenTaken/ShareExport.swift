@@ -46,6 +46,9 @@ struct ShareExportSheet: View {
     @State private var aspect: ShareAspect = .portrait
     @State private var showCost = false
     @State private var showComposition = true
+    // Field share cards only; kept for this sheet, never saved or synced.
+    @State private var inscription = ""
+    @State private var signature = ""
     @State private var scopedSummary: UsageSummary?
     @State private var loadedScopeKey: ScopeQueryKey?
     @State private var didCopy = false
@@ -148,7 +151,9 @@ struct ShareExportSheet: View {
                 data: cardData,
                 aspect: aspect,
                 showCost: showCost,
-                showComposition: showComposition
+                showComposition: showComposition,
+                inscription: inscription,
+                signature: signature
             )
             .frame(width: canvasSize.width, height: canvasSize.height)
             .scaleEffect(scale, anchor: .center)
@@ -223,6 +228,22 @@ struct ShareExportSheet: View {
             VStack(spacing: 8) {
                 shareToggleRow(title: "Show cost estimate", isOn: $showCost)
                 shareToggleRow(title: "Show composition", isOn: $showComposition)
+                if settings.theme == .field {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Inscription and signature")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Palette.ink2)
+                            Spacer(minLength: 6)
+                            Text("On the card only, never saved")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.ink3)
+                        }
+                        fieldTextRow("Inscription", text: $inscription, limit: 40)
+                        fieldTextRow("Signature", text: $signature, limit: 24)
+                    }
+                    .padding(.top, 6)
+                }
             }
 
             Spacer(minLength: 12)
@@ -247,6 +268,21 @@ struct ShareExportSheet: View {
                 sharePickerButton
             }
         }
+    }
+
+    private func fieldTextRow(_ title: LocalizedStringKey, text: Binding<String>, limit: Int) -> some View {
+        TextField(title, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13))
+            .foregroundStyle(Palette.ink1)
+            .padding(.horizontal, 10)
+            .frame(height: 28)
+            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(FieldPalette.panel))
+            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
+            .onChange(of: text.wrappedValue) { _, value in
+                if value.count > limit { text.wrappedValue = String(value.prefix(limit)) }
+            }
+            .accessibilityLabel(Text(title))
     }
 
     private func shareToggleRow(
@@ -607,7 +643,9 @@ struct ShareExportSheet: View {
             data: exportData,
             aspect: aspect,
             showCost: showCost,
-            showComposition: showComposition
+            showComposition: showComposition,
+            inscription: inscription,
+            signature: signature
         )
         .frame(width: canvasSize.width, height: canvasSize.height)
         .environment(\.colorScheme, scheme)
@@ -1253,6 +1291,8 @@ struct ShareCardView: View {
     let aspect: ShareAspect
     let showCost: Bool
     let showComposition: Bool
+    var inscription = ""
+    var signature = ""
 
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
@@ -1262,7 +1302,7 @@ struct ShareCardView: View {
 
     var body: some View {
         if ThemeRuntime.isField {
-            FieldShareCard(data: data, aspect: aspect, showCost: showCost, showComposition: showComposition)
+            FieldShareCard(data: data, aspect: aspect, showCost: showCost, showComposition: showComposition, inscription: inscription, signature: signature)
         } else {
             tideCard
         }

@@ -25,6 +25,11 @@ struct MenuBarContent: View {
 
             heroCard
 
+            if settings.theme == .field, !activeSources.isEmpty {
+                // Today's farm, the menu bar's small version of the dashboard field.
+                FieldLandscapeView(items: activeSources, highlight: .constant(nil), interactive: false, compact: true)
+            }
+
             topSourcesSection
 
             Rectangle()
@@ -37,7 +42,9 @@ struct MenuBarContent: View {
         .padding(14)
         .frame(width: 332)
         .background {
-            if reduceTransparency {
+            if settings.theme == .field {
+                FieldPalette.paper
+            } else if reduceTransparency {
                 Palette.solid
             }
         }

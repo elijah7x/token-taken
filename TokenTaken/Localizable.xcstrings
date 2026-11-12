@@ -1088,6 +1088,26 @@
         }
       }
     },
+    "Inscription" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "题词"
+          }
+        }
+      }
+    },
+    "Inscription and signature" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "题词与署名"
+          }
+        }
+      }
+    },
     "Install Command-Line Tool" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1722,6 +1742,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "占今天"
+          }
+        }
+      }
+    },
+    "On the card only, never saved" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只写在卡片上，不保存"
           }
         }
       }
@@ -2404,6 +2434,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已显示全部 %lld 个"
+          }
+        }
+      }
+    },
+    "Signature" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "署名"
           }
         }
       }

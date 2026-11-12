@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Initialized the project specification, architecture, decision records, and contracts.
 - Added a Developer ID release pipeline with hardened-runtime signing, DMG packaging, and notarization; v0.1 updates are manual.
-- Added the app icon (paired measuring-cup TT on a glass plate, with dedicated 16 and 32 pt renders) and a matching menu bar template glyph.
+- Added the app icon (a staggered stack of blue glass coins on a pale plate, with dedicated 16 and 32 pt renders) and a matching menu bar template glyph.
 - Added usage collectors combining the pinned `tokscale` 4.21.0 subprocess (`claude`, `codex`, `grok`, `kimi`, `opencode`, `gemini`, `droid`) with native Swift collectors for Zcode (online SQLite backup, native `model_usage`, and pre-boundary legacy assistant messages), `pi`, and `oh-my-pi` (entry-ID deduplication, reasoning split from output, and operation records).
 - Added the local SQLite usage store at schema version 2 with `daily_usage` and `hourly_usage` tables, transactional per-source snapshot replacement, and source health tracking (`ok`, `notInstalled`, `unavailable`, `failed`, `stale`, and skipped-record counts).
 - Added `TokenTakenKit` statistics and read-time cost estimation across disjoint token categories (`input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`) plus unpriced `uncategorized` totals, using bundled price table `tokscale-4.21.0-2026-11-10+alias-v3` and model alias table `v3`.
@@ -21,7 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added `scripts/update-prices.py`, which regenerates `TokenTakenKit/PriceSnapshot.swift` offline from the newest `engine/price-snapshot-*.json` (stdlib only, runs on the macOS system Python 3.9). `--check` reports drift, and `scripts/release.sh` now fails a release when the generated table is stale.
 
 - Added the Field theme (theme ID `sketchbook`): a hand-drawn farm where each source or model is a plot whose area and plant count follow tokens, with ten crops, seasonal scenery, day and night skies, serif type, paper surfaces in place of Liquid Glass, a Field share card, and a 田 Dock icon.
-- Added a Follow System, Light, or Dark setting that applies to every window and the menu bar extra.
+- Added a Follow System, Light, or Dark setting that applies to every window and the menu bar extra, including sessions that only open the menu bar extra.
+- Field: a turning water wheel, drifting chimney smoke, and night fireflies (still under Reduce Motion), today's field in the menu bar extra, crop flags on plots too small for a sign, fixed crops per source across views, and an inscription and signature on the share card.
 
 ### Changed
 

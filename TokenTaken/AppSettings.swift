@@ -232,6 +232,9 @@ final class AppSettings {
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
         launchAtLoginStatus = SMAppService.mainApp.status
         applyUnitStyle(bumpRevision: false)
+        // NSApp is not up yet while the app's state is built; apply once launch finishes so a session
+        // that only opens the menu bar panel still gets the chosen appearance.
+        DispatchQueue.main.async { [weak self] in self?.applyAppearance() }
     }
 
     private func applyUnitStyle(bumpRevision: Bool) {

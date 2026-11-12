@@ -86,10 +86,15 @@ enum FieldCrop: Int, CaseIterable {
 
     // Fixed preferences keep a source on the same crop in every period and on every surface.
     private static let preferred: [String: FieldCrop] = [
+        // The ten most used sources each own a crop; the rest share one and only move aside when
+        // they meet their crop's owner in the same view.
         "claude": .pumpkin, "codex": .flax, "zcode": .lavender, "omp": .buckwheat, "pi": .wheat,
-        "kimi": .tea, "grok": .cabbage, "opencode": .rapeseed, "gemini": .orchard,
-        "factory": .corn, "devin": .wheat, "antigravity": .lavender, "dsh": .corn, "fx": .rapeseed
+        "kimi": .tea, "antigravity": .cabbage, "opencode": .rapeseed, "gemini": .orchard, "dsh": .corn,
+        "grok": .orchard, "factory": .buckwheat, "devin": .rapeseed, "fx": .flax
     ]
+
+    private static let shared: Set<String> = ["grok", "factory", "devin", "fx"]
+    private static func sharesCrop(_ id: String) -> Bool { shared.contains(id) }
 
     private static func hashed(_ key: String) -> FieldCrop {
         var h: UInt32 = 0
@@ -101,7 +106,9 @@ enum FieldCrop: Int, CaseIterable {
     /// so up to ten plots in a view never share a crop.
     static func assign(_ items: [Breakdown]) -> [String: FieldCrop] {
         var used = Set<FieldCrop>(), out: [String: FieldCrop] = [:]
-        for item in items {
+        // Owners of a preferred crop claim it first, so a source keeps its crop whatever else is planted.
+        let ordered = items.filter { preferred[$0.id] != nil && !sharesCrop($0.id) } + items.filter { preferred[$0.id] == nil || sharesCrop($0.id) }
+        for item in ordered {
             var crop = preferred[item.id] ?? hashed(item.name)
             if used.contains(crop), used.count < allCases.count {
                 var i = crop.rawValue

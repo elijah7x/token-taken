@@ -105,8 +105,13 @@ struct FieldShareCard: View {
     let aspect: ShareAspect
     let showCost: Bool
     let showComposition: Bool
+    var inscription = ""
+    var signature = ""
 
     @Environment(\.colorScheme) private var scheme
+
+    private var quote: String { inscription.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var signer: String { signature.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var items: [Breakdown] {
         if case .model = data.kind { return data.summary.byModel }
@@ -129,6 +134,7 @@ struct FieldShareCard: View {
                     header
                     headline(numberSize: 168).padding(.top, 70)
                     facts(vertical: false).padding(.top, 40)
+                    if !quote.isEmpty { inscriptionLine.padding(.top, 36) }
                     Spacer(minLength: 30)
                     field.frame(width: size.width - margin * 2)
                     if showComposition { composition.padding(.top, 34) }
@@ -143,6 +149,7 @@ struct FieldShareCard: View {
                         VStack(alignment: .leading, spacing: 0) {
                             headline(numberSize: 150)
                             facts(vertical: true).padding(.top, 40)
+                            if !quote.isEmpty { inscriptionLine.padding(.top, 36) }
                         }
                         .frame(width: 560, alignment: .leading)
                         VStack(alignment: .leading, spacing: 26) {
@@ -251,12 +258,36 @@ struct FieldShareCard: View {
         }
     }
 
+    private var inscriptionLine: some View {
+        HStack(alignment: .top, spacing: 18) {
+            Rectangle().fill(FieldPalette.accent).frame(width: 3)
+            Text(verbatim: quote)
+                .font(FieldFont.serif(34))
+                .foregroundStyle(FieldPalette.ink)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 14) {
             Rectangle().fill(FieldPalette.rule).frame(height: 2)
-            Text("Plot area and plant count follow tokens · read from local logs only")
-                .font(FieldFont.serif(24))
-                .foregroundStyle(FieldPalette.muted)
+            HStack(alignment: .firstTextBaseline, spacing: 24) {
+                Text("Plot area and plant count follow tokens · read from local logs only")
+                    .font(FieldFont.serif(24))
+                    .foregroundStyle(FieldPalette.muted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Spacer(minLength: 0)
+                if !signer.isEmpty {
+                    Text(verbatim: "— " + signer)
+                        .font(FieldFont.serif(28))
+                        .foregroundStyle(FieldPalette.ink)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
         }
     }
 }
