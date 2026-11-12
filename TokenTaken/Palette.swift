@@ -29,11 +29,14 @@ extension Color {
     }
 
     /// Appearance-aware color. With Increase Contrast the `contrast` variant wins.
-    init(light: String, dark: String, contrastLight: String? = nil, contrastDark: String? = nil, fieldLight: String? = nil, fieldDark: String? = nil) {
+    init(light: String, dark: String, contrastLight: String? = nil, contrastDark: String? = nil, fieldLight: String? = nil, fieldDark: String? = nil, cosmos: String? = nil) {
         self.init(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             if ThemeRuntime.isField, let fieldLight, let fieldDark {
                 return NSColor(Color(hex: isDark ? fieldDark : fieldLight))
+            }
+            if ThemeRuntime.isCosmos, let cosmos {
+                return NSColor(Color(hex: cosmos))
             }
             let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
             let hex = switch (isDark, increased) {
@@ -47,6 +50,20 @@ extension Color {
     }
 }
 
+enum CosmosPalette {
+    static let page = Color(hex: "#030507")
+    static let background = Color(hex: "#07090D")
+    static let panel = Color(hex: "#0C1016")
+    static let ink = Color(hex: "#F0F2F4")
+    static let ink2 = Color(hex: "#B5BCC7")
+    static let ink3 = Color(hex: "#8993A2")
+    static let rule = Color(hex: "#1A2029")
+    static let controlRule = Color(hex: "#303845")
+    static let accent = Color(hex: "#E8C48E")
+    static let track = Color(hex: "#171E28")
+    static let selection = Color(hex: "#202630")
+}
+
 enum Palette {
     // MARK: Ink hierarchy
 
@@ -55,27 +72,31 @@ enum Palette {
         dark: "#EEF2F8",
         contrastLight: "#090E14",
         contrastDark: "#FFFFFF",
-        fieldLight: "#2B2A24", fieldDark: "#ECE6D6"
+        fieldLight: "#2B2A24", fieldDark: "#ECE6D6",
+        cosmos: "#F0F2F4"
     )
     static let ink2 = Color(
         light: "#465264",
         dark: "#A9B5C7",
         contrastLight: "#283241",
         contrastDark: "#D4DCE8",
-        fieldLight: "#55524A", fieldDark: "#C4BDAB"
+        fieldLight: "#55524A", fieldDark: "#C4BDAB",
+        cosmos: "#B5BCC7"
     )
     static let ink3 = Color(
         light: "#6C788A",
         dark: "#7B889C",
         contrastLight: "#465264",
         contrastDark: "#B0BCCF",
-        fieldLight: "#6B675B", fieldDark: "#A9A392"
+        fieldLight: "#6B675B", fieldDark: "#A9A392",
+        cosmos: "#8993A2"
     )
 
     // MARK: Surfaces & borders
 
     static let cardSurface = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.panel) }
         if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#262A23" : "#FBF8F0")) }
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if reduceTransparency {
@@ -90,6 +111,7 @@ enum Palette {
 
     static let sidebarSurface = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.background) }
         if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#22261F" : "#EFE9DA")) }
         let reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         if reduceTransparency {
@@ -105,6 +127,7 @@ enum Palette {
     /// The floating tray: a lighter, nearly opaque pane lifted off the frosted base.
     static let traySurface = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.background) }
         if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#262A23" : "#FBF8F0")) }
         if NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency {
             return isDark
@@ -117,6 +140,7 @@ enum Palette {
     })
 
     static let trayRim = Color(nsColor: NSColor(name: nil) { appearance in
+        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.rule) }
         if ThemeRuntime.isField { return NSColor(Color(hex: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "#3E4337" : "#D9D2C0")) }
         return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10)
@@ -125,6 +149,7 @@ enum Palette {
 
     static let barTrack = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.track) }
         if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#353A30" : "#E6DFCD")) }
         let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         if isDark {
@@ -135,6 +160,10 @@ enum Palette {
 
     static let hairline = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        if ThemeRuntime.isCosmos {
+            let hex = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? "#303845" : "#1A2029"
+            return NSColor(Color(hex: hex))
+        }
         if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#3E4337" : "#D9D2C0")) }
         let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         if isDark {
@@ -144,7 +173,7 @@ enum Palette {
     })
 
     /// Opaque base window surface (`--win-bg`), also used under Reduce Transparency.
-    static let solid = Color(light: "#F4F6FA", dark: "#0D121A", fieldLight: "#F5F1E6", fieldDark: "#1E211C")
+    static let solid = Color(light: "#F4F6FA", dark: "#0D121A", fieldLight: "#F5F1E6", fieldDark: "#1E211C", cosmos: "#07090D")
 
     // MARK: Semantic roles & health
 
@@ -153,25 +182,29 @@ enum Palette {
         dark: "#56A8FF",
         contrastLight: "#004FA3",
         contrastDark: "#82BEFF",
-        fieldLight: "#A94E2A", fieldDark: "#E28A62"
+        fieldLight: "#A94E2A", fieldDark: "#E28A62",
+        cosmos: "#E8C48E"
     )
     static let healthOK = Color(
         light: "#178750",
         dark: "#3BD184",
         contrastLight: "#0E6339",
-        contrastDark: "#6BE0A3"
+        contrastDark: "#6BE0A3",
+        cosmos: "#E8C48E"
     )
     static let healthWarn = Color(
         light: "#B56100",
         dark: "#FFB340",
         contrastLight: "#8A4800",
-        contrastDark: "#FFC978"
+        contrastDark: "#FFC978",
+        cosmos: "#E8C48E"
     )
     static let healthScan = Color(
         light: "#0D7490",
         dark: "#4FB0CD",
         contrastLight: "#08566B",
-        contrastDark: "#7AD0E6"
+        contrastDark: "#7AD0E6",
+        cosmos: "#B5BCC7"
     )
 
     static let muted = ink2
@@ -183,6 +216,15 @@ enum Palette {
     /// Category order matches `TokenCategory.allCases`: input, cacheRead, cacheWrite, output, reasoning.
     static func color(for category: TokenCategory) -> Color {
         if ThemeRuntime.isField { return FieldCrop.color(for: category) }
+        if ThemeRuntime.isCosmos {
+            return switch category {
+            case .cacheRead: Color(hex: "#EAF2FF")
+            case .input: Color(hex: "#FFF0D2")
+            case .cacheWrite: Color(hex: "#E8C48E")
+            case .output: Color(hex: "#D99A56")
+            case .reasoning: Color(hex: "#B65A35")
+            }
+        }
         return switch category {
         case .input:
             Color(light: "#CF6B85", dark: "#E2829B")
@@ -227,6 +269,7 @@ enum Palette {
     ]
 
     static func color(forSource id: String) -> Color {
+        if ThemeRuntime.isCosmos { return CosmosPalette.accent }
         if ThemeRuntime.isField { return FieldCrop.color(forSource: id) }
         switch id.lowercased() {
         case "claude", "claude-code":
@@ -263,8 +306,9 @@ enum Palette {
         }
     }
 
-    /// Assigns distinct hues across `ids`, resolving hash collisions in sorted-ID order so colors stay stable across periods.
+    /// Field and Liquid Glass assign distinct stable hues; Cosmos uses the warm accent for every model.
     static func modelColors(for ids: [String]) -> [String: Color] {
+        if ThemeRuntime.isCosmos { return Dictionary(uniqueKeysWithValues: Set(ids).map { ($0, CosmosPalette.accent) }) }
         if ThemeRuntime.isField { return FieldCrop.colors(forModels: ids) }
         let count = modelPalette.count
         guard count > 0, !ids.isEmpty else { return [:] }
@@ -323,14 +367,14 @@ struct SourceMonogramBadge: View {
             .font(.system(size: 10.5, weight: .bold, design: .monospaced))
             .minimumScaleFactor(0.75)
             .foregroundStyle(
-                scheme == .dark
-                    ? color.mix(with: .white, by: 0.20)
-                    : color.mix(with: .black, by: 0.28)
+                ThemeRuntime.isCosmos
+                    ? CosmosPalette.ink2
+                    : (scheme == .dark ? color.mix(with: .white, by: 0.20) : color.mix(with: .black, by: 0.28))
             )
             .frame(width: size, height: size)
             .background {
-                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
-                    .fill(color.opacity(0.14))
+                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+                    .fill(ThemeRuntime.isCosmos ? CosmosPalette.track : color.opacity(0.14))
             }
             .accessibilityHidden(true)
     }
@@ -382,7 +426,9 @@ struct WindowBackdrop: View {
 
     var body: some View {
         Group {
-            if theme == .field {
+            if theme == .cosmos {
+                CosmosPalette.background
+            } else if theme == .field {
                 FieldPalette.paper
             } else if reduceTransparency || theme != .liquidGlass {
                 Palette.solid
@@ -440,10 +486,13 @@ struct WindowBackdrop: View {
 }
 
 extension View {
-    /// Native glass, or under the Field theme a solid paper panel with a ruled edge.
+    /// Native glass, or an opaque panel with a ruled edge under Field and Cosmos.
     @ViewBuilder
     func themedGlass<S: Shape>(_ glass: Glass = .regular, in shape: S) -> some View {
-        if ThemeRuntime.isField {
+        if ThemeRuntime.isCosmos {
+            background(CosmosPalette.panel)
+                .overlay { Rectangle().stroke(CosmosPalette.controlRule, lineWidth: 1) }
+        } else if ThemeRuntime.isField {
             background { shape.fill(FieldPalette.panel) }
                 .overlay { shape.stroke(FieldPalette.rule, lineWidth: 1) }
         } else {
@@ -453,17 +502,22 @@ extension View {
 
     @ViewBuilder
     func themedGlassButton() -> some View {
-        if ThemeRuntime.isField {
+        if ThemeRuntime.isCosmos {
+            buttonStyle(CosmosButtonStyle())
+        } else if ThemeRuntime.isField {
             buttonStyle(FieldButtonStyle())
         } else {
             buttonStyle(.glass)
         }
     }
 
-    /// Floating tooltip surface: glass normally, an opaque Palette surface with a hairline under Reduce Transparency.
+    /// Floating tooltip: Liquid Glass normally, an opaque surface under Field, Cosmos, or Reduce Transparency.
     @ViewBuilder
     func tooltipSurface(reduceTransparency: Bool, cornerRadius: CGFloat = Radius.inner) -> some View {
-        if reduceTransparency {
+        if ThemeRuntime.isCosmos {
+            background(CosmosPalette.background)
+                .overlay { Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1) }
+        } else if reduceTransparency {
             background {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(Palette.cardSurface)
@@ -477,19 +531,25 @@ extension View {
         }
     }
 
-    /// Grounded Atmosphere card surface: `Palette.cardSurface`, `Radius.card`, 0.5pt hairline border, soft shadow.
+    /// Rounded Atmosphere card, or a square opaque panel with a control-rule border under Cosmos.
+    @ViewBuilder
     func atmosphereCard(reduceTransparency: Bool, isDark: Bool) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-        return self
-            .background { shape.fill(Palette.cardSurface) }
-            .clipShape(shape)
-            .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 0.5) }
-            .shadow(
-                color: .black.opacity(reduceTransparency ? 0 : (isDark ? 0.22 : 0.04)),
-                radius: 10,
-                x: 0,
-                y: 3
-            )
+        if ThemeRuntime.isCosmos {
+            background(CosmosPalette.panel)
+                .overlay { Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1) }
+        } else {
+            let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+            self
+                .background { shape.fill(Palette.cardSurface) }
+                .clipShape(shape)
+                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 0.5) }
+                .shadow(
+                    color: .black.opacity(reduceTransparency ? 0 : (isDark ? 0.22 : 0.04)),
+                    radius: 10,
+                    x: 0,
+                    y: 3
+                )
+        }
     }
 }
 

@@ -11,6 +11,7 @@ enum ShareScope: Hashable {
 
 enum ShareAspect: String, CaseIterable, Identifiable {
     case portrait
+    case square
     case landscape
 
     var id: Self { self }
@@ -18,6 +19,7 @@ enum ShareAspect: String, CaseIterable, Identifiable {
     var title: LocalizedStringKey {
         switch self {
         case .portrait: "Portrait 2:3"
+        case .square: "Square 1:1"
         case .landscape: "Landscape 3:2"
         }
     }
@@ -25,14 +27,37 @@ enum ShareAspect: String, CaseIterable, Identifiable {
     var canvasSize: CGSize {
         switch self {
         case .portrait: CGSize(width: 1080, height: 1620)
+        case .square: CGSize(width: 1080, height: 1080)
         case .landscape: CGSize(width: 1620, height: 1080)
         }
     }
 }
 
+private struct CosmosShareSnapshotKey: Hashable {
+    let scope: ShareScope
+    let aspect: ShareAspect
+    let dimension: BreakdownDimension
+    let periodTotal: Int64
+}
+
+private func cosmosShareSceneSize(for aspect: ShareAspect) -> CGSize {
+    let cardSize = aspect.canvasSize
+    switch aspect {
+    case .portrait:
+        return CGSize(width: cardSize.width, height: (cardSize.height * 0.52).rounded())
+    case .square:
+        return CGSize(width: cardSize.width, height: (cardSize.height * 0.46).rounded())
+    case .landscape:
+        return CGSize(width: (cardSize.width * 0.575).rounded(), height: cardSize.height)
+    }
+}
+
 // MARK: - Share & Export Sheet
 
+@MainActor
 struct ShareExportSheet: View {
+    var dimension: BreakdownDimension = .sources
+
     @Environment(AppModel.self) private var model
     @Environment(AppSettings.self) private var settings
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
@@ -51,6 +76,8 @@ struct ShareExportSheet: View {
     @State private var signature = ""
     @State private var scopedSummary: UsageSummary?
     @State private var loadedScopeKey: ScopeQueryKey?
+    @State private var cosmosSnapshot: NSImage?
+    @State private var renderedCosmosSnapshotKey: CosmosShareSnapshotKey?
     @State private var didCopy = false
     @State private var copyResetTask: Task<Void, Never>?
     @State private var shareAnchor = SharePickerAnchor()
@@ -69,6 +96,11 @@ struct ShareExportSheet: View {
     }
 
     private var summary: UsageSummary { model.summary }
+    private var isCosmos: Bool { settings.theme == .cosmos }
+    private var primaryInk: Color { isCosmos ? CosmosPalette.ink : Palette.ink1 }
+    private var secondaryInk: Color { isCosmos ? CosmosPalette.ink2 : Palette.ink2 }
+    private var tertiaryInk: Color { isCosmos ? CosmosPalette.ink3 : Palette.ink3 }
+    private var hairline: Color { isCosmos ? CosmosPalette.rule : Palette.hairline }
 
     private var effectiveScope: ShareScope {
         switch scope {
@@ -101,31 +133,72 @@ struct ShareExportSheet: View {
         )
     }
 
+    private var cardCanvasSize: CGSize { aspect.canvasSize }
+
+    private func cosmosDimension(for scope: ShareScope) -> BreakdownDimension {
+        switch scope {
+        case .overall: dimension
+        case .source: .models
+        case .model: .sources
+        }
+    }
+
+    private func makeCosmosSnapshotKey(
+        scope: ShareScope,
+        sceneSummary: UsageSummary,
+        aspect: ShareAspect
+    ) -> CosmosShareSnapshotKey {
+        CosmosShareSnapshotKey(
+            scope: scope,
+            aspect: aspect,
+            dimension: cosmosDimension(for: scope),
+            periodTotal: sceneSummary.total.total
+        )
+    }
+
+    private var currentCosmosSnapshotKey: CosmosShareSnapshotKey {
+        makeCosmosSnapshotKey(
+            scope: effectiveScope,
+            sceneSummary: cardData.scopedSummary ?? summary,
+            aspect: aspect
+        )
+    }
+
+    private var currentCosmosSnapshot: NSImage? {
+        guard renderedCosmosSnapshotKey == currentCosmosSnapshotKey else { return nil }
+        return cosmosSnapshot
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             previewPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(24)
+                .padding(isCosmos ? 20 : 24)
 
             Rectangle()
-                .fill(Palette.hairline)
+                .fill(hairline)
                 .frame(width: 1)
                 .padding(.vertical, 20)
 
             controlColumn
-                .frame(width: 268)
+                .frame(width: isCosmos ? 292 : 268)
                 .padding(24)
+                .background(isCosmos ? CosmosPalette.background : Color.clear)
         }
-        .frame(width: 720, height: 560)
+        .frame(width: isCosmos ? 860 : 720, height: isCosmos ? 620 : 560)
         .background {
             ShareSheetBackdrop(
                 theme: settings.theme,
                 transparency: settings.interfaceTransparency
             )
         }
+        .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .onChange(of: scopeQueryKey, initial: true) { _, key in
             scopedSummary = resolveScopedSummary(for: key.scope)
             loadedScopeKey = key
+        }
+        .onChange(of: currentCosmosSnapshotKey, initial: true) { _, key in
+            renderCosmosSnapshot(for: key)
         }
         .onExitCommand {
             dismiss()
@@ -135,23 +208,40 @@ struct ShareExportSheet: View {
         }
     }
 
+    private func renderCosmosSnapshot(for key: CosmosShareSnapshotKey) {
+        guard isCosmos else {
+            cosmosSnapshot = nil
+            renderedCosmosSnapshotKey = nil
+            return
+        }
+        cosmosSnapshot = CosmosSnapshot.image(
+            summary: cardData.scopedSummary ?? summary,
+            dimension: key.dimension,
+            size: cosmosShareSceneSize(for: key.aspect),
+            scale: 2
+        )
+        renderedCosmosSnapshotKey = key
+    }
+
     // MARK: - Left preview pane
 
     private var previewPane: some View {
         GeometryReader { proxy in
-            let canvasSize = aspect.canvasSize
+            let canvasSize = cardCanvasSize
             let availableWidth = max(1, proxy.size.width - 8)
             let availableHeight = max(1, proxy.size.height - 8)
             let scale = min(availableWidth / canvasSize.width, availableHeight / canvasSize.height)
             let scaledWidth = canvasSize.width * scale
             let scaledHeight = canvasSize.height * scale
-            let cornerRadius = max(12, 36 * scale)
+            let cornerRadius = isCosmos ? 0 : max(12, 36 * scale)
 
             ShareCardView(
                 data: cardData,
                 aspect: aspect,
                 showCost: showCost,
                 showComposition: showComposition,
+                dimension: dimension,
+                cosmosSnapshot: currentCosmosSnapshot,
                 inscription: inscription,
                 signature: signature
             )
@@ -161,10 +251,10 @@ struct ShareExportSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Palette.hairline, lineWidth: 1)
+                    .strokeBorder(isCosmos ? CosmosPalette.controlRule : hairline, lineWidth: 1)
             }
             .shadow(
-                color: .black.opacity(reduceTransparency ? 0 : (scheme == .dark ? 0.34 : 0.10)),
+                color: isCosmos ? .clear : .black.opacity(reduceTransparency ? 0 : (scheme == .dark ? 0.34 : 0.10)),
                 radius: 18,
                 x: 0,
                 y: 6
@@ -194,10 +284,13 @@ struct ShareExportSheet: View {
                 } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Palette.ink2)
+                        .foregroundStyle(secondaryInk)
                         .frame(width: 24, height: 24)
-                        .modifier(ShareRoundButtonSurface(reduceTransparency: reduceTransparency))
-                        .contentShape(Circle())
+                        .modifier(ShareRoundButtonSurface(
+                            reduceTransparency: reduceTransparency,
+                            isCosmos: isCosmos
+                        ))
+                        .contentShape(isCosmos ? AnyShape(Rectangle()) : AnyShape(Circle()))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
@@ -208,7 +301,7 @@ struct ShareExportSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Scope")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.ink2)
+                    .foregroundStyle(secondaryInk)
 
                 scopePicker
             }
@@ -216,13 +309,13 @@ struct ShareExportSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Aspect")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.ink2)
+                    .foregroundStyle(secondaryInk)
 
                 aspectSegmentedControl
             }
 
             Rectangle()
-                .fill(Palette.hairline)
+                .fill(hairline)
                 .frame(height: 1)
 
             VStack(spacing: 8) {
@@ -292,16 +385,24 @@ struct ShareExportSheet: View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(Palette.ink1)
+                .foregroundStyle(primaryInk)
                 .lineLimit(1)
                 .accessibilityHidden(true)
 
             Spacer(minLength: 8)
 
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(GlassToggleStyle())
-                .accessibilityLabel(Text(title))
+            Group {
+                if isCosmos {
+                    Toggle(title, isOn: isOn)
+                        .labelsHidden()
+                        .toggleStyle(CosmosShareToggleStyle())
+                } else {
+                    Toggle(title, isOn: isOn)
+                        .labelsHidden()
+                        .toggleStyle(GlassToggleStyle())
+                }
+            }
+            .accessibilityLabel(Text(title))
         }
         .frame(maxWidth: .infinity)
         .frame(height: 30)
@@ -315,21 +416,25 @@ struct ShareExportSheet: View {
                 scope = .overall
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: effectiveScope == .overall ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: isCosmos
+                        ? (effectiveScope == .overall ? "checkmark.square.fill" : "square")
+                        : (effectiveScope == .overall ? "checkmark.circle.fill" : "circle"))
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(effectiveScope == .overall ? Palette.roleAccent : Palette.ink3)
+                        .foregroundStyle(effectiveScope == .overall
+                            ? (isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+                            : tertiaryInk)
                         .accessibilityHidden(true)
 
                     Text("This period overall")
                         .font(.system(size: 12.5, weight: effectiveScope == .overall ? .semibold : .medium))
-                        .foregroundStyle(Palette.ink1)
+                        .foregroundStyle(primaryInk)
                         .lineLimit(1)
 
                     Spacer(minLength: 6)
 
                     Text(TokenFormat.short(summary.total.total))
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Palette.ink2)
+                        .font(.system(size: 11.5, design: isCosmos ? .monospaced : .default))
+                        .foregroundStyle(secondaryInk)
                         .monospacedDigit()
                 }
                 .padding(.horizontal, 11)
@@ -337,9 +442,12 @@ struct ShareExportSheet: View {
                 .frame(maxWidth: .infinity)
                 .modifier(SharePillSurface(
                     isSelected: effectiveScope == .overall,
-                    reduceTransparency: reduceTransparency
+                    reduceTransparency: reduceTransparency,
+                    isCosmos: isCosmos
                 ))
-                .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                .contentShape(isCosmos
+                    ? AnyShape(Rectangle())
+                    : AnyShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("This period overall"))
@@ -386,28 +494,36 @@ struct ShareExportSheet: View {
                 if let source = selectedSourceBreakdown {
                     Text(verbatim: source.name)
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Palette.ink1)
+                        .foregroundStyle(primaryInk)
                         .lineLimit(1)
                 } else {
                     Text("Source")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.ink2)
+                        .foregroundStyle(secondaryInk)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(Palette.ink3)
+                    .foregroundStyle(tertiaryInk)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
             .frame(maxWidth: .infinity)
-            .modifier(SharePillSurface(isSelected: isSelected, reduceTransparency: reduceTransparency))
-            .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+            .modifier(SharePillSurface(
+                isSelected: isSelected,
+                reduceTransparency: reduceTransparency,
+                isCosmos: isCosmos
+            ))
+            .contentShape(isCosmos
+                ? AnyShape(Rectangle())
+                : AnyShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        .tint(isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+        .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .disabled(summary.bySource.isEmpty)
         .opacity(summary.bySource.isEmpty ? 0.45 : 1)
         .accessibilityLabel(Text("Source scope"))
@@ -436,29 +552,37 @@ struct ShareExportSheet: View {
                 if let item = selectedModelBreakdown {
                     Text(verbatim: item.name)
                         .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
-                        .foregroundStyle(Palette.ink1)
+                        .foregroundStyle(primaryInk)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 } else {
                     Text("Model")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Palette.ink2)
+                        .foregroundStyle(secondaryInk)
                         .lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(Palette.ink3)
+                    .foregroundStyle(tertiaryInk)
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 10)
             .frame(height: 30)
             .frame(maxWidth: .infinity)
-            .modifier(SharePillSurface(isSelected: isSelected, reduceTransparency: reduceTransparency))
-            .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+            .modifier(SharePillSurface(
+                isSelected: isSelected,
+                reduceTransparency: reduceTransparency,
+                isCosmos: isCosmos
+            ))
+            .contentShape(isCosmos
+                ? AnyShape(Rectangle())
+                : AnyShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
+        .tint(isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+        .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .disabled(summary.byModel.isEmpty)
         .opacity(summary.byModel.isEmpty ? 0.45 : 1)
         .accessibilityLabel(Text("Model scope"))
@@ -467,18 +591,32 @@ struct ShareExportSheet: View {
 
     // MARK: - Aspect segmented control
 
-    private var aspectSegmentedControl: some View {
-        GlassEffectContainer(spacing: 0) {
-            HStack(spacing: 2) {
-                ForEach(ShareAspect.allCases) { option in
-                    aspectSegment(option)
+    @ViewBuilder private var aspectSegmentedControl: some View {
+        let options = ShareAspect.allCases.filter { isCosmos || $0 != .square }
+        Group {
+            if isCosmos {
+                HStack(spacing: 0) {
+                    ForEach(options) { option in
+                        aspectSegment(option)
+                    }
                 }
+                .frame(maxWidth: .infinity)
+                .background(CosmosPalette.background)
+                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+            } else {
+                GlassEffectContainer(spacing: 0) {
+                    HStack(spacing: 2) {
+                        ForEach(options) { option in
+                            aspectSegment(option)
+                        }
+                    }
+                    .padding(2)
+                }
+                .frame(maxWidth: .infinity)
+                .background(Capsule().fill(Palette.barTrack))
+                .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
             }
-            .padding(2)
         }
-        .frame(maxWidth: .infinity)
-        .background(Capsule().fill(Palette.barTrack))
-        .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Aspect ratio"))
     }
@@ -492,78 +630,116 @@ struct ShareExportSheet: View {
         } label: {
             Text(option.title)
                 .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
-                .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink2)
+                .foregroundStyle(isSelected ? primaryInk : secondaryInk)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity, minHeight: 26)
-                .contentShape(Capsule())
+                .minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .contentShape(isCosmos ? AnyShape(Rectangle()) : AnyShape(Capsule()))
                 .modifier(ShareSegmentSurface(
                     isSelected: isSelected,
                     reduceTransparency: reduceTransparency,
-                    namespace: aspectNamespace
+                    namespace: aspectNamespace,
+                    isCosmos: isCosmos
                 ))
         }
         .buttonStyle(.plain)
         .focused($focusedAspect, equals: option)
         .onKeyPress(.leftArrow) {
-            aspect = .portrait
-            focusedAspect = .portrait
+            moveAspect(by: -1)
             return .handled
         }
         .onKeyPress(.rightArrow) {
-            aspect = .landscape
-            focusedAspect = .landscape
+            moveAspect(by: 1)
             return .handled
         }
         .accessibilityLabel(Text(option.title))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
+    private func moveAspect(by offset: Int) {
+        let options = ShareAspect.allCases.filter { isCosmos || $0 != .square }
+        guard let index = options.firstIndex(of: aspect) else { return }
+        let nextIndex = min(max(index + offset, 0), options.count - 1)
+        aspect = options[nextIndex]
+        focusedAspect = aspect
+    }
+
     // MARK: - Action buttons
 
-    private func actionButton(
+    private func actionButtonLabel(title: LocalizedStringKey, symbol: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(secondaryInk)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 12.5, weight: .medium))
+                .foregroundStyle(primaryInk)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder private func actionButton(
         title: LocalizedStringKey,
         symbol: String,
         accessibilityLabel: LocalizedStringKey,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(Palette.ink2)
-                    .accessibilityHidden(true)
-                Text(title)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Palette.ink1)
-                    .lineLimit(1)
+        if isCosmos {
+            Button(action: action) {
+                actionButtonLabel(title: title, symbol: symbol)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 24)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 32)
-            .modifier(ShareActionButtonSurface(isProminent: false, reduceTransparency: reduceTransparency))
-            .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+            .buttonStyle(CosmosButtonStyle())
+            .accessibilityLabel(Text(accessibilityLabel))
+        } else {
+            Button(action: action) {
+                actionButtonLabel(title: title, symbol: symbol)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 32)
+                    .modifier(ShareActionButtonSurface(isProminent: false, reduceTransparency: reduceTransparency))
+                    .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(accessibilityLabel))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(accessibilityLabel))
     }
 
-    private var sharePickerButton: some View {
-        Button(action: presentSharePicker) {
-            HStack(spacing: 6) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Palette.roleAccent)
-                    .accessibilityHidden(true)
-                Text("Share…")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Palette.ink1)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 34)
-            .modifier(ShareActionButtonSurface(isProminent: true, reduceTransparency: reduceTransparency))
-            .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+    private var shareButtonLabel: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+                .accessibilityHidden(true)
+            Text("Share…")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(primaryInk)
+                .lineLimit(1)
         }
-        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private var sharePickerButton: some View {
+        Group {
+            if isCosmos {
+                Button(action: presentSharePicker) {
+                    shareButtonLabel
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 26)
+                }
+                .buttonStyle(CosmosButtonStyle())
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(CosmosPalette.accent, lineWidth: 1))
+            } else {
+                Button(action: presentSharePicker) {
+                    shareButtonLabel
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 34)
+                        .modifier(ShareActionButtonSurface(isProminent: true, reduceTransparency: reduceTransparency))
+                        .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
         .background {
             SharePickerAnchorRepresentable(anchor: shareAnchor)
         }
@@ -638,24 +814,45 @@ struct ShareExportSheet: View {
             scope: effectiveScope,
             scopedSummary: resolvedScoped
         )
-        let canvasSize = aspect.canvasSize
+        let canvasSize = cardCanvasSize
+        let exportSceneSummary = resolvedScoped ?? summary
+        let exportSnapshotKey = makeCosmosSnapshotKey(
+            scope: effectiveScope,
+            sceneSummary: exportSceneSummary,
+            aspect: aspect
+        )
+        let exportCosmosSnapshot: NSImage?
+        if isCosmos, renderedCosmosSnapshotKey == exportSnapshotKey {
+            exportCosmosSnapshot = cosmosSnapshot
+        } else if isCosmos {
+            exportCosmosSnapshot = CosmosSnapshot.image(
+                summary: exportSceneSummary,
+                dimension: exportSnapshotKey.dimension,
+                size: cosmosShareSceneSize(for: aspect),
+                scale: 2
+            )
+        } else {
+            exportCosmosSnapshot = nil
+        }
         let view = ShareCardView(
             data: exportData,
             aspect: aspect,
             showCost: showCost,
             showComposition: showComposition,
+            dimension: dimension,
+            cosmosSnapshot: exportCosmosSnapshot,
             inscription: inscription,
             signature: signature
         )
         .frame(width: canvasSize.width, height: canvasSize.height)
-        .environment(\.colorScheme, scheme)
+        .environment(\.colorScheme, settings.theme == .cosmos ? .dark : scheme)
         .environment(\.locale, locale)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2.0
         renderer.proposedSize = ProposedViewSize(canvasSize)
 
-        let targetAppearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let targetAppearance = NSAppearance(named: settings.theme == .cosmos || scheme == .dark ? .darkAqua : .aqua)
         var cgImage: CGImage?
         if let targetAppearance {
             targetAppearance.performAsCurrentDrawingAppearance {
@@ -1105,7 +1302,7 @@ private struct TideGeometry {
         let leftColWidth: CGFloat
 
         switch aspect {
-        case .portrait:
+        case .portrait, .square:
             let contentWidth = size.width - hMargin * 2
             let topY: CGFloat = 636
             let bottomY: CGFloat = size.height - 76
@@ -1286,11 +1483,310 @@ private struct TideGeometry {
     }
 }
 
+@MainActor
+struct CosmosShareCard: View {
+    let data: ShareCardData
+    let aspect: ShareAspect
+    let showCost: Bool
+    let showComposition: Bool
+    let dimension: BreakdownDimension
+    let snapshot: NSImage?
+
+    @Environment(\.locale) private var locale
+
+    private static let categoryColors: [TokenCategory: Color] = [
+        .cacheRead: Color(hex: "#EAF2FF"),
+        .input: Color(hex: "#FFF0D2"),
+        .cacheWrite: Color(hex: "#E8C48E"),
+        .output: Color(hex: "#D99A56"),
+        .reasoning: Color(hex: "#B65A35"),
+    ]
+
+    private var cardSize: CGSize { aspect.canvasSize }
+    private var sceneSize: CGSize { cosmosShareSceneSize(for: aspect) }
+    private var isWide: Bool { cardSize.width > cardSize.height }
+    private var detailSize: CGSize {
+        isWide
+            ? CGSize(width: cardSize.width - sceneSize.width, height: cardSize.height)
+            : CGSize(width: cardSize.width, height: cardSize.height - sceneSize.height)
+    }
+    private var sceneSummary: UsageSummary { data.scopedSummary ?? data.summary }
+    private var sceneDimension: BreakdownDimension {
+        switch data.kind {
+        case .overall: dimension
+        case .source: .models
+        case .model: .sources
+        }
+    }
+    private var items: [Breakdown] {
+        let items = sceneDimension == .sources ? sceneSummary.bySource : sceneSummary.byModel
+        return items.filter { $0.counts.total > 0 }
+    }
+
+    var body: some View {
+        Group {
+            if isWide {
+                HStack(spacing: 0) {
+                    scene
+                    details
+                }
+            } else {
+                VStack(spacing: 0) {
+                    scene
+                    details
+                }
+            }
+        }
+        .frame(width: cardSize.width, height: cardSize.height)
+        .background(CosmosPalette.page)
+    }
+
+    private var scene: some View {
+        CosmosPalette.page
+            .overlay {
+                if let snapshot {
+                    Image(nsImage: snapshot)
+                        .resizable()
+                        .frame(width: sceneSize.width, height: sceneSize.height)
+                }
+            }
+            .frame(width: sceneSize.width, height: sceneSize.height)
+            .clipped()
+    }
+
+    private var details: some View {
+        Group {
+            if isWide {
+                wideDetails
+            } else {
+                stackedDetails
+            }
+        }
+        .frame(width: detailSize.width, height: detailSize.height, alignment: .topLeading)
+        .background(CosmosPalette.background)
+        .overlay(alignment: isWide ? .leading : .top) {
+            Rectangle()
+                .fill(CosmosPalette.controlRule)
+                .frame(width: isWide ? 1 : nil, height: isWide ? nil : 1)
+        }
+    }
+
+    private var wideDetails: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            hero.padding(.top, 24)
+            if showCost {
+                cost.padding(.top, 18)
+            }
+            hairline.padding(.top, 24)
+            ranking.padding(.top, 22)
+            if showComposition {
+                hairline.padding(.top, 22)
+                composition.padding(.top, 18)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(40)
+    }
+
+    private var stackedDetails: some View {
+        HStack(alignment: .top, spacing: 44) {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                hero.padding(.top, 24)
+                if showCost {
+                    cost.padding(.top, 18)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            VStack(alignment: .leading, spacing: 0) {
+                ranking
+                if showComposition {
+                    hairline.padding(.top, 18)
+                    composition.padding(.top, 16)
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+        .padding(36)
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(verbatim: data.isPartialScope ? data.scopeDisplayTitle : "Token Taken")
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(CosmosPalette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .truncationMode(.middle)
+
+            Text(periodDescription)
+                .font(.system(size: 20))
+                .foregroundStyle(CosmosPalette.ink3)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.top, 10)
+        }
+    }
+
+    private var hero: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Period tokens")
+                .font(.system(size: 16))
+                .foregroundStyle(CosmosPalette.ink3)
+
+            Text(verbatim: TokenFormat.short(data.counts.total))
+                .font(.system(size: 58, weight: .light, design: .monospaced))
+                .foregroundStyle(CosmosPalette.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .padding(.top, 8)
+
+            Text(verbatim: "\(data.counts.total.formatted(.number.locale(locale))) Token")
+                .font(.system(size: 18, design: .monospaced))
+                .foregroundStyle(CosmosPalette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .padding(.top, 4)
+        }
+    }
+
+    private var cost: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(verbatim: TokenFormat.usd(data.estimatedUSD))
+                .font(.system(size: 30, weight: .medium, design: .monospaced))
+                .foregroundStyle(CosmosPalette.accent)
+                .monospacedDigit()
+                .lineLimit(1)
+
+            Text("estimate, not a bill")
+                .font(.system(size: 16))
+                .foregroundStyle(CosmosPalette.ink3)
+                .padding(.top, 4)
+        }
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(CosmosPalette.controlRule)
+            .frame(height: 1)
+    }
+
+    private var ranking: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(sceneDimension == .sources ? LocalizedStringKey("Top 3 sources") : LocalizedStringKey("Top 3 models"))
+                .font(.system(size: 18))
+                .foregroundStyle(CosmosPalette.ink2)
+
+            if items.isEmpty {
+                Text("No usage in this period")
+                    .font(.system(size: 18))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .padding(.top, 16)
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(items.prefix(3).enumerated()), id: \.element.id) { index, item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                                Text(verbatim: "\(index + 1). \(item.name)")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(CosmosPalette.ink)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+
+                                Spacer(minLength: 8)
+
+                                Text(verbatim: TokenFormat.short(item.counts.total))
+                                    .font(.system(size: 18, design: .monospaced))
+                                    .foregroundStyle(CosmosPalette.ink2)
+                                    .monospacedDigit()
+                                    .lineLimit(1)
+                            }
+
+                            Group {
+                                if data.isPartialScope {
+                                    Text("Share of scope \(Share.percent(item.counts.total, of: sceneSummary.total.total))")
+                                } else {
+                                    Text("Share of period \(Share.percent(item.counts.total, of: sceneSummary.total.total))")
+                                }
+                            }
+                            .font(.system(size: 16, design: .monospaced))
+                            .foregroundStyle(CosmosPalette.ink3)
+                            .monospacedDigit()
+                        }
+                    }
+                }
+                .padding(.top, 14)
+            }
+        }
+    }
+
+    private var composition: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Composition")
+                .font(.system(size: 18))
+                .foregroundStyle(CosmosPalette.ink2)
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(CosmosScene.categoryOrder) { category in
+                    let value = sceneSummary.total[category]
+                    HStack(spacing: 10) {
+                        Rectangle()
+                            .fill(Self.categoryColors[category] ?? CosmosPalette.ink3)
+                            .frame(width: 8, height: 8)
+                            .accessibilityHidden(true)
+                        Text(category.title)
+                            .font(.system(size: 16))
+                            .foregroundStyle(CosmosPalette.ink2)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(verbatim: TokenFormat.short(value))
+                            .font(.system(size: 16, design: .monospaced))
+                            .foregroundStyle(CosmosPalette.ink)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        Text(verbatim: Share.percent(value, of: sceneSummary.total.total))
+                            .font(.system(size: 16, design: .monospaced))
+                            .foregroundStyle(CosmosPalette.ink3)
+                            .monospacedDigit()
+                            .frame(width: 58, alignment: .trailing)
+                    }
+                }
+            }
+            .padding(.top, 12)
+        }
+    }
+
+    private var periodDescription: LocalizedStringKey {
+        let start = data.summary.start
+        switch data.summary.period {
+        case .day:
+            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+        case .week:
+            let today = Calendar.current.date(byAdding: .day, value: -1, to: data.summary.end) ?? start
+            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+        case .month:
+            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
+        case .year:
+            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
+        case .all:
+            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
+        }
+    }
+}
+
 struct ShareCardView: View {
     let data: ShareCardData
     let aspect: ShareAspect
     let showCost: Bool
     let showComposition: Bool
+    var dimension: BreakdownDimension = .sources
+    var cosmosSnapshot: NSImage?
     var inscription = ""
     var signature = ""
 
@@ -1301,7 +1797,16 @@ struct ShareCardView: View {
     private var isDark: Bool { scheme == .dark }
 
     var body: some View {
-        if ThemeRuntime.isField {
+        if ThemeRuntime.isCosmos {
+            CosmosShareCard(
+                data: data,
+                aspect: aspect,
+                showCost: showCost,
+                showComposition: showComposition,
+                dimension: dimension,
+                snapshot: cosmosSnapshot
+            )
+        } else if ThemeRuntime.isField {
             FieldShareCard(data: data, aspect: aspect, showCost: showCost, showComposition: showComposition, inscription: inscription, signature: signature)
         } else {
             tideCard
@@ -1321,7 +1826,7 @@ struct ShareCardView: View {
             )
 
             switch aspect {
-            case .portrait:
+            case .portrait, .square:
                 portraitTopContent(geometry: geometry)
             case .landscape:
                 landscapeLeftColumn(geometry: geometry)
@@ -1908,7 +2413,9 @@ private struct ShareSheetBackdrop: View {
     }
 
     var body: some View {
-        if reduceTransparency || theme != .liquidGlass {
+        if theme == .cosmos {
+            CosmosPalette.background
+        } else if reduceTransparency || theme != .liquidGlass {
             Palette.solid
         } else {
             let isDark = scheme == .dark
@@ -1947,9 +2454,14 @@ private struct ShareSheetBackdrop: View {
 
 private struct ShareRoundButtonSurface: ViewModifier {
     let reduceTransparency: Bool
+    let isCosmos: Bool
 
     func body(content: Content) -> some View {
-        if reduceTransparency {
+        if isCosmos {
+            content
+                .background(Rectangle().fill(CosmosPalette.panel))
+                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if reduceTransparency {
             content
                 .background { Circle().fill(Palette.cardSurface) }
                 .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: 1) }
@@ -1963,10 +2475,20 @@ private struct ShareRoundButtonSurface: ViewModifier {
 private struct SharePillSurface: ViewModifier {
     let isSelected: Bool
     let reduceTransparency: Bool
+    let isCosmos: Bool
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
-        if reduceTransparency {
+        if isCosmos {
+            content
+                .background(Rectangle().fill(isSelected ? CosmosPalette.selection : CosmosPalette.panel))
+                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(isSelected ? CosmosPalette.accent : Color.clear)
+                        .frame(height: 2)
+                }
+        } else if reduceTransparency {
             content
                 .background { shape.fill(isSelected ? Palette.cardSurface : Palette.barTrack) }
                 .overlay {
@@ -1991,9 +2513,18 @@ private struct ShareSegmentSurface: ViewModifier {
     let isSelected: Bool
     let reduceTransparency: Bool
     let namespace: Namespace.ID
+    let isCosmos: Bool
 
     func body(content: Content) -> some View {
-        if !isSelected {
+        if isCosmos {
+            content
+                .background(Rectangle().fill(isSelected ? CosmosPalette.selection : Color.clear))
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(isSelected ? CosmosPalette.accent : Color.clear)
+                        .frame(height: 2)
+                }
+        } else if !isSelected {
             content
         } else if reduceTransparency {
             content
@@ -2003,6 +2534,36 @@ private struct ShareSegmentSurface: ViewModifier {
             content
                 .themedGlass(.regular.interactive(), in: .capsule)
                 .glassEffectID("shareAspect", in: namespace)
+        }
+    }
+}
+
+private struct CosmosShareToggleStyle: ToggleStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        Button {
+            configuration.isOn.toggle()
+        } label: {
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Rectangle()
+                    .fill(configuration.isOn ? CosmosPalette.accent : CosmosPalette.track)
+                    .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+                Rectangle()
+                    .fill(configuration.isOn ? CosmosPalette.page : CosmosPalette.ink2)
+                    .frame(width: 14, height: 14)
+                    .padding(3)
+            }
+            .frame(width: 36, height: 20)
+            .contentShape(Rectangle())
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isOn)
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .accessibilityRepresentation {
+            Toggle(configuration)
+                .toggleStyle(.switch)
         }
     }
 }

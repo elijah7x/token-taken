@@ -5,9 +5,8 @@ Status: Draft v0 (2026-11-09)
 ## Theme structure
 
 - A theme is a complete set of design tokens for materials, colors, typography, chart styles, iconography, and motion, plus optional component skins.
-- Theme IDs are `liquid-glass`, `geek`, and `sketchbook`. v1 ships `liquid-glass` and `sketchbook` (shown as Field); the token-based theme system exists from day one.
-- `geek` is a later theme, not a hidden or partially selectable v1 option.
-- A theme applies app-wide: main window, menu bar extra, Settings, share card, and the Dock icon.
+- Theme IDs are `liquid-glass`, `sketchbook`, and `cosmos`. v1 ships Liquid Glass, Field (`sketchbook`), and Cosmos (宇宙); the token-based theme system exists from day one.
+- A theme applies app-wide: main window, menu bar extra, Settings, and share card. A Dock icon variant is optional and must be documented by the theme.
 - A new theme ships only when its token set is complete and its required screenshot set has been accepted.
 
 ## Information integrity
@@ -22,17 +21,18 @@ Status: Draft v0 (2026-11-09)
 - Honor Reduce Transparency, Increase Contrast, and Reduce Motion in every theme.
 - With Reduce Transparency, glass MUST fall back to opaque system materials while preserving hierarchy and legibility.
 - Increase Contrast MUST strengthen relevant system-provided separation and text legibility; Reduce Motion MUST remove nonessential motion without removing information or state feedback.
-- Every theme supports light and dark appearances. The user chooses Follow System, Light, or Dark in Settings; the choice applies to every window and the menu bar extra. Text contrast MUST meet at least WCAG AA in both appearances and all interactive states.
+- Themes support light and dark appearances unless a theme is explicitly documented as dark only. A dark-only theme MUST force dark appearance in every window and the menu bar extra while selected, MUST NOT overwrite the saved appearance preference, and MUST restore that preference when another theme is selected.
+- Where appearance selection is supported, the user chooses Follow System, Light, or Dark in Settings and the choice applies to every window and the menu bar extra. Text contrast MUST meet at least WCAG AA in every supported appearance and all interactive states.
 - Every theme MUST preserve legibility and layout for English (`en`) and Simplified Chinese (`zh-Hans`) without changing number semantics.
 
 ## Menu bar
 
-- The menu-bar presentation follows the app's light/dark setting (Follow System by default) and remains minimal.
+- The menu-bar presentation follows the effective app appearance (Follow System by default), including a documented dark-only theme's forced dark appearance, and remains minimal.
 - It uses the same statistics semantics as the main app and MUST NOT introduce a separate total, hidden rounding rule, or theme-dependent meaning.
 
 ## Visual acceptance
 
-- Acceptance requires real screenshots of the built app, not mockups, in both light and dark appearances, compared against the approved reference design.
+- Acceptance requires real screenshots of the built app, not mockups, in every supported appearance—both light and dark unless the theme is documented as dark only—compared against the approved reference design.
 - Screenshots MUST cover the required screens and representative loading, empty, error, and populated states; accessibility variants are required when they change material or contrast behavior.
 - A new theme's screenshot set MUST use the same screens and data as the accepted reference set so information parity can be reviewed.
 - Visual approval does not waive accessibility, responsive-layout, or information-integrity requirements.
@@ -48,7 +48,18 @@ Status: Draft v0 (2026-11-09)
 - The Field share card can carry an inscription (up to 40 characters) and a signature (up to 24). Both are written on the card only and are never saved or synced.
 - Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), and swaps the Dock icon at runtime. The Finder icon stays the bundle icon.
 
+## Cosmos (`cosmos`)
+
+- Cosmos (宇宙) is the approved A3 视界 design. A Metal ray marcher hosted by `MTKView` draws the black hole, accretion disk, and bodies in one scene; the brighter starfield is ambient and carries no usage data.
+- The five disk bands are contiguous radial bands whose widths encode category shares in `cacheRead`, `input`, `cacheWrite`, `output`, `reasoning` order. Their colors are `#EAF2FF`, `#FFF0D2`, `#E8C48E`, `#D99A56`, and `#B65A35` respectively.
+- The top six sources or models become bodies. Relative share to the power 0.78 determines size, tokens per hour determines orbital speed, and stable identity selects the surface variant. Exact orbital angle is not a data dimension. Items after the top six become dust; dust point count represents item count, not tokens.
+- The scene includes labels, hover readouts, category legend, dust label, and flow caption. The shared period picker, totals, cost, devices, and ranked top-four list with Show all remain outside it, preserving the same statistics and controls as other themes.
+- The menu bar extra shows today's compact Cosmos scene when today has usage. The share card offers the same scope (overall, one source, one model), aspect (2:3, 1:1, 3:2), cost and composition options as the other themes. Wide cards put the scene left of the info panel; square and tall cards put it above. A scoped card renders the scope's breakdown along the other dimension (a source shows its models, a model its sources). The card shows period totals, estimated cost with the existing disclaimer when enabled, the top three items, and the five-category composition when enabled; an unavailable snapshot falls back to a plain dark panel.
+- Cosmos uses system sans type, monospaced tabular figures for numeric readouts, and opaque dark panels. It does not use Liquid Glass, serif type, or Field's custom period picker; its period picker, segmented controls, toggles and buttons are square, bordered Cosmos controls, and breakdown rows carry no per-item color dots.
+- Adaptive render scale limits GPU cost. Reduce Motion renders a still frame without removing data or interactions. Metal failure leaves the surrounding usage data and ranked list available.
+- Cosmos is dark only: it disables the Light/Dark/Follow System control, shows an explanation, and forces dark appearance without changing the saved preference. It keeps the default Dock icon until a Cosmos variant is accepted.
+
 ## Open questions
 
 - Approved reference-design location and the final required screenshot matrix.
-- Complete token values and component skins for `geek` after v1.
+- Cosmos native performance acceptance and a Dock icon variant.

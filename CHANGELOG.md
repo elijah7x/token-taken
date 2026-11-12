@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Added the Field theme (theme ID `sketchbook`): a hand-drawn farm where each source or model is a plot whose area and plant count follow tokens, with ten crops, seasonal scenery, day and night skies, serif type, paper surfaces in place of Liquid Glass, a Field share card, and a 田 Dock icon.
 - Added a Follow System, Light, or Dark setting that applies to every window and the menu bar extra, including sessions that only open the menu bar extra.
 - Field: a turning water wheel, drifting chimney smoke, and night fireflies (still under Reduce Motion), today's field in the menu bar extra, crop flags on plots too small for a sign, fixed crops per source across views, and an inscription and signature on the share card.
+- Added the Cosmos theme (宇宙, theme ID `cosmos`): a Metal ray-marched black hole with a five-category accretion disk, orbiting sources or models, and dust; opaque dark surfaces, a compact menu-bar scene, a share card with the usual scope, aspect, cost and composition options, and a still frame under Reduce Motion. Cosmos forces dark appearance while selected without overwriting the saved appearance preference.
 
 ### Changed
 

@@ -6,6 +6,7 @@ import TokenTakenKit
 /// `AppSettings` keeps it in step with `theme` and bumps `formatRevision` so every scene rebuilds on a change.
 enum ThemeRuntime {
     nonisolated(unsafe) static var isField = false
+    nonisolated(unsafe) static var isCosmos = false
 }
 
 /// Solid paper button with a ruled edge, replacing `.glass` under the Field theme.
@@ -20,6 +21,32 @@ struct FieldButtonStyle: ButtonStyle {
             )
             .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+struct CosmosButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(CosmosPalette.ink2)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                Rectangle()
+                    .fill(configuration.isPressed ? CosmosPalette.selection : CosmosPalette.background)
+            )
+            .overlay(Rectangle().stroke(CosmosPalette.controlRule, lineWidth: 1))
+            .contentShape(Rectangle())
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func themedPlainButton() -> some View {
+        if ThemeRuntime.isCosmos {
+            buttonStyle(CosmosButtonStyle())
+        } else {
+            buttonStyle(.plain)
+        }
     }
 }
 
@@ -82,6 +109,71 @@ struct FieldPeriodPicker: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Usage period"))
+    }
+}
+
+struct CosmosPeriodPicker: View {
+    @Environment(AppModel.self) private var model
+    @FocusState private var focusedPeriod: Period?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Usage period")
+                .font(.system(size: 11))
+                .tracking(0.8)
+                .foregroundStyle(CosmosPalette.ink3)
+
+            HStack(spacing: 0) {
+                ForEach(Array(Period.allCases.enumerated()), id: \.element.id) { index, period in
+                    let selected = model.period == period
+                    Button {
+                        model.period = period
+                    } label: {
+                        Text(period.title)
+                            .font(.system(size: 11, weight: selected ? .medium : .regular))
+                            .foregroundStyle(selected ? CosmosPalette.ink : CosmosPalette.ink3)
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                            .background(selected ? CosmosPalette.track : .clear)
+                            .overlay(alignment: .bottom) {
+                                Rectangle()
+                                    .fill(CosmosPalette.accent)
+                                    .frame(height: 2)
+                                    .opacity(selected ? 1 : 0)
+                            }
+                            .overlay(alignment: .leading) {
+                                Rectangle()
+                                    .fill(CosmosPalette.rule)
+                                    .frame(width: index == 0 ? 0 : 1)
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(period.shortcutKey, modifiers: .command)
+                    .focused($focusedPeriod, equals: period)
+                    .onKeyPress(.leftArrow) {
+                        moveSelection(by: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.rightArrow) {
+                        moveSelection(by: 1)
+                        return .handled
+                    }
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .background(CosmosPalette.background)
+            .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Usage period"))
+        }
+    }
+
+    private func moveSelection(by offset: Int) {
+        let periods = Period.allCases
+        guard let index = periods.firstIndex(of: model.period) else { return }
+        let newIndex = min(max(index + offset, 0), periods.count - 1)
+        model.period = periods[newIndex]
+        focusedPeriod = periods[newIndex]
     }
 }
 

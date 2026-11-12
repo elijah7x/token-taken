@@ -61,10 +61,22 @@ struct TokenTakenApp: App {
             withEnvironment(MenuBarContent().id(settings.formatRevision))
                 .onAppear { refreshCoordinator?.start() }
         } label: {
-            Label(TokenFormat.short(model.todaySummary.total.total), image: "MenuBarGlyph")
-                .id(settings.formatRevision)
-                .labelStyle(.titleAndIcon)
-                .monospacedDigit()
+            Group {
+                if settings.theme == .cosmos {
+                    Label {
+                        Text(TokenFormat.short(model.todaySummary.total.total))
+                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .foregroundStyle(CosmosPalette.ink)
+                    } icon: {
+                        CosmosMenuBarGlyph()
+                    }
+                } else {
+                    Label(TokenFormat.short(model.todaySummary.total.total), image: "MenuBarGlyph")
+                }
+            }
+            .id(settings.formatRevision)
+            .labelStyle(.titleAndIcon)
+            .monospacedDigit()
         }
         .menuBarExtraStyle(.window)
     }
@@ -80,6 +92,7 @@ struct TokenTakenApp: App {
                 .environment(router)
                 .environment(\.locale, locale)
                 .fontDesign(settings.theme == .field ? .serif : nil)
+                .preferredColorScheme(settings.theme == .cosmos ? .dark : nil)
         } else {
             content
                 .environment(settings)
@@ -87,7 +100,24 @@ struct TokenTakenApp: App {
                 .environment(router)
                 .environment(\.locale, locale)
                 .fontDesign(settings.theme == .field ? .serif : nil)
+                .preferredColorScheme(settings.theme == .cosmos ? .dark : nil)
         }
+    }
+}
+
+private struct CosmosMenuBarGlyph: View {
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(CosmosPalette.ink2, lineWidth: 1)
+                .frame(width: 7, height: 7)
+            Ellipse()
+                .stroke(CosmosPalette.accent, lineWidth: 1)
+                .frame(width: 17, height: 6)
+                .rotationEffect(.degrees(-12))
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
     }
 }
 

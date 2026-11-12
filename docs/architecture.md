@@ -85,7 +85,8 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 ### Presentation and themes
 
 - Provides main-window view models and SwiftUI views for day, week (Monday start), month, year, and all-time periods, with model, source, and enabled device breakdowns.
-- Ships theme IDs `liquid-glass` and `sketchbook` (Field) in v1 and reserves `geek`. `ThemeRuntime` mirrors the active theme for dynamic palette colors and glass helpers; changing theme rebuilds every scene. Field rendering lives in `FieldTheme.swift`, `FieldLandscapeView.swift`, and `FieldSurfaces.swift`.
+- Ships theme IDs `liquid-glass`, `sketchbook` (Field), and `cosmos` (Cosmos, 宇宙) in v1; `cosmos` replaces the reserved `geek` ID. `ThemeRuntime` mirrors the active theme for dynamic palette colors and glass helpers; changing theme rebuilds every scene. Field rendering lives in `FieldTheme.swift`, `FieldLandscapeView.swift`, and `FieldSurfaces.swift`.
+- Cosmos renders its ray-marched scene through Metal and `MTKView` in `CosmosRenderer.swift`, `CosmosScene.swift`, `CosmosSceneView.swift`, and `CosmosShaders.metal`. It uses adaptive render scale, a still frame under Reduce Motion, and a dark-only appearance exception that preserves the saved light/dark preference.
 - Preserves loading, empty, stale, and error states rather than displaying missing data as zero.
 - Follows `docs/contracts/themes.md` for theme boundaries.
 

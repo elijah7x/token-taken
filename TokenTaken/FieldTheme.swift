@@ -236,7 +236,7 @@ enum FieldAppIconSwitcher {
     static func apply(_ theme: AppTheme) {
         guard let app = NSApp else { return }
         switch theme {
-        case .liquidGlass:
+        case .liquidGlass, .cosmos:
             app.applicationIconImage = nil
         case .field:
             let isDark = app.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua

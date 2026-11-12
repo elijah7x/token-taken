@@ -8,6 +8,7 @@ import TokenTakenKit
 enum AppTheme: String, CaseIterable {
     case liquidGlass = "liquid-glass"
     case field = "sketchbook"
+    case cosmos = "cosmos"
 }
 
 enum AppLanguage: String, CaseIterable, Identifiable {
@@ -90,7 +91,8 @@ final class AppSettings {
             guard theme != oldValue else { return }
             defaults.set(theme.rawValue, forKey: Keys.theme)
             ThemeRuntime.isField = theme == .field
-            FieldAppIconSwitcher.apply(theme)
+            ThemeRuntime.isCosmos = theme == .cosmos
+            applyAppearance()
             formatRevision &+= 1
         }
     }
@@ -110,9 +112,10 @@ final class AppSettings {
         }
     }
 
-    /// Applies the light/dark choice to every window, the menu bar panel and the Dock icon.
+    /// Applies the effective appearance to every window, the menu bar panel and the Dock icon.
+    /// Cosmos forces dark without changing the preference that other themes use.
     func applyAppearance() {
-        NSApp?.appearance = appearance.nsAppearance
+        NSApp?.appearance = theme == .cosmos ? NSAppearance(named: .darkAqua) : appearance.nsAppearance
         FieldAppIconSwitcher.apply(theme)
     }
 
@@ -225,6 +228,7 @@ final class AppSettings {
         let storedTheme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
         theme = storedTheme
         ThemeRuntime.isField = storedTheme == .field
+        ThemeRuntime.isCosmos = storedTheme == .cosmos
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
         language = AppLanguage(rawValue: defaults.string(forKey: Keys.language) ?? "") ?? .system
         numberUnits = NumberUnits(rawValue: defaults.string(forKey: Keys.numberUnits) ?? "") ?? .automatic

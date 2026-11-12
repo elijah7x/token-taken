@@ -1,6 +1,54 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ Token" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Token"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Token"
+          }
+        }
+      }
+    },
+    "%@ Token · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Token · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Token · %@"
+          }
+        }
+      }
+    },
+    "%@ of this period · approximately %@ tokens per hour" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ of this period · approximately %@ tokens per hour"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占本期 %@ · 平均每小时 ≈ %@ Token"
+          }
+        }
+      }
+    },
     "%@ of total" : {
       "localizations" : {
         "zh-Hans" : {
@@ -43,6 +91,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ Token，占总量 %@"
+          }
+        }
+      }
+    },
+    "%@ tokens, %@ of total, approximately %@ tokens per hour" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tokens, %@ of total, approximately %@ tokens per hour"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ Token，占 %@，平均每小时约 %@ Token"
           }
         }
       }
@@ -193,6 +257,22 @@
         }
       }
     },
+    "%lld more · %@ tokens" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld more · %@ tokens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其余 %lld 个 · %@ Token"
+          }
+        }
+      }
+    },
     "%lld sources stale" : {
       "localizations" : {
         "en" : {
@@ -273,6 +353,22 @@
         }
       }
     },
+    "A black hole bends starlight and particle flow; five token categories form the disk and up to six bodies share the same occluded light paths." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A black hole bends starlight and particle flow; five token categories form the disk and up to six bodies share the same occluded light paths."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "黑洞弯折星光与粒子流；五类 Token 组成吸积盘，至多六颗天体在同一弯曲光路中受遮挡。"
+          }
+        }
+      }
+    },
     "A file named token-taken already exists in the chosen folder." : {
       "localizations" : {
         "zh-Hans" : {
@@ -289,6 +385,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关于"
+          }
+        }
+      }
+    },
+    "About %@ per hour" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About %@ per hour"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "平均每小时 ≈ %@"
           }
         }
       }
@@ -737,6 +849,22 @@
         }
       }
     },
+    "Composition" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Composition"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "构成"
+          }
+        }
+      }
+    },
     "Confluence" : {
       "localizations" : {
         "zh-Hans" : {
@@ -805,6 +933,38 @@
         }
       }
     },
+    "Cosmos" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cosmos"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "宇宙"
+          }
+        }
+      }
+    },
+    "Cosmos is dark only." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cosmos is dark only."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "宇宙主题仅有深色外观。"
+          }
+        }
+      }
+    },
     "Cost estimate" : {
       "localizations" : {
         "zh-Hans" : {
@@ -837,6 +997,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法打开本地用量数据库。"
+          }
+        }
+      }
+    },
+    "Current period" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current period"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前周期"
           }
         }
       }
@@ -915,6 +1091,22 @@
         }
       }
     },
+    "Disk flow ∝ tokens per hour (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Disk flow ∝ tokens per hour (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "盘面流速 ∝ 本期每小时 Token（%@）"
+          }
+        }
+      }
+    },
     "Does not include %@" : {
       "localizations" : {
         "en" : {
@@ -949,6 +1141,22 @@
     },
     "English" : {
       "shouldTranslate" : false
+    },
+    "Estimated cost" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimated cost"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "估算费用"
+          }
+        }
+      }
     },
     "Everything is computed offline on this Mac; logs are never modified or uploaded." : {
       "localizations" : {
@@ -1010,6 +1218,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "田野"
+          }
+        }
+      }
+    },
+    "Five token categories" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Five token categories"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "五类 Token 图例"
           }
         }
       }
@@ -1974,6 +2198,22 @@
         }
       }
     },
+    "Period tokens" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Period tokens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本期 Token"
+          }
+        }
+      }
+    },
     "Plot area and plant count follow tokens · read from local logs only" : {
       "localizations" : {
         "en" : {
@@ -2326,6 +2566,54 @@
         }
       }
     },
+    "Share of period %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share of period %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占本期 %@"
+          }
+        }
+      }
+    },
+    "Share of scope %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share of scope %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占范围 %@"
+          }
+        }
+      }
+    },
+    "Share snapshot" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share snapshot"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享快照"
+          }
+        }
+      }
+    },
     "Share totals between your Macs through iCloud Drive." : {
       "localizations" : {
         "en" : {
@@ -2574,6 +2862,22 @@
         }
       }
     },
+    "Square 1:1" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Square 1:1"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "方形 1:1"
+          }
+        }
+      }
+    },
     "Stale" : {
       "localizations" : {
         "en" : {
@@ -2680,6 +2984,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未找到应用内置的 token-taken 工具。"
+          }
+        }
+      }
+    },
+    "The cosmos scene cannot be drawn on this Mac." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The cosmos scene cannot be drawn on this Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 无法绘制宇宙场景。"
           }
         }
       }
@@ -2928,6 +3248,38 @@
         }
       }
     },
+    "Top 3 models" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top 3 models"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主要模型（前 3）"
+          }
+        }
+      }
+    },
+    "Top 3 sources" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top 3 sources"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主要来源（前 3）"
+          }
+        }
+      }
+    },
     "Top model" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2960,6 +3312,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "活跃来源"
+          }
+        }
+      }
+    },
+    "Total" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "总计"
           }
         }
       }

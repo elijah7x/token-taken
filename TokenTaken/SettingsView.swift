@@ -3,7 +3,7 @@ import ServiceManagement
 import SwiftUI
 import TokenTakenKit
 
-/// The selected settings section, laid directly on the window's glass base; the tray carries the section list.
+/// The selected settings section on the themed window base; the tray carries the section list.
 struct SettingsView: View {
     @Environment(MainWindowRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -21,6 +21,7 @@ struct SettingsView: View {
                 .transition(.opacity)
         }
         .scrollIndicators(.automatic)
+        .background(ThemeRuntime.isCosmos ? CosmosPalette.background : .clear)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: router.settingsSection)
     }
 
@@ -146,12 +147,18 @@ private struct SettingsNavigationButton: View {
             .padding(.horizontal, 10)
             .frame(height: 36)
             .background {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : 8, style: .continuous)
                     .fill(
                         isSelected
-                            ? Palette.roleAccent.opacity(contrast == .increased ? 0.18 : 0.12)
-                            : (isHovered ? Palette.ink1.opacity(0.05) : .clear)
+                            ? (ThemeRuntime.isCosmos ? CosmosPalette.selection : Palette.roleAccent.opacity(contrast == .increased ? 0.18 : 0.12))
+                            : (isHovered ? (ThemeRuntime.isCosmos ? CosmosPalette.track : Palette.ink1.opacity(0.05)) : .clear)
                     )
+            }
+            .overlay(alignment: .leading) {
+                Rectangle()
+                    .fill(CosmosPalette.accent)
+                    .frame(width: 2)
+                    .opacity(ThemeRuntime.isCosmos && isSelected ? 1 : 0)
             }
             .contentShape(Rectangle())
         }
@@ -180,14 +187,15 @@ struct GlassToggleStyle: ToggleStyle {
                 configuration.isOn.toggle()
             }
         } label: {
-            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                track(isOn: configuration.isOn)
-                knob
-                    .padding(2)
+            if ThemeRuntime.isCosmos {
+                toggleTrack(configuration: configuration)
+                    .contentShape(Rectangle())
+                    .animation(spring, value: configuration.isOn)
+            } else {
+                toggleTrack(configuration: configuration)
+                    .contentShape(Capsule())
+                    .animation(spring, value: configuration.isOn)
             }
-            .frame(width: 40, height: 24)
-            .contentShape(Capsule())
-            .animation(spring, value: configuration.isOn)
         }
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.45)
@@ -197,9 +205,22 @@ struct GlassToggleStyle: ToggleStyle {
         }
     }
 
+    private func toggleTrack(configuration: Configuration) -> some View {
+        ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+            track(isOn: configuration.isOn)
+            knob(isOn: configuration.isOn)
+                .padding(ThemeRuntime.isCosmos ? 3 : 2)
+        }
+        .frame(width: 40, height: 24)
+    }
+
     @ViewBuilder
     private func track(isOn: Bool) -> some View {
-        if reduceTransparency {
+        if ThemeRuntime.isCosmos {
+            Rectangle()
+                .fill(isOn ? CosmosPalette.accent : CosmosPalette.track)
+                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if reduceTransparency {
             Capsule()
                 .fill(isOn ? Palette.roleAccent : Palette.sidebarSurface)
                 .overlay {
@@ -221,8 +242,13 @@ struct GlassToggleStyle: ToggleStyle {
     }
 
     @ViewBuilder
-    private var knob: some View {
-        if reduceTransparency {
+    private func knob(isOn: Bool) -> some View {
+        if ThemeRuntime.isCosmos {
+            Rectangle()
+                .fill(isOn ? CosmosPalette.page : CosmosPalette.ink3)
+                .frame(width: 16, height: 16)
+                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if reduceTransparency {
             Circle()
                 .fill(Color.white)
                 .frame(width: 20, height: 20)
@@ -279,7 +305,6 @@ private struct GlassMenuPicker<SelectionValue: Hashable, CurrentLabel: View, Opt
             .padding(.horizontal, 12)
             .frame(minHeight: 28)
             .modifier(SettingsActionPillSurface(reduceTransparency: reduceTransparency))
-            .contentShape(Capsule())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -344,17 +369,19 @@ private struct SettingsRowsGroup<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.inner, style: .continuous)
         VStack(alignment: .leading, spacing: 0) {
             content
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            shape.fill(reduceTransparency ? Palette.cardSurface : Palette.ink1.opacity(0.025))
+            shape.fill(ThemeRuntime.isCosmos ? CosmosPalette.panel : (reduceTransparency ? Palette.cardSurface : Palette.ink1.opacity(0.025)))
         }
         .overlay {
-            if reduceTransparency {
+            if ThemeRuntime.isCosmos {
+                shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
+            } else if reduceTransparency {
                 shape.strokeBorder(Palette.hairline, lineWidth: 1)
             }
         }
@@ -399,7 +426,6 @@ private struct SettingsScanActionPill: View {
             .padding(.horizontal, 12)
             .frame(height: 28)
             .modifier(SettingsActionPillSurface(reduceTransparency: reduceTransparency))
-            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .fixedSize(horizontal: true, vertical: false)
@@ -419,13 +445,20 @@ private struct SettingsActionPillSurface: ViewModifier {
     let reduceTransparency: Bool
 
     func body(content: Content) -> some View {
-        if reduceTransparency {
+        if ThemeRuntime.isCosmos {
+            content
+                .background(CosmosPalette.background)
+                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+                .contentShape(Rectangle())
+        } else if reduceTransparency {
             content
                 .background { Capsule().fill(Palette.cardSurface) }
                 .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
+                .contentShape(Capsule())
         } else {
             content
                 .themedGlass(.regular.interactive(), in: .capsule)
+                .contentShape(Capsule())
         }
     }
 }
@@ -485,7 +518,7 @@ private struct GeneralSettingsTab: View {
             VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
                     title: "Appearance",
-                    description: settings.theme == .field ? LocalizedStringKey("Theme, language, and number units.") : LocalizedStringKey("Theme, transparency, language, and number units.")
+                    description: settings.theme == .liquidGlass ? LocalizedStringKey("Theme, transparency, language, and number units.") : LocalizedStringKey("Theme, language, and number units.")
                 )
 
                 SettingsRowsGroup {
@@ -496,15 +529,21 @@ private struct GeneralSettingsTab: View {
                                 Text("Liquid Glass")
                             case .field:
                                 Text("Field")
+                            case .cosmos:
+                                Text("Cosmos")
                             }
                         } options: {
                             Text("Liquid Glass").tag(AppTheme.liquidGlass)
                             Text("Field").tag(AppTheme.field)
+                            Text("Cosmos").tag(AppTheme.cosmos)
                         }
                     }
 
                     SettingsHairline()
-                    SettingsControlRow(title: "Light or dark") {
+                    SettingsControlRow(
+                        title: "Light or dark",
+                        help: settings.theme == .cosmos ? LocalizedStringKey("Cosmos is dark only.") : nil
+                    ) {
                         GlassMenuPicker("Light or dark", selection: $settings.appearance) {
                             Text(settings.appearance.title)
                         } options: {
@@ -512,6 +551,7 @@ private struct GeneralSettingsTab: View {
                                 Text(appearance.title).tag(appearance)
                             }
                         }
+                        .disabled(settings.theme == .cosmos)
                     }
 
                     if settings.theme == .liquidGlass {
@@ -540,7 +580,7 @@ private struct GeneralSettingsTab: View {
                                 .foregroundStyle(Palette.ink3)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 12)
-                            if reduceTransparency {
+                            if reduceTransparency && !ThemeRuntime.isCosmos {
                                 Button("Relaunch") { settings.relaunch() }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
@@ -597,7 +637,7 @@ private struct GeneralSettingsTab: View {
                                 .font(.system(size: 11.5))
                                 .foregroundStyle(Palette.ink3)
                             Spacer(minLength: 12)
-                            if reduceTransparency {
+                            if reduceTransparency && !ThemeRuntime.isCosmos {
                                 Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
@@ -1253,7 +1293,7 @@ private struct AboutSettingsTab: View {
 
             SettingsRowsGroup {
                 SettingsControlRow(title: "Command-Line Tool", help: "Use token-taken in Terminal") {
-                    if reduceTransparency {
+                    if reduceTransparency && !ThemeRuntime.isCosmos {
                         Button("Install Command-Line Tool", action: install)
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -1297,7 +1337,7 @@ private struct AboutSettingsTab: View {
 
             HStack(spacing: 8) {
                 if case .available(_, let url) = updateChecker.state {
-                    if reduceTransparency {
+                    if reduceTransparency && !ThemeRuntime.isCosmos {
                         Link("Download", destination: url)
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -1308,7 +1348,7 @@ private struct AboutSettingsTab: View {
                     }
                 }
 
-                if reduceTransparency {
+                if reduceTransparency && !ThemeRuntime.isCosmos {
                     Button("Check for Updates") {
                         Task { await updateChecker.check() }
                     }

@@ -71,7 +71,7 @@ token-taken models --period month --json
 
 ### Presentation and distribution
 
-- Ship the `liquid-glass` and Field (`sketchbook`) themes, with a Follow System, Light, or Dark setting, while keeping `geek` as a reserved theme ID (owner decision 2026-11-12, [ADR-0007](decisions/0007-field-theme.md)).
+- Ship the `liquid-glass`, Field (`sketchbook`), and Cosmos (`cosmos`, shown as 宇宙) themes. Liquid Glass and Field offer Follow System, Light, or Dark; Cosmos is a documented dark-only theme that forces dark appearance while selected without overwriting the saved preference (owner decisions 2026-11-12, [ADR-0007](decisions/0007-field-theme.md), [ADR-0008](decisions/0008-cosmos-theme.md)).
 - Provide the main window, per-model/source/device breakdowns described above, and a minimal menu bar extra.
 - Distribute a non-sandboxed macOS app outside the Mac App Store with Developer ID. Signing, notarization, and DMG packaging follow [ADR-0004](decisions/0004-distribution.md).
 - Keep local data under `~/Library/Application Support/Token Taken/`.
@@ -88,7 +88,6 @@ token-taken models --period month --json
 - Quota or limit tracking.
 - Windows or Linux support.
 - Mac App Store distribution.
-- The Geek theme.
 - Non-iCloud sync backends, including local folder, S3, and WebDAV backends.
 - Styled export cards. V1 export is CLI JSON/CSV.
 - Team or multi-user features.
@@ -98,7 +97,7 @@ token-taken models --period month --json
 
 These items follow v1 and are not release commitments:
 
-- Geek: a flat, modern, dark theme.
+- A Cosmos Dock icon variant.
 - Styled and customizable export cards in v1.x.
 - Local folder, S3, and WebDAV sync behind the sync backend interface.
 

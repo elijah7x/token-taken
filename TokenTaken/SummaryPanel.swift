@@ -15,6 +15,14 @@ struct SummaryRail: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
+        if ThemeRuntime.isCosmos {
+            cosmosBody
+        } else {
+            standardBody
+        }
+    }
+
+    private var standardBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(periodDescription)
                 .font(.system(size: 12, weight: .medium))
@@ -79,6 +87,92 @@ struct SummaryRail: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var cosmosBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Current period")
+                .font(.system(size: 11))
+                .foregroundStyle(CosmosPalette.ink3)
+            Text(periodDescription)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(CosmosPalette.ink)
+                .monospacedDigit()
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 3)
+                .contentTransition(reduceMotion ? .identity : .numericText())
+
+            if isCollecting {
+                Text(verbatim: "—")
+                    .font(.system(size: 24, weight: .medium, design: .monospaced))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .padding(.top, 12)
+                    .accessibilityHidden(true)
+                Text("Summarising…")
+                    .font(.system(size: 11))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .padding(.top, 4)
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Total")
+                        .font(.system(size: 11))
+                        .foregroundStyle(CosmosPalette.ink3)
+                    Spacer(minLength: 8)
+                    Text(TokenFormat.short(summary.total.total))
+                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .foregroundStyle(CosmosPalette.accent)
+                        .contentTransition(reduceMotion ? .identity : .numericText())
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityValue(TokenFormat.spoken(summary.total.total))
+                .padding(.top, 12)
+
+                Text(verbatim: "\(summary.total.total.formatted(.number.locale(locale))) Token")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .padding(.top, 2)
+
+                Rectangle()
+                    .fill(CosmosPalette.rule)
+                    .frame(height: 1)
+                    .padding(.vertical, 12)
+                    .accessibilityHidden(true)
+
+                Text("Estimated cost")
+                    .font(.system(size: 11))
+                    .foregroundStyle(CosmosPalette.ink3)
+                Text("estimate, not a bill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .padding(.top, 1)
+                Text(TokenFormat.usd(summary.cost.estimatedUSD))
+                    .font(.system(size: 24, weight: .medium, design: .monospaced))
+                    .foregroundStyle(CosmosPalette.ink)
+                    .padding(.top, 4)
+                    .contentTransition(reduceMotion ? .identity : .numericText())
+                    .help(costHelp)
+
+                if summary.cost.unpricedTokens > 0 {
+                    Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
+                        .font(.system(size: 11))
+                        .foregroundStyle(CosmosPalette.accent)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
+
+                if model.dataIssues.devices > 0 {
+                    PartialDeviceBanner(
+                        summary: summary,
+                        remoteDevices: model.remoteDevices,
+                        deviceIssueCount: model.dataIssues.devices,
+                        reduceTransparency: reduceTransparency
+                    )
+                    .padding(.top, 10)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private var periodDescription: LocalizedStringKey {
         let start = summary.start
         switch model.period {
@@ -113,6 +207,24 @@ struct TrayDevices: View {
     @Environment(\.locale) private var locale
 
     var body: some View {
+        if ThemeRuntime.isCosmos {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Devices")
+                    .font(.system(size: 11))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .padding(.bottom, 6)
+                Rectangle()
+                    .fill(CosmosPalette.rule)
+                    .frame(height: 1)
+                    .accessibilityHidden(true)
+                deviceTimeline
+            }
+        } else {
+            deviceTimeline
+        }
+    }
+
+    private var deviceTimeline: some View {
         TimelineView(.everyMinute) { context in
             if isCollecting {
                 VStack(alignment: .leading, spacing: 3) {
@@ -133,10 +245,11 @@ struct TrayDevices: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, ThemeRuntime.isCosmos ? 8 : 0)
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(Text("Summarising…"))
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: ThemeRuntime.isCosmos ? 0 : 12) {
                     ForEach(summary.byDevice) { device in
                         deviceBlock(device, now: context.date)
                     }
@@ -161,6 +274,12 @@ struct TrayDevices: View {
                                 .lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, ThemeRuntime.isCosmos ? 8 : 0)
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(CosmosPalette.rule)
+                                .frame(height: ThemeRuntime.isCosmos ? 1 : 0)
+                        }
                         .accessibilityElement(children: .combine)
                     }
                 }
@@ -170,35 +289,75 @@ struct TrayDevices: View {
 
     private func deviceBlock(_ device: Breakdown, now: Date) -> some View {
         let isLocal = isLocalDevice(device)
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .center, spacing: 6) {
-                Text(verbatim: device.name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.ink1)
+        return Group {
+            if ThemeRuntime.isCosmos {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .center, spacing: 6) {
+                        Text(verbatim: device.name)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(CosmosPalette.ink)
+                            .lineLimit(1)
+                        if isLocal {
+                            ThisMacBadge()
+                        }
+                        Spacer(minLength: 6)
+                        Text(TokenFormat.short(device.counts.total))
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .foregroundStyle(CosmosPalette.ink)
+                    }
+
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        if let update = updateStatus(for: device, isLocal: isLocal, now: now) {
+                            update.text
+                                .foregroundStyle(update.isWarning ? Palette.healthWarn : CosmosPalette.ink3)
+                        }
+                        Spacer(minLength: 6)
+                        if hidesDeviceShare {
+                            Text("Included")
+                        } else {
+                            Text(Share.percent(device.counts.total, of: summary.total.total))
+                        }
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(CosmosPalette.ink3)
                     .lineLimit(1)
-                if isLocal {
-                    ThisMacBadge()
                 }
-            }
-
-            Group {
-                if hidesDeviceShare {
-                    Text(verbatim: "\(TokenFormat.short(device.counts.total)) · ") + Text("Included")
-                } else {
-                    Text(verbatim: "\(TokenFormat.short(device.counts.total)) · \(Share.percent(device.counts.total, of: summary.total.total))")
+                .padding(.vertical, 8)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(CosmosPalette.rule).frame(height: 1)
                 }
-            }
-            .font(.system(size: 12))
-            .monospacedDigit()
-            .foregroundStyle(Palette.ink2)
-            .lineLimit(1)
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .center, spacing: 6) {
+                        Text(verbatim: device.name)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Palette.ink1)
+                            .lineLimit(1)
+                        if isLocal {
+                            ThisMacBadge()
+                        }
+                    }
 
-            if let update = updateStatus(for: device, isLocal: isLocal, now: now) {
-                update.text
-                    .font(.system(size: 11, weight: update.isWarning ? .medium : .regular))
-                    .foregroundStyle(update.isWarning ? Palette.healthWarn : Palette.ink3)
+                    Group {
+                        if hidesDeviceShare {
+                            Text(verbatim: "\(TokenFormat.short(device.counts.total)) · ") + Text("Included")
+                        } else {
+                            Text(verbatim: "\(TokenFormat.short(device.counts.total)) · \(Share.percent(device.counts.total, of: summary.total.total))")
+                        }
+                    }
+                    .font(.system(size: 12))
                     .monospacedDigit()
+                    .foregroundStyle(Palette.ink2)
                     .lineLimit(1)
+
+                    if let update = updateStatus(for: device, isLocal: isLocal, now: now) {
+                        update.text
+                            .font(.system(size: 11, weight: update.isWarning ? .medium : .regular))
+                            .foregroundStyle(update.isWarning ? Palette.healthWarn : Palette.ink3)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -317,12 +476,20 @@ private struct PartialDeviceBanner: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background {
-            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
-                .fill(Palette.healthWarn.opacity(reduceTransparency ? 0.18 : 0.12))
+            if ThemeRuntime.isCosmos {
+                Rectangle().fill(CosmosPalette.track)
+            } else {
+                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+                    .fill(Palette.healthWarn.opacity(reduceTransparency ? 0.18 : 0.12))
+            }
         }
         .overlay {
-            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
-                .strokeBorder(Palette.healthWarn.opacity(0.30), lineWidth: 1)
+            if ThemeRuntime.isCosmos {
+                Rectangle().strokeBorder(CosmosPalette.accent, lineWidth: 1)
+            } else {
+                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+                    .strokeBorder(Palette.healthWarn.opacity(0.30), lineWidth: 1)
+            }
         }
         .accessibilityElement(children: .combine)
     }
@@ -345,12 +512,16 @@ private struct ThisMacBadge: View {
     var body: some View {
         Text("This Mac")
             .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(Palette.ink2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.accent : Palette.ink2)
+            .padding(.horizontal, ThemeRuntime.isCosmos ? 4 : 6)
+            .padding(.vertical, ThemeRuntime.isCosmos ? 0 : 2)
             .background {
-                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
-                    .fill(Palette.ink1.opacity(0.06))
+                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+                    .fill(ThemeRuntime.isCosmos ? CosmosPalette.background : Palette.ink1.opacity(0.06))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+                    .strokeBorder(ThemeRuntime.isCosmos ? CosmosPalette.controlRule : .clear, lineWidth: 1)
             }
             .fixedSize()
     }
@@ -420,13 +591,25 @@ struct FullWidthProportionBar: View {
             let width = proxy.size.width
             let fillWidth = clamped > 0 ? min(width, max(height, width * CGFloat(clamped))) : 0
             ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Palette.barTrack)
-                    .frame(width: width, height: height)
-                if fillWidth > 0 {
+                if ThemeRuntime.isCosmos {
+                    Rectangle()
+                        .fill(CosmosPalette.track)
+                        .frame(width: width, height: height)
+                } else {
                     Capsule()
-                        .fill(color)
-                        .frame(width: fillWidth, height: height)
+                        .fill(Palette.barTrack)
+                        .frame(width: width, height: height)
+                }
+                if fillWidth > 0 {
+                    if ThemeRuntime.isCosmos {
+                        Rectangle()
+                            .fill(color)
+                            .frame(width: fillWidth, height: height)
+                    } else {
+                        Capsule()
+                            .fill(color)
+                            .frame(width: fillWidth, height: height)
+                    }
                 }
             }
         }
@@ -446,13 +629,25 @@ private struct ProportionBar: View {
         let clamped = min(max(ratio, 0), 1)
         let fillWidth = clamped > 0 ? max(height, width * CGFloat(clamped)) : 0
         ZStack(alignment: .leading) {
-            Capsule()
-                .fill(Palette.barTrack)
-                .frame(width: width, height: height)
-            if fillWidth > 0 {
+            if ThemeRuntime.isCosmos {
+                Rectangle()
+                    .fill(CosmosPalette.track)
+                    .frame(width: width, height: height)
+            } else {
                 Capsule()
-                    .fill(color)
-                    .frame(width: fillWidth, height: height)
+                    .fill(Palette.barTrack)
+                    .frame(width: width, height: height)
+            }
+            if fillWidth > 0 {
+                if ThemeRuntime.isCosmos {
+                    Rectangle()
+                        .fill(color)
+                        .frame(width: fillWidth, height: height)
+                } else {
+                    Capsule()
+                        .fill(color)
+                        .frame(width: fillWidth, height: height)
+                }
             }
         }
         .accessibilityHidden(true)
@@ -583,11 +778,13 @@ struct BreakdownCard: View {
             if let secondary {
                 VStack(spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 8, height: 8)
-                            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
-                            .accessibilityHidden(true)
+                        if !ThemeRuntime.isCosmos {
+                            Circle()
+                                .fill(color)
+                                .frame(width: 8, height: 8)
+                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                                .accessibilityHidden(true)
+                        }
 
                         Text(verbatim: item.name)
                             .font(isModel
@@ -601,7 +798,7 @@ struct BreakdownCard: View {
                         Spacer(minLength: 12)
 
                         Text("\(TokenFormat.short(item.counts.total)) tokens")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
                             .fixedSize()
@@ -632,18 +829,20 @@ struct BreakdownCard: View {
                                 .frame(minWidth: 46, alignment: .trailing)
                         }
                     }
-                    .padding(.leading, 16)
+                    .padding(.leading, ThemeRuntime.isCosmos ? 0 : 16)
                 }
                 .padding(.vertical, 6)
                 .frame(minHeight: 48)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Circle()
-                            .fill(color)
-                            .frame(width: 8, height: 8)
-                            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
-                            .accessibilityHidden(true)
+                        if !ThemeRuntime.isCosmos {
+                            Circle()
+                                .fill(color)
+                                .frame(width: 8, height: 8)
+                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                                .accessibilityHidden(true)
+                        }
 
                         Text(verbatim: item.name)
                             .font(isModel
@@ -659,7 +858,7 @@ struct BreakdownCard: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("\(TokenFormat.short(item.counts.total)) tokens")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: 13, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
                             .fixedSize()
@@ -724,13 +923,13 @@ struct BreakdownCard: View {
                             Text("Show all \(items.count) ›")
                         }
                     }
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Palette.roleAccent)
+                    .font(.system(size: ThemeRuntime.isCosmos ? 11 : 11.5, weight: .semibold))
+                    .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.ink2 : Palette.roleAccent)
                     .monospacedDigit()
-                    .frame(minHeight: 24)
+                    .frame(minHeight: ThemeRuntime.isCosmos ? 0 : 24)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .themedPlainButton()
                 .fixedSize()
             }
             .padding(.top, 4)
