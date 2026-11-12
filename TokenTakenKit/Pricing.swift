@@ -7,12 +7,15 @@ public struct PriceTable: Sendable {
         public let input: Double?
         public let cacheRead: Double?
         public let cacheWrite: Double?
+        /// Anthropic's published 1-hour cache-write tariff; nil for every other provider.
+        public let cacheWrite1h: Double?
         public let output: Double?
 
-        public init(input: Double?, cacheRead: Double?, cacheWrite: Double?, output: Double?) {
+        public init(input: Double?, cacheRead: Double?, cacheWrite: Double?, cacheWrite1h: Double? = nil, output: Double?) {
             self.input = input
             self.cacheRead = cacheRead
             self.cacheWrite = cacheWrite
+            self.cacheWrite1h = cacheWrite1h
             self.output = output
         }
     }
@@ -62,7 +65,12 @@ public struct PriceTable: Sendable {
         }
         price(counts.input, r.input)
         price(counts.cacheRead, r.cacheRead)
-        price(counts.cacheWrite, r.cacheWrite)
+        // `cacheWrite1h` is a subset of `cacheWrite`: split it out and bill it at the explicit 1-hour
+        // rate, falling back to the cache-write rate when the table has none. The clamp keeps a row that
+        // claims more 1-hour writes than cache writes from charging for tokens it does not have.
+        let oneHour = min(max(counts.cacheWrite1h, 0), counts.cacheWrite)
+        price(counts.cacheWrite - oneHour, r.cacheWrite)
+        price(oneHour, r.cacheWrite1h ?? r.cacheWrite)
         price(counts.output, r.output)
         price(counts.reasoning, r.output)
         return (perMillion / 1_000_000, unpriced)

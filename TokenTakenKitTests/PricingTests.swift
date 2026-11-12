@@ -180,6 +180,41 @@ final class PricingTests: XCTestCase {
         XCTAssertEqual(try cost("gemini-3.7-flash", TokenCounts(input: 1_000_000)), 0.75, accuracy: 1e-9)
     }
 
+    func testOneHourCacheWriteUsesTwiceTheInputRate() throws {
+        // claude-sonnet-4-5: input 3.0, 5-minute cache write 3.75, 1-hour cache write 6.0.
+        let counts = TokenCounts(cacheWrite: 1_000_000, cacheWrite1h: 1_000_000)
+        XCTAssertEqual(try cost("claude-sonnet-4-5", counts), 6.0, accuracy: 1e-9)
+        XCTAssertEqual(try cost("claude-sonnet-5-5", counts), 4.0, accuracy: 1e-9)
+        // A mixed row pays the 1-hour rate on the subset and the 5-minute rate on the rest.
+        let mixed = TokenCounts(cacheWrite: 1_000_000, cacheWrite1h: 400_000)
+        XCTAssertEqual(try cost("claude-sonnet-4-5", mixed), 0.4 * 6.0 + 0.6 * 3.75, accuracy: 1e-9)
+        // The subset never enters the total, so it cannot inflate any token count.
+        XCTAssertEqual(mixed.total, 1_000_000)
+        XCTAssertEqual(TokenCounts(cacheWrite: 1_000_000).total, 1_000_000)
+        // Zero means the whole cache write is a 5-minute write, exactly as before the subset existed.
+        XCTAssertEqual(try cost("claude-sonnet-4-5", TokenCounts(cacheWrite: 1_000_000)), 3.75, accuracy: 1e-9)
+    }
+
+    func testOneHourCacheWriteFallsBackToTheCacheWriteRate() throws {
+        // gpt-6.1-sol publishes no 1-hour tariff: those tokens are priced, never unpriced or free.
+        let counts = TokenCounts(cacheWrite: 1_000_000, cacheWrite1h: 1_000_000)
+        let estimate = table.estimate(model: "gpt-6.1-sol", counts: counts)
+        XCTAssertEqual(estimate.usd, 2.5, accuracy: 1e-9)
+        XCTAssertEqual(estimate.unpricedTokens, 0)
+        XCTAssertEqual(try cost("gpt-6.1-sol", counts), 2.5, accuracy: 1e-9)
+        // With no cache-write rate either, the tokens stay unpriced.
+        let unpriced = table.estimate(model: "grok-4.7", counts: counts)
+        XCTAssertEqual(unpriced.usd, 0)
+        XCTAssertEqual(unpriced.unpricedTokens, 1_000_000)
+    }
+
+    func testOneHourSubsetIsClampedToCacheWrite() throws {
+        // A row claiming more 1-hour writes than cache writes cannot charge for tokens it does not have.
+        let overclaimed = TokenCounts(cacheWrite: 1_000_000, cacheWrite1h: 4_000_000)
+        XCTAssertEqual(try cost("claude-sonnet-4-5", overclaimed), 6.0, accuracy: 1e-9)
+        XCTAssertEqual(try cost("claude-sonnet-4-5", TokenCounts(cacheWrite1h: 500_000)), 0, accuracy: 1e-9)
+    }
+
     func testReasoningBilledAtOutputRate() {
         // claude-sonnet-5-5 output rate is 10.0.
         let estimate = table.estimate(model: "claude-sonnet-5-5", counts: TokenCounts(output: 250_000, reasoning: 750_000))

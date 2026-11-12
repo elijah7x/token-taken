@@ -21,5 +21,6 @@ Every refresh rescanned all agent logs: about 14 s and a 245 MB memory peak on a
 ## Consequences
 
 - A routine refresh takes well under a second for unchanged sources. The first refresh after install, an engine upgrade, a time-zone change or a format change is a full collection.
+- Re-storing unchanged rows is a no-op day by day rather than a daily replacement (ADR-0008): daily history is a floor, and only a changed history epoch or a changed collection time zone rebaselines the days after the earliest reported one.
 - tokscale change detection relies on its known input locations for 4.21.0. Upgrading the engine changes the stamp; any new input location must be added to the fingerprint roots.
 - A file rewritten in place with identical size and modification time would be missed. Agents append to their logs, so this is accepted.

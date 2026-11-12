@@ -57,8 +57,9 @@ final class SQLiteUsageStoreTests: XCTestCase {
         let replacement = record(model: "model-c", input: 400)
         try store.replace(batch: CollectionBatch(daily: [replacement]), sourceID: "claude", deviceID: "device-a")
         XCTAssertEqual(Set(try store.records()), Set([replacement, codexA, claudeB]))
+        // An empty batch keeps stored days: daily history is a floor, not a snapshot (ADR-0008).
         try store.replace(batch: CollectionBatch(), sourceID: "claude", deviceID: "device-a")
-        XCTAssertEqual(Set(try store.records()), Set([codexA, claudeB]))
+        XCTAssertEqual(Set(try store.records()), Set([replacement, codexA, claudeB]))
     }
 
     func testBothTablesRollBackTogether() throws {
@@ -113,7 +114,7 @@ final class SQLiteUsageStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
         defer { sqlite3_finalize(version) }
         XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
-        XCTAssertEqual(sqlite3_column_int(version, 0), 2)
+        XCTAssertEqual(sqlite3_column_int(version, 0), 4)
     }
 
     func testFailedAndUnavailableCollectorsPreserveBothCaches() async throws {

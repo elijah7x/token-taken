@@ -4,12 +4,12 @@ import os
 public struct TokscaleCollector: UsageCollector {
     public static let defaultClients = [
         "claude", "codex", "grok", "kimi", "opencode", "gemini", "droid",
-        "devin-cli", "devin-desktop", "antigravity-cli", "antigravity-extension", "dsh", "fx",
+        "dsh", "fx",
     ]
 
     /// Engine client id to Token Taken source id. Clients sharing a source are always collected in one engine run:
-    /// tokscale drops Devin Desktop sessions already in the Devin CLI database and deduplicates the Antigravity
-    /// family by response id only across clients requested together.
+    /// tokscale deduplicates the Antigravity family by response id only across clients requested together.
+    /// Devin is collected natively (ADR-0009), so it is no longer an engine client.
     private static let sourceMap = [
         "claude": "claude",
         "codex": "codex",
@@ -18,10 +18,6 @@ public struct TokscaleCollector: UsageCollector {
         "opencode": "opencode",
         "gemini": "gemini",
         "droid": "factory",
-        "devin-cli": "devin",
-        "devin-desktop": "devin",
-        "antigravity-cli": "antigravity",
-        "antigravity-extension": "antigravity",
         "dsh": "dsh",
         "fx": "fx",
     ]

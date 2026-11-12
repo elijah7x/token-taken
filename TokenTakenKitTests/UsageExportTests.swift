@@ -60,7 +60,18 @@ final class UsageExportTests: XCTestCase {
 
         let counts = TokenCounts(input: -1, cacheRead: -2, cacheWrite: -3, output: -4, reasoning: -5, uncategorized: -6)
         let line = UsageCSV.line(ExportRow(record(day: "2026-11-09", counts: counts, events: -7)))
-        XCTAssertTrue(line.hasSuffix(",-1,-2,-3,-4,-5,-6,-21,-7"), line)
+        XCTAssertTrue(line.hasSuffix(",-1,-2,-3,-4,-5,-6,-21,-7,0"), line)
+    }
+
+    func testCSVAppendsTheOneHourCacheWriteSubset() {
+        let counts = TokenCounts(input: 1, cacheWrite: 10, output: 2, cacheWrite1h: 6)
+        let row = ExportRow(record(day: "2026-11-09", counts: counts))
+        XCTAssertEqual(row.cacheWrite, 10)
+        XCTAssertEqual(row.cacheWrite1h, 6)
+        XCTAssertEqual(row.total, 13)
+        XCTAssertEqual(UsageCSV.columns.last, "cacheWrite1h")
+        XCTAssertEqual(UsageCSV.fields(row).last, "6")
+        XCTAssertEqual(UsageCSV.columns.count, UsageCSV.fields(row).count)
     }
 
     func testCSVDocumentHasHeaderAndCRLFTerminators() {

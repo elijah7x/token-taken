@@ -29,16 +29,25 @@ def swift_number(value):
     return "nil" if value is None else repr(float(value))
 
 
+def cache_write_1h(key, entry):
+    """Anthropic publishes 1-hour cache writes at 2x the input rate. Every other provider has no
+    1-hour tariff, so the rate stays null and those tokens are billed at the cache-write rate."""
+    if not key.startswith("claude-") or entry["input"] is None:
+        return None
+    return entry["input"] * 2
+
+
 def render(snapshot_path):
     data = json.loads(snapshot_path.read_text(encoding="utf-8"))
     relative = snapshot_path.relative_to(ROOT).as_posix()
     rows = "\n".join(
-        '            "%s": Rates(input: %s, cacheRead: %s, cacheWrite: %s, output: %s),'
+        '            "%s": Rates(input: %s, cacheRead: %s, cacheWrite: %s, cacheWrite1h: %s, output: %s),'
         % (
             key,
             swift_number(entry["input"]),
             swift_number(entry["cacheRead"]),
             swift_number(entry["cacheWrite"]),
+            swift_number(cache_write_1h(key, entry)),
             swift_number(entry["output"]),
         )
         for key, entry in sorted(data["rates"].items())
@@ -52,7 +61,8 @@ def render(snapshot_path):
 //   python3 scripts/update-prices.py
 //
 // Rates are USD per 1M tokens. A null in the JSON becomes nil here, which marks that category
-// unpriced for the model instead of free.
+// unpriced for the model instead of free. `cacheWrite1h` is not in the JSON: it is derived for
+// Anthropic Claude models as 2x the input rate and is nil for every other provider.
 
 extension PriceTable {{
     /// Rates from {path}, read with the alias table named in the version.

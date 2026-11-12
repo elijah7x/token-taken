@@ -7,7 +7,7 @@ public enum StoreError: Error, Sendable {
 }
 
 public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
-    public static let schemaVersion = 2
+    public static let schemaVersion = 4
     private let queue = DispatchQueue(label: "io.github.elijah7x.TokenTaken.store")
     private let db: OpaquePointer
 
@@ -39,7 +39,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             } else {
                 try execute("PRAGMA journal_mode=WAL;")
                 try migrate(from: version)
-                if version < Self.schemaVersion {
+                if version < 2 {
                     // A new or rebuilt cache has no rows, so collector state that marks sources unchanged
                     // would keep them empty; drop it to force a full collection (ADR-0006).
                     try? FileManager.default.removeItem(
@@ -67,7 +67,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                     record_count INTEGER NOT NULL, error TEXT
                 );
                 """)
-            if version < Self.schemaVersion {
+            if version < 2 {
                 try execute("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS daily_usage; DROP TABLE IF EXISTS hourly_usage;")
                 let columns = try prepare("PRAGMA table_info(health);")
                 var names = Set<String>()
@@ -88,7 +88,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                     raw_model_id TEXT NOT NULL, day TEXT NOT NULL, time_zone TEXT NOT NULL,
                     input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
                     output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
-                    event_count INTEGER NOT NULL,
+                    event_count INTEGER NOT NULL, cache_write_1h INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (device_id, source_id, model_id, day)
                 );
                 CREATE TABLE IF NOT EXISTS hourly_usage (
@@ -98,9 +98,23 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                     event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
                     PRIMARY KEY (device_id, source_id, hour_start)
                 );
-                PRAGMA user_version = 2;
-                COMMIT;
+                CREATE TABLE IF NOT EXISTS history_epochs (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+                    PRIMARY KEY (device_id, source_id)
+                );
                 """)
+            // Schema 4 adds the 1-hour cache-write subset of `cache_write`. It is appended so a migrated
+            // table keeps the column order of a newly created one; existing rows default to zero, which
+            // prices their whole cache write at the 5-minute rate. Hourly rows carry no model dimension and
+            // stay on the 5-minute rate, so they gain no column.
+            let columns = try prepare("PRAGMA table_info(daily_usage);")
+            var dailyColumns = Set<String>()
+            while sqlite3_step(columns) == SQLITE_ROW { dailyColumns.insert(text(columns, 1)) }
+            sqlite3_finalize(columns)
+            if !dailyColumns.contains("cache_write_1h") {
+                try execute("ALTER TABLE daily_usage ADD COLUMN cache_write_1h INTEGER NOT NULL DEFAULT 0;")
+            }
+            try execute("PRAGMA user_version = 4; COMMIT;")
         } catch {
             try? execute("ROLLBACK;")
             throw error
@@ -111,17 +125,20 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         try queue.sync {
             let statement = try prepare("""
                 SELECT day, time_zone, device_id, source_id, model_id, raw_model_id,
-                       input, cache_read, cache_write, output, reasoning, uncategorized, event_count
+                       input, cache_read, cache_write, output, reasoning, uncategorized, event_count,
+                       cache_write_1h
                 FROM daily_usage ORDER BY day, device_id, source_id, model_id;
                 """)
             defer { sqlite3_finalize(statement) }
             var result: [UsageRecord] = []
             while try next(statement) {
+                var rowCounts = counts(statement, start: 6)
+                rowCounts.cacheWrite1h = sqlite3_column_int64(statement, 13)
                 let record = UsageRecord(
                     day: text(statement, 0), timeZoneID: text(statement, 1),
                     deviceID: text(statement, 2), sourceID: text(statement, 3),
                     modelID: text(statement, 4), rawModelID: text(statement, 5),
-                    counts: counts(statement, start: 6), eventCount: sqlite3_column_int64(statement, 12)
+                    counts: rowCounts, eventCount: sqlite3_column_int64(statement, 12)
                 )
                 guard record.dayInterval != nil else { throw StoreError.sql("Invalid usage day or time zone") }
                 result.append(record)
@@ -168,28 +185,16 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
               batch.hourly.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID }) else {
             throw StoreError.sql("Collection batch does not match its source/device or contains an invalid day")
         }
+        let epoch = HistoryEpochs.epoch(for: sourceID)
         try queue.sync {
             try execute("BEGIN IMMEDIATE;")
             do {
-                for table in ["daily_usage", "hourly_usage"] {
-                    let statement = try prepare("DELETE FROM \(table) WHERE source_id = ? AND device_id = ?;")
-                    defer { sqlite3_finalize(statement) }
-                    try bind(sourceID, to: statement, at: 1)
-                    try bind(deviceID, to: statement, at: 2)
-                    try step(statement)
-                }
-                let daily = try prepare("INSERT INTO daily_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);")
-                defer { sqlite3_finalize(daily) }
-                for record in batch.daily {
-                    sqlite3_reset(daily)
-                    sqlite3_clear_bindings(daily)
-                    for (index, value) in [deviceID, sourceID, record.modelID, record.rawModelID, record.day, record.timeZoneID].enumerated() {
-                        try bind(value, to: daily, at: Int32(index + 1))
-                    }
-                    try bind(record.counts, to: daily, at: 7)
-                    try check(sqlite3_bind_int64(daily, 13, record.eventCount))
-                    try step(daily)
-                }
+                try mergeDaily(batch.daily, sourceID: sourceID, deviceID: deviceID, epoch: epoch)
+                let clear = try prepare("DELETE FROM hourly_usage WHERE source_id = ? AND device_id = ?;")
+                defer { sqlite3_finalize(clear) }
+                try bind(sourceID, to: clear, at: 1)
+                try bind(deviceID, to: clear, at: 2)
+                try step(clear)
                 let hourly = try prepare("INSERT INTO hourly_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);")
                 defer { sqlite3_finalize(hourly) }
                 for record in batch.hourly {
@@ -209,6 +214,104 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                 throw error
             }
         }
+    }
+
+    private struct StoredDaily {
+        var zones = Set<String>()
+        var totals: [String: Int64] = [:]
+        var days = Set<String>()
+    }
+
+    private func storedDaily(sourceID: String, deviceID: String) throws -> StoredDaily {
+        // The day total deliberately excludes `cache_write_1h`, which is a subset of `cache_write`.
+        let statement = try prepare("""
+            SELECT day, time_zone, input + cache_read + cache_write + output + reasoning + uncategorized
+            FROM daily_usage WHERE source_id = ? AND device_id = ?;
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(sourceID, to: statement, at: 1)
+        try bind(deviceID, to: statement, at: 2)
+        var stored = StoredDaily()
+        while try next(statement) {
+            let day = text(statement, 0)
+            stored.zones.insert(text(statement, 1))
+            stored.totals[day, default: 0] += sqlite3_column_int64(statement, 2)
+            stored.days.insert(day)
+        }
+        return stored
+    }
+
+    private func storedEpoch(sourceID: String, deviceID: String) throws -> String? {
+        let statement = try prepare("SELECT epoch FROM history_epochs WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        guard try next(statement) else { return nil }
+        return text(statement, 0)
+    }
+
+    private func record(epoch: String, sourceID: String, deviceID: String) throws {
+        let statement = try prepare("""
+            INSERT INTO history_epochs (device_id, source_id, epoch) VALUES (?, ?, ?)
+            ON CONFLICT(device_id, source_id) DO UPDATE SET epoch = excluded.epoch;
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        try bind(epoch, to: statement, at: 3)
+        try step(statement)
+    }
+
+    /// Merges one source's daily snapshot into the store. Counted usage is a floor: a stored day is replaced only
+    /// when the batch total is not smaller, and a stored day the batch no longer reports is kept, so an agent
+    /// pruning its own logs cannot shrink history. A day never mixes stored and batch rows, so a model rename
+    /// cannot leave a stale row behind (ADR-0008).
+    private func mergeDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String) throws {
+        let stored = try storedDaily(sourceID: sourceID, deviceID: deviceID)
+        let batchDays = Dictionary(grouping: records, by: \.day)
+        let batchTotals = batchDays.mapValues { rows in rows.reduce(Int64(0)) { $0 + $1.counts.total } }
+        let batchZones = Set(records.map(\.timeZoneID))
+        let previousEpoch = try storedEpoch(sourceID: sourceID, deviceID: deviceID)
+        let zoneChanged = !stored.zones.isEmpty && !batchZones.isEmpty && stored.zones != batchZones
+        // A missing epoch row is the first run after the schema 3 upgrade: record the current epoch and use the
+        // normal merge, so existing rows are protected immediately instead of being rebaselined unseen.
+        let rebaseline = previousEpoch.map { $0 != epoch || zoneChanged } ?? false
+        // A rebaseline adopts every day after the earliest day the batch reports, which is how an intentional
+        // correction or a collection time-zone change lowers or moves recent usage. Days up to and including that
+        // date keep the floor rule, because the batch has no evidence for lowering them.
+        let earliest = rebaseline ? batchDays.keys.min() : nil
+        let adopted = Set(batchTotals.filter { entry in
+            if let earliest, entry.key > earliest { return true }
+            return entry.value >= stored.totals[entry.key, default: 0]
+        }.keys)
+        let delete = try prepare("DELETE FROM daily_usage WHERE device_id = ? AND source_id = ? AND day = ?;")
+        defer { sqlite3_finalize(delete) }
+        func remove(_ day: String) throws {
+            sqlite3_reset(delete)
+            sqlite3_clear_bindings(delete)
+            try bind(deviceID, to: delete, at: 1)
+            try bind(sourceID, to: delete, at: 2)
+            try bind(day, to: delete, at: 3)
+            try step(delete)
+        }
+        for day in adopted { try remove(day) }
+        if let earliest {
+            for day in stored.days where day > earliest && batchDays[day] == nil { try remove(day) }
+        }
+        let insert = try prepare("INSERT INTO daily_usage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);")
+        defer { sqlite3_finalize(insert) }
+        for record in records where adopted.contains(record.day) {
+            sqlite3_reset(insert)
+            sqlite3_clear_bindings(insert)
+            for (index, value) in [deviceID, sourceID, record.modelID, record.rawModelID, record.day, record.timeZoneID].enumerated() {
+                try bind(value, to: insert, at: Int32(index + 1))
+            }
+            try bind(record.counts, to: insert, at: 7)
+            try check(sqlite3_bind_int64(insert, 13, record.eventCount))
+            try check(sqlite3_bind_int64(insert, 14, record.counts.cacheWrite1h))
+            try step(insert)
+        }
+        try record(epoch: epoch, sourceID: sourceID, deviceID: deviceID)
     }
 
     public func upsert(device: Device) throws {

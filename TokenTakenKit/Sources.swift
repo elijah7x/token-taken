@@ -29,6 +29,8 @@ public enum SourceCatalog {
         SourceInfo(id: "antigravity", name: "Antigravity", colorHex: "#D3A6E6"),
         SourceInfo(id: "dsh", name: "DeepSeek Harness", colorHex: "#C9D27E"),
         SourceInfo(id: "fx", name: "fx", colorHex: "#EE9AA2"),
+        SourceInfo(id: "mcode", name: "MiniMax Code", colorHex: "#E0A9C4"),
+        SourceInfo(id: "deepseek-cli", name: "DeepSeek CLI", colorHex: "#9DB6CE"),
     ]
 
     private static let byID: [String: SourceInfo] = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })

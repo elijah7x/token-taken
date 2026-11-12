@@ -67,17 +67,18 @@ final class PiCollectorTests: XCTestCase {
         let claude = try record(batch, day: "2026-11-10", modelID: "claude-sonnet-4-5")
         XCTAssertEqual(claude.rawModelID, "Claude-Sonnet-4-5")
         XCTAssertEqual(claude.counts, TokenCounts(input: 100, cacheRead: 10, cacheWrite: 5, output: 30, reasoning: 20))
-        XCTAssertEqual(claude.eventCount, 1, "The exact duplicate entry must collapse.")
+        XCTAssertEqual(claude.eventCount, 1)
 
-        XCTAssertEqual(
-            try record(batch, day: "2026-11-10", modelID: "ollama/qwen3:4b").counts,
-            TokenCounts(input: 40, output: 20)
-        )
+        // The ollama reply is the session's latest model when the model-less compaction and
+        // branch_summary arrive, so both bill it rather than the tools/summaries bucket.
+        let ollama = try record(batch, day: "2026-11-10", modelID: "ollama/qwen3:4b")
+        XCTAssertEqual(ollama.counts, TokenCounts(input: 254, output: 57, reasoning: 8))
+        XCTAssertEqual(ollama.eventCount, 3)
 
-        // compaction + branch_summary + model-less toolResult share pi's tools/summaries bucket.
+        // Only the toolResult still lands in tools/summaries: it names no model of its own.
         let operations = try record(batch, day: "2026-11-10", modelID: "tools/summaries")
-        XCTAssertEqual(operations.counts, TokenCounts(input: 221, output: 40, reasoning: 8))
-        XCTAssertEqual(operations.eventCount, 3)
+        XCTAssertEqual(operations.counts, TokenCounts(input: 7, output: 3))
+        XCTAssertEqual(operations.eventCount, 1)
 
         let cacheWarm = try record(batch, day: "2026-11-10", modelID: "vendor/custom-warm-model")
         XCTAssertEqual(cacheWarm.rawModelID, "vendor/Custom-Warm-Model")
@@ -100,8 +101,8 @@ final class PiCollectorTests: XCTestCase {
         let claude = try record(batch, day: "2026-11-10", modelID: "claude-sonnet-4-5")
         let ollama = try record(batch, day: "2026-11-10", modelID: "ollama/qwen3:4b")
         XCTAssertEqual(claude.eventCount, 1)
-        XCTAssertEqual(ollama.eventCount, 1)
-        XCTAssertEqual(claude.counts.total + ollama.counts.total, 225)
+        XCTAssertEqual(ollama.eventCount, 3, "One reply, one compaction, one branch summary.")
+        XCTAssertEqual(claude.counts.total + ollama.counts.total, 484)
     }
 
     func testDuplicatedEntryIdIsCountedOnceAcrossFiles() async throws {
@@ -309,6 +310,29 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertEqual(batch.skippedRecords, 0)
         XCTAssertTrue(batch.daily.isEmpty)
         XCTAssertTrue(batch.hourly.isEmpty)
+    }
+
+    func testCompactionBeforeAnyModelUsesToolsSummaries() async throws {
+        let root = directory.appendingPathComponent("early-compaction", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"compaction","id":"early-c","timestamp":"2026-11-10T10:00:00Z","usage":{"input":30,"output":10,"totalTokens":40}}"#,
+            #"{"type":"model_change","id":"early-mc","timestamp":"2026-11-10T10:01:00Z","modelId":"claude-sonnet-4-5"}"#,
+            #"{"type":"compaction","id":"late-c","timestamp":"2026-11-10T10:02:00Z","usage":{"input":20,"output":5,"totalTokens":25}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+
+        XCTAssertEqual(batch.daily.map(\.modelID), ["claude-sonnet-4-5", "tools/summaries"])
+        XCTAssertEqual(
+            try record(batch, day: "2026-11-10", modelID: "tools/summaries").counts,
+            TokenCounts(input: 30, output: 10)
+        )
+        XCTAssertEqual(
+            try record(batch, day: "2026-11-10", modelID: "claude-sonnet-4-5").counts,
+            TokenCounts(input: 20, output: 5)
+        )
     }
 
     func testNonDirectoryRootErrorDoesNotExposePath() async throws {

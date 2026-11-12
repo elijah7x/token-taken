@@ -40,6 +40,8 @@ public struct DeviceSyncSnapshot: Codable, Sendable {
 
 public struct DailySyncSnapshot: Codable, Sendable {
     public let schemaVersion: Int
+    /// `counts` carries the optional `cacheWrite1h` subset key. An absent key decodes as zero and a peer
+    /// that does not know it ignores it, so no `schemaVersion` bump is needed for that addition.
     public let records: [UsageRecord]
 
     public init(records: [UsageRecord]) {

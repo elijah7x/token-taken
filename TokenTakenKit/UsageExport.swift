@@ -86,6 +86,8 @@ public struct ExportRow: Encodable, Sendable, Equatable {
     public let uncategorized: Int64
     public let total: Int64
     public let eventCount: Int64
+    /// Subset of `cacheWrite`, kept out of `total`; appended last to keep earlier columns stable.
+    public let cacheWrite1h: Int64
 
     public init(_ record: UsageRecord) {
         day = record.day
@@ -102,6 +104,7 @@ public struct ExportRow: Encodable, Sendable, Equatable {
         uncategorized = record.counts.uncategorized
         total = record.counts.total
         eventCount = record.eventCount
+        cacheWrite1h = record.counts.cacheWrite1h
     }
 }
 
@@ -110,6 +113,7 @@ public enum UsageCSV {
     public static let columns = [
         "day", "timeZoneID", "deviceID", "sourceID", "modelID", "rawModelID",
         "input", "cacheRead", "cacheWrite", "output", "reasoning", "uncategorized", "total", "eventCount",
+        "cacheWrite1h",
     ]
 
     public static let header = columns.joined(separator: ",")
@@ -132,6 +136,7 @@ public enum UsageCSV {
             row.day, row.timeZoneID, row.deviceID, row.sourceID, row.modelID, row.rawModelID,
             String(row.input), String(row.cacheRead), String(row.cacheWrite), String(row.output),
             String(row.reasoning), String(row.uncategorized), String(row.total), String(row.eventCount),
+            String(row.cacheWrite1h),
         ]
     }
 

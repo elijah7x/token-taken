@@ -774,6 +774,12 @@ private struct SourcesSettingsTab: View {
         "opencode": [".local/share/opencode", ".config/opencode"],
         "gemini": [".gemini"],
         "factory": [".factory"],
+        "devin": [".local/share/devin", "Library/Application Support/Devin"],
+        "antigravity": [".gemini/antigravity-cli", ".gemini/antigravity"],
+        "dsh": [".dsh"],
+        "fx": [".fx"],
+        "mcode": [".minimax/v2/sessions"],
+        "deepseek-cli": [".deepseek/sessions"],
     ]
 
     var body: some View {

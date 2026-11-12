@@ -148,7 +148,7 @@ public actor CollectionRunner {
                 let start = currentHour.addingTimeInterval(Double(-offset) * 3_600)
                 if hours[start] == nil {
                     hours[start] = HourlyUsage(hourStart: start, deviceID: device.id, sourceID: sourceID,
-                        counts: .zero, eventCount: 0, reasoningKnown: ["zcode", "pi", "omp"].contains(sourceID))
+                        counts: .zero, eventCount: 0, reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode"].contains(sourceID))
                 }
             }
         }

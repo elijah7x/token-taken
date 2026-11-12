@@ -88,6 +88,10 @@ The pinned engine (4.21.0, `b26c433d`) already parses these device-local clients
 - Not added: clients that read data synced from an online account (Cursor, Amp, Warp, Trae, and the Antigravity desktop cache under the tokscale config directory).
 - Devin's database can exceed 1 GB. Change detection uses file metadata only; when it changes, the engine re-reads it, which raises that refresh's cost.
 
+## Native Devin and Antigravity (2026-11-12)
+
+Devin and Antigravity move off the engine to native Swift collectors; [ADR-0009](0009-native-devin-antigravity.md) records the evidence and the rules this section keeps. The engine no longer requests `devin-cli` or `devin-desktop`, and Devin's history epoch is raised. `antigravity-cli` and `antigravity-extension` stay in the engine's client list until the native Antigravity collector replaces them; both collectors report the same source id, so they must never run in the same release. Nothing else above changes: native collectors still deduplicate before aggregating, still report through `SourceHealth`, and are still bounded by the reconciliation bar in this ADR.
+
 ## Consequences
 
 - Engine-dependent agent coverage, packaging, refresh behavior, and sync timestamp support remain open.

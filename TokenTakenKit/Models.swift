@@ -13,18 +13,24 @@ public struct TokenCounts: Hashable, Codable, Sendable {
     public var output: Int64
     public var reasoning: Int64
     public var uncategorized: Int64
+    /// Anthropic 1-hour cache writes, a SUBSET of `cacheWrite` rather than a sixth category:
+    /// `0 <= cacheWrite1h <= cacheWrite`. It is billed at its own rate, contributes nothing to `total`,
+    /// and defaults to zero in initialization and older Codable data, where the whole cache write is
+    /// treated as a 5-minute write.
+    public var cacheWrite1h: Int64
 
-    public init(input: Int64 = 0, cacheRead: Int64 = 0, cacheWrite: Int64 = 0, output: Int64 = 0, reasoning: Int64 = 0, uncategorized: Int64 = 0) {
+    public init(input: Int64 = 0, cacheRead: Int64 = 0, cacheWrite: Int64 = 0, output: Int64 = 0, reasoning: Int64 = 0, uncategorized: Int64 = 0, cacheWrite1h: Int64 = 0) {
         self.input = input
         self.cacheRead = cacheRead
         self.cacheWrite = cacheWrite
         self.output = output
         self.reasoning = reasoning
         self.uncategorized = uncategorized
+        self.cacheWrite1h = cacheWrite1h
     }
 
     private enum CodingKeys: String, CodingKey {
-        case input, cacheRead, cacheWrite, output, reasoning, uncategorized
+        case input, cacheRead, cacheWrite, output, reasoning, uncategorized, cacheWrite1h
     }
 
     public init(from decoder: any Decoder) throws {
@@ -35,8 +41,10 @@ public struct TokenCounts: Hashable, Codable, Sendable {
         output = try values.decode(Int64.self, forKey: .output)
         reasoning = try values.decode(Int64.self, forKey: .reasoning)
         uncategorized = try values.decodeIfPresent(Int64.self, forKey: .uncategorized) ?? 0
+        cacheWrite1h = try values.decodeIfPresent(Int64.self, forKey: .cacheWrite1h) ?? 0
     }
 
+    /// Sum of the disjoint categories. `cacheWrite1h` is a subset of `cacheWrite`, never an addend.
     public var total: Int64 { input + cacheRead + cacheWrite + output + reasoning + uncategorized }
 
     public subscript(_ category: TokenCategory) -> Int64 {
@@ -69,7 +77,8 @@ public struct TokenCounts: Hashable, Codable, Sendable {
             cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
             output: lhs.output + rhs.output,
             reasoning: lhs.reasoning + rhs.reasoning,
-            uncategorized: lhs.uncategorized + rhs.uncategorized
+            uncategorized: lhs.uncategorized + rhs.uncategorized,
+            cacheWrite1h: lhs.cacheWrite1h + rhs.cacheWrite1h
         )
     }
 

@@ -35,7 +35,7 @@ public struct PiCollector: UsageCollector {
     public func collect() async throws -> CollectionBatch {
         try autoreleasepool {
             try PiFormatScan(
-                root: root, sourceID: "pi", deviceID: deviceID, timeZone: timeZone,
+                roots: [root], sourceID: "pi", deviceID: deviceID, timeZone: timeZone,
                 stateDirectory: stateDirectory, now: now()
             ).run()
         }
@@ -43,24 +43,30 @@ public struct PiCollector: UsageCollector {
 }
 
 /// Scans pi-format session JSONL. pi and oh-my-pi write the same record layout, so both collectors
-/// share this scanner and differ only in their scan root and source id.
+/// share this scanner and differ only in their scan roots and source id.
 ///
-/// Counted record types (tokscale's set, kept so pi totals stay comparable with the pinned engine):
+/// Counted record types (tokscale's set, kept so pi totals stay comparable with the pinned engine,
+/// plus oh-my-pi's `model_usage` spelling of `usage`):
 /// - `message` with `message.role == "assistant"`: the billed reply.
 /// - `message` with `message.role == "toolResult"` and a `message.usage`: the call behind a tool.
 ///   pi normally bills this under `tools/summaries`; a message that names its own model keeps it.
-/// - `compaction`: the `/compact` summarization call, usage at the record root.
-/// - `branch_summary`: the branch summarization call, usage at the record root.
+/// - `compaction`: the `/compact` summarization call, usage at the record root. A record without its
+///   own model is attributed to the session's current model, like a model-less `usage` record.
+/// - `branch_summary`: the branch summarization call, attributed the same way as `compaction`.
 /// - `usage`: standalone accounting such as cache warming; it names its billed model at the root.
-///   A model-less `usage` record inherits the session's current model, like tokscale's legacy row.
+/// - `model_usage`: oh-my-pi writes its auxiliary calls this way; same rules as `usage`, and the
+///   `purpose`/`role` fields it adds never take part in event identity.
 ///
 /// `session`, `title`, `title_change`, `session_info`, `model_change`, `thinking_level_change`,
 /// `custom` and other control records are skipped without counting as malformed. A `model_change`
-/// record updates the session's current model so a later model-less `usage` record can be attributed.
+/// record updates the session's current model so a later model-less `usage`, `model_usage`,
+/// `compaction` or `branch_summary` record can be attributed; only a record that arrives before any
+/// model is known falls back to `tools/summaries`.
 ///
 /// Token categories follow `docs/contracts/statistics.md`: `input` already excludes cache tokens, and
-/// both pi and oh-my-pi report reasoning inside `output` (their `totalTokens` excludes it), so
-/// reasoning is subtracted from output and stored separately.
+/// both pi and oh-my-pi report reasoning inside `output`, since their `totalTokens` is
+/// `input + cacheRead + cacheWrite + output`. Reasoning is therefore subtracted from output to keep
+/// the five categories disjoint, and it must never be added to `output` again.
 ///
 /// Divergences from tokscale's pi lane, all in the direction of losing no usage:
 /// - Event identity never uses `message.responseId`; see `record` for the key.
@@ -80,7 +86,7 @@ struct PiFormatScan: Sendable {
     /// Placeholder epoch timestamps used to land usage in 1970; treated as missing.
     static let minimumTimestamp = Date(timeIntervalSince1970: 1_577_836_800)
     /// Bumped whenever the persisted incremental state layout or scan semantics change.
-    static let stateFormatVersion = 2
+    static let stateFormatVersion = 3
 
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
@@ -95,7 +101,9 @@ struct PiFormatScan: Sendable {
         Data(#""session""#.utf8),
     ]
 
-    let root: URL
+    /// Every tree this scan reads. One source can own several roots: oh-my-pi writes agent sessions
+    /// and worker-MCP sessions to separate trees, and their entry ids share one dedupe set.
+    let roots: [URL]
     let sourceID: String
     let deviceID: String
     let timeZone: TimeZone
@@ -298,17 +306,23 @@ struct PiFormatScan: Sendable {
         }
     }
 
+    /// State key for one session file: the root's index plus the root-relative path. The index comes
+    /// first because two roots of one source can hold identically named files at the same relative
+    /// path, and a shared key would make them shadow each other's cached contribution.
     private func stateKey(for file: URL) -> String {
-        let rootPath = root.path
-        guard file.path.hasPrefix(rootPath) else { return file.path }
-        let rest = file.path.dropFirst(rootPath.count)
-        return rest.hasPrefix("/") ? String(rest) : "/" + rest
+        for (index, root) in roots.enumerated() {
+            let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+            guard file.path.hasPrefix(prefix) else { continue }
+            return "\(index):" + file.path.dropFirst(prefix.count)
+        }
+        return file.path
     }
 
     /// Scans one file, fully or from `startOffset` after an append, aggregating inline and capturing
     /// the file's contribution for the next state. The session model seeded from a previous scan lets
-    /// a model-less `usage` record append correctly. `committedModel` is the model state at the
-    /// returned offset, so the unterminated tail's own model changes are re-derived next time.
+    /// a model-less `usage`, `model_usage`, `compaction` or `branch_summary` record append correctly.
+    /// `committedModel` is the model state at the returned offset, so the unterminated tail's own
+    /// model changes are re-derived next time.
     private func scanFile(
         _ file: URL,
         totals: inout Totals,
@@ -369,37 +383,42 @@ struct PiFormatScan: Sendable {
         return hash
     }
 
+    /// Every `.jsonl` file under any existing root, recursively. A missing root is not a failure as
+    /// long as another exists; a root that is not a directory or cannot be enumerated still throws.
     private func sessionFiles() throws -> [URL] {
         let manager = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard manager.fileExists(atPath: root.path, isDirectory: &isDirectory) else {
-            throw CollectorError.sourceUnavailable
-        }
-        guard isDirectory.boolValue else {
-            throw CollectorError.invalidOutput("\(sourceID) session root is not a directory")
-        }
-        var enumerationError: Error?
-        guard let enumerator = manager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            errorHandler: { _, error in
-                enumerationError = error
-                return false
-            }
-        ) else {
-            throw CollectorError.open("Could not enumerate \(sourceID) sessions")
-        }
         var files: [URL] = []
-        for case let url as URL in enumerator {
-            autoreleasepool {
-                guard url.pathExtension == "jsonl" else { return }
-                guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return }
-                files.append(url)
+        var foundRoot = false
+        for root in roots {
+            var isDirectory: ObjCBool = false
+            guard manager.fileExists(atPath: root.path, isDirectory: &isDirectory) else { continue }
+            guard isDirectory.boolValue else {
+                throw CollectorError.invalidOutput("\(sourceID) session root is not a directory")
+            }
+            foundRoot = true
+            var enumerationError: Error?
+            guard let enumerator = manager.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                errorHandler: { _, error in
+                    enumerationError = error
+                    return false
+                }
+            ) else {
+                throw CollectorError.open("Could not enumerate \(sourceID) sessions")
+            }
+            for case let url as URL in enumerator {
+                autoreleasepool {
+                    guard url.pathExtension == "jsonl" else { return }
+                    guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { return }
+                    files.append(url)
+                }
+            }
+            if let enumerationError {
+                throw enumerationError
             }
         }
-        if let enumerationError {
-            throw enumerationError
-        }
+        guard foundRoot else { throw CollectorError.sourceUnavailable }
         return files.sorted { $0.path < $1.path }
     }
 
@@ -409,7 +428,8 @@ struct PiFormatScan: Sendable {
 
     private struct FileState {
         var isFirstLine: Bool
-        /// The session's currently selected model, used only to attribute a model-less `usage` record.
+        /// The session's currently selected model, used to attribute records that name no model
+        /// (`usage`, `model_usage`, `compaction`, `branch_summary`).
         var currentModel: String?
 
         init(currentModel: String? = nil, isFirstLine: Bool = true) {
@@ -1064,12 +1084,14 @@ struct PiFormatScan: Sendable {
                 )
             case "compaction", "branch_summary":
                 guard let usage = object.usage else { return }
+                // The summarization call bills the session's model even though the record omits it.
                 record(
-                    object: object, type: type, model: Self.text(object.model) ?? PiFormatScan.toolsSummariesModel,
+                    object: object, type: type,
+                    model: Self.text(object.model) ?? state.currentModel ?? PiFormatScan.toolsSummariesModel,
                     usage: usage, messageTimestamp: nil, line: rawLine, fallbackDate: fallbackDate,
                     fractional: fractional, plain: plain, terminated: terminated
                 )
-            case "usage":
+            case "usage", "model_usage":
                 guard let usage = object.usage else { return }
                 record(
                     object: object, type: type, model: Self.text(object.model) ?? state.currentModel,
@@ -1177,7 +1199,8 @@ struct PiFormatScan: Sendable {
         }
 
         /// Splits reasoning out of output. pi and oh-my-pi both report reasoning as a breakdown of
-        /// `output` and print a `totalTokens` that excludes it, so adding it again would double count.
+        /// `output`: their `totalTokens` is `input + cacheRead + cacheWrite + output`, so reasoning is
+        /// already inside it and adding it again would double count.
         static func tokenCounts(from usage: ScanUsage) -> (TokenCounts, Bool)? {
             let input = usage.input?.value ?? 0
             let cacheRead = usage.cacheRead?.value ?? 0
@@ -1302,7 +1325,7 @@ struct PiFormatScan: Sendable {
     }
 }
 
-/// Incremental scan state persisted between collections of one pi-format scan root (pi or omp).
+/// Incremental scan state persisted between collections of one pi-format source (pi or omp).
 /// Local only like every collector state; an unreadable or stamp-mismatched value forces a full scan.
 struct PiFormatScanState: Codable, Sendable {
     var stamp: CollectionStamp

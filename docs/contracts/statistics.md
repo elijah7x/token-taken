@@ -11,14 +11,15 @@ Status: Implemented v1 (2026-11-11)
 - `cacheRead` and `cacheWrite` are tokens read from and written to a provider cache. They MUST NOT also be counted as input.
 - `output` excludes separately reported reasoning when the source reports reasoning inside output. `reasoning` is stored separately only when the source reports it; it MUST NOT be inferred from opaque output.
 - `uncategorized` is a known total with an unknown category split, not a sixth `TokenCategory`. It defaults to zero in initialization and older Codable data, participates in addition, and is never priced.
+- `cacheWrite1h` is the subset of `cacheWrite` written with a one-hour TTL. It is not a category, never enters totals or day comparisons, and is priced at the model's explicit one-hour cache-write rate, falling back to the cache-write rate when none is published.
 - Total tokens are always `input + cacheRead + cacheWrite + output + reasoning + uncategorized` after normalization. An inclusive source count MUST be normalized before storage, not added twice at query time.
 - Missing or unparseable data is unknown, not zero. `reasoningKnown=false` distinguishes omitted hourly reasoning from a measured zero.
 
 ## Source identity and deduplication
 
-- Source IDs are stable lowercase kebab-case. Factory Droid is `factory`; its tokscale client selector is `droid`. Devin is `devin` (tokscale `devin-cli` and `devin-desktop`) and Antigravity is `antigravity` (tokscale `antigravity-cli` and `antigravity-extension`).
-- Every tokscale client of one source is requested in the same engine run, in both graph and hourly output, and a change in any of them re-collects them all. tokscale drops Devin Desktop sessions already present in the Devin CLI database and deduplicates the Antigravity family by provider response ID only across clients requested together; collecting them apart would double count.
-- A source is available when the root of any of its clients exists. Change detection reads file metadata (path, size, modification time) only; a single SQLite database is fingerprinted by itself and its `-wal`/`-shm` siblings and is never opened, since Devin's database can exceed 1 GB.
+- Source IDs are stable lowercase kebab-case. Factory Droid is `factory`; its tokscale client selector is `droid`. Devin is `devin` (native Swift: the CLI database and Desktop ACP events), Antigravity is `antigravity` (native Swift: the CLI and extension conversation databases), MiniMax Code is `mcode`, and DeepSeek CLI is `deepseek-cli`.
+- Every tokscale client of one source is requested in the same engine run, in both graph and hourly output, and a change in any of them re-collects them all. The native Antigravity collector deduplicates provider response IDs once per collection across both of its databases.
+- A source is available when the root of any of its clients exists. Change detection reads file metadata (path, size, modification time) only, including a single SQLite database with its `-wal`/`-shm` siblings. The native Devin collector opens that database read-only and streams its rows, because it can exceed 1 GB.
 - Native collectors deduplicate before forming aggregates using stable native IDs or documented deterministic fingerprints. Ingestion time and read order MUST NOT become event identity.
 - tokscale performs its own source-specific deduplication before export; its graph and hourly output do not expose per-event dedup keys. Aggregate natural keys identify snapshot rows, not individual calls.
 - Device-local sources are attributed to their collecting device and MUST NOT be cross-device deduplicated. Exact account-scoped cross-device deduplication is not supported by these aggregates. Cursor remains deferred and opt-in; do not claim account-scoped accuracy.
@@ -32,10 +33,12 @@ Status: Implemented v1 (2026-11-11)
 | OpenCode | tokscale `opencode` | Engine category and dedup rules; hourly reasoning unavailable |
 | Gemini CLI | tokscale `gemini` | Engine category and dedup rules; hourly reasoning unavailable |
 | Factory Droid | tokscale `droid` | Engine category and dedup rules; hourly reasoning unavailable |
-| Devin | tokscale `devin-cli` (`~/.local/share/devin/cli/sessions.db`, honours `XDG_DATA_HOME`) and `devin-desktop` (`~/Library/Application Support/Devin/User/acp-events`) | Engine reads CLI request-level metrics; Desktop sessions already in the CLI database are dropped; hourly reasoning unavailable |
-| Antigravity | tokscale `antigravity-cli` (`~/.gemini/antigravity-cli/conversations/*.db`, honours `GEMINI_CLI_HOME`) and `antigravity-extension` (`~/.gemini/antigravity/conversations/*.db`) | Engine response-ID dedup across both clients; hourly reasoning unavailable |
+| Devin | native Swift | CLI `~/.local/share/devin/cli/sessions.db` (honours `XDG_DATA_HOME`) and Desktop `~/Library/Application Support/Devin/User/acp-events/*.ndjson`. Assistant rows only. `input` is `input_tokens`, `cacheWrite` is `cache_creation_tokens`, `cacheRead` is `cache_read_tokens`, `output` is `output_tokens`, `reasoning` is 0 because the provider reports none separately; `num_tokens` becomes output only when all four are zero. `(session, request_id)` is deduplicated with the lowest `row_id` kept, and a row without a request id is keyed by its `row_id`. The day and hour come from `metadata.started_generation_at`, then `metadata.created_at`, then the row's `created_at`; the write time of the row database is never used for dating. Desktop usage whose title resolves to a session the CLI already counted is dropped. Hourly reasoning unavailable |
+| Antigravity | native Swift (`~/.gemini/antigravity-cli/conversations/*.db`, honours `GEMINI_CLI_HOME`, and `~/.gemini/antigravity/conversations/*.db`) | Input is `usage.#2` only; the fixed per-model preamble `usage.#1` is never counted (ADR-0009); response-ID dedup across both databases; reasoning `#10` separate from output `#9` |
 | DeepSeek Harness | tokscale `dsh` (`~/.dsh/sessions`, honours `DSH_HOME`) | Engine category and dedup rules; hourly reasoning unavailable |
 | fx | tokscale `fx` (`~/.fx/sessions`) | Engine category and dedup rules; hourly reasoning unavailable |
+| MiniMax Code | native Swift (`message.usage` in `~/.minimax/v2/sessions/**/messages.jsonl`) | `message_id` deduplication; `input` excludes `cacheRead`; reasoning unavailable; `usage.cost` is never a cost source |
+| DeepSeek CLI | native Swift | Session-level `metadata.total_tokens` only, recorded as `uncategorized` and never priced; messages carry no usage, so there is no category split and no hourly series |
 | Zcode | native Swift | Completed native usage plus pre-boundary legacy assistant messages; exact cross-session copies removed; inclusive input/output split |
 | pi | native Swift | Entry-ID deduplication, not response-ID-only deduplication; includes operation usage |
 | oh-my-pi | native Swift | Entry-ID deduplication; reasoning tokens split from inclusive output |
@@ -87,10 +90,21 @@ These rules describe the collection design, not acceptance of every source as re
 
 - Every supported source MUST be reconciled on sanitized samples against the selected engine and native ledger where applicable. Record intentional deviations and evidence; unexplained mismatches block support.
 - `SourceHealth` exposes `lastAttempt`, `lastSuccess`, `recordCount` (daily rows), `skippedRecords`, `errorMessage`, and state `ok`, `unavailable`, `notInstalled`, `failed`, or `stale`.
-- Missing source locations throw `CollectorError.sourceUnavailable`. Failed or unavailable collectors MUST preserve both cached tables and the previous last-success timestamp. Only a successful collection replaces snapshots. Skipped records are a partial-data condition even when state is `ok`.
+- Missing source locations throw `CollectorError.sourceUnavailable`. Failed or unavailable collectors MUST preserve both cached tables and the previous last-success timestamp. A successful collection replaces the 48-hour hourly snapshot and merges daily history under the retained-history rules below. Skipped records are a partial-data condition even when state is `ok`.
 - The default stale threshold is 24 hours since last success. Preserve unavailable/failed states rather than overwriting them with stale. Surface database and health-write errors through collection results; health reads throw rather than masquerading as an empty health list.
 - `AppModel.dataIssues` exposes `failed`, `unavailable`, and `stale` source counts, `skippedRecords`, `devices`, `count`, and `isPartial` for presentation. Storage/read errors also make that summary partial.
 - Missing intervals MUST NOT be interpolated or silently converted to zero.
+
+### Retained history
+
+Daily history is a floor, not a snapshot ([ADR-0008](../decisions/0008-retained-history.md)). Agents prune, rotate and rewrite their own logs, so a later collection can report less than an earlier one. Counted usage MUST NOT be lost when that happens, and nothing may be counted twice.
+
+- A day total is `input + cacheRead + cacheWrite + output + reasoning + uncategorized` summed over every model row of that `(deviceID, sourceID, day)`.
+- A day present in both the batch and the store is replaced only when the batch total is not smaller. A smaller day keeps its stored rows whole, including every model row and `eventCount`. A stored day the batch no longer reports is kept, and a day only the batch reports is inserted. Stored and batch rows are never mixed within one day, so a renamed model cannot leave a stale row behind and no day is counted twice.
+- A rebaseline replaces that rule when the source's history epoch changed or the batch's collection time zone differs from a stored row's `timeZoneID` for that device/source. With `E` the earliest day in the batch, days after `E` adopt the batch exactly, including deleting stored days it no longer reports; days up to and including `E` keep the floor rule. The new epoch is stored on success.
+- History epochs are a Token Taken constant, not engine state: every source starts at revision `1`, and tokscale-collected sources append the pinned engine version (`1+tokscale-4.21.0`). A release raises a source's revision only when it intentionally lowers or moves already-counted usage, such as a deduplication or date-attribution fix.
+- The last applied epoch is stored per `(deviceID, sourceID)` in `history_epochs` (schema version 3). A missing row is the first run after the upgrade: record the current epoch and use the normal merge, so existing rows are protected immediately and are never rebaselined unseen.
+- Daily merge and hourly replacement happen in one transaction. Reading, sync publication and aggregation need no change because `daily_usage` remains the resolved view.
 
 ## Open questions
 

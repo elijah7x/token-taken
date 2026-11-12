@@ -55,6 +55,31 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(remote.daily[0].counts.uncategorized, 7)
     }
 
+    func testRoundTripPreservesTheOneHourCacheWriteSubset() throws {
+        let counts = TokenCounts(input: 1, cacheRead: 2, cacheWrite: 10, output: 3, reasoning: 4,
+                                 uncategorized: 5, cacheWrite1h: 6)
+        let row = UsageRecord(day: "2026-11-09", timeZoneID: "Asia/Shanghai", deviceID: other.id,
+            sourceID: "claude", modelID: "claude-sonnet-4-5", counts: counts, eventCount: 1)
+        try ICloudSync.write(local: FixtureStore(devices: [other], daily: [row], hours: []),
+            device: other, root: directory, appVersion: "1.0", now: now)
+        let remote = try XCTUnwrap(read().first)
+        XCTAssertEqual(remote.daily, [row])
+        XCTAssertEqual(remote.daily[0].counts.cacheWrite1h, 6)
+        XCTAssertEqual(remote.daily[0].counts.total, 25)
+    }
+
+    func testSnapshotWithoutTheOneHourKeyDecodesAsZero() throws {
+        // A peer that predates the subset publishes no key; its whole cache write stays a 5-minute write.
+        let data = try SyncSnapshot.encode(DailySyncSnapshot(records: [record(device: other)]))
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(text.contains("\"cacheWrite1h\":0"), text)
+        let legacy = Data(text.replacingOccurrences(of: ",\"cacheWrite1h\":0", with: "").utf8)
+        let decoded = try SyncSnapshot.decode(DailySyncSnapshot.self, from: legacy)
+        XCTAssertEqual(decoded.records[0].counts.cacheWrite1h, 0)
+        XCTAssertEqual(decoded.records[0].counts.cacheWrite, 10)
+        XCTAssertEqual(decoded.records[0].counts.total, 172)
+    }
+
     func testSingleWriterDoesNotTouchAnotherDeviceOrRepublishItsRows() throws {
         try publish(other)
         let backend = SyncBackend(root: directory)
@@ -583,7 +608,7 @@ final class SyncTests: XCTestCase {
         let countsJSON = try XCTUnwrap(dailyRecordsJSON[0]["counts"] as? [String: Any])
         XCTAssertEqual(
             Set(countsJSON.keys),
-            Set(["cacheRead", "cacheWrite", "input", "output", "reasoning", "uncategorized"])
+            Set(["cacheRead", "cacheWrite", "cacheWrite1h", "input", "output", "reasoning", "uncategorized"])
         )
 
         let hourlyJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: hourlyData) as? [String: Any])

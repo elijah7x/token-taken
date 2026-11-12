@@ -1,0 +1,6 @@
+{"type":"session","version":3,"id":"omp-worker-synthetic-1","timestamp":"2026-09-17T03:00:00.000Z","cwd":"/tmp/omp-worker-synthetic"}
+{"type":"model_change","id":"wmc1","parentId":null,"timestamp":"2026-09-17T02:59:30.000Z","provider":"zai","modelId":"glm-5.3"}
+{"type":"message","id":"w0001","parentId":"wmc1","timestamp":"2026-09-17T03:00:05.000Z","message":{"role":"assistant","provider":"zai","model":"glm-5.3","responseId":"resp-worker-1","timestamp":1789614005000,"durationMs":1200,"usage":{"input":40,"cacheRead":5,"cacheWrite":0,"output":12,"reasoningTokens":2,"totalTokens":57}}}
+{"type":"message","id":"w0002","parentId":"w0001","timestamp":"2026-09-17T03:04:05.000Z","message":{"role":"assistant","provider":"google","model":"gemini-3.8-flash","responseId":"resp-worker-2","timestamp":1789614245000,"durationMs":900,"usage":{"input":18,"cacheRead":0,"cacheWrite":0,"output":6,"totalTokens":24}}}
+{"type":"model_usage","id":"w0003","parentId":"w0002","timestamp":"2026-09-17T03:06:00.000Z","purpose":"auto-thinking","role":"tiny","model":"gemini-3.8-flash","usage":{"input":445,"cacheRead":3,"cacheWrite":0,"output":1,"totalTokens":446}}
+{"type":"compaction","id":"w0004","parentId":"w0003","timestamp":"2026-09-17T03:10:05.000Z","usage":{"input":120,"cacheRead":0,"cacheWrite":0,"output":20,"reasoning":4,"totalTokens":140}}

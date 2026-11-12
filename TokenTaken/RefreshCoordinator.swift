@@ -248,6 +248,11 @@ final class RefreshCoordinator {
         collectors.append(ZcodeCollector(deviceID: device.id, stateDirectory: state))
         collectors.append(PiCollector(deviceID: device.id, stateDirectory: state))
         collectors.append(OmpCollector(deviceID: device.id, stateDirectory: state))
+        // Native sources are collected whether or not the engine binary is installed.
+        collectors.append(DevinCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(AntigravityCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(MiniMaxCodeCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(DeepSeekCollector(deviceID: device.id, stateDirectory: state))
         return collectors
     }
 
