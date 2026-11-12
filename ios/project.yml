@@ -1,0 +1,51 @@
+name: TokenTakenMobile
+options:
+  bundleIdPrefix: io.github.elijah7x
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+  groupSortPosition: top
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  TokenTakenMobile:
+    type: application
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: ../Shared
+      - path: TokenTakenMobile
+        excludes:
+          - Info.plist
+          - TokenTakenMobile.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTaken.iOS
+        PRODUCT_NAME: Token Taken
+        INFOPLIST_FILE: TokenTakenMobile/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        CODE_SIGN_ENTITLEMENTS: TokenTakenMobile/TokenTakenMobile.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_EMIT_LOC_STRINGS: "YES"
+        LOCALIZATION_PREFERS_STRING_CATALOGS: "YES"
+        ENABLE_USER_SCRIPT_SANDBOXING: "YES"
+        SUPPORTS_MACCATALYST: "NO"
+        SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: "NO"
+schemes:
+  TokenTakenMobile:
+    build:
+      targets:
+        TokenTakenMobile: all
+    run:
+      config: Debug

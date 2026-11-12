@@ -1220,6 +1220,32 @@ private struct SyncSettingsTab: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
+                SettingsGroupCaption(
+                    title: "Sync to iPhone",
+                    description: "Publishes this Mac's usage report to iCloud so the iPhone app can show it."
+                )
+
+                SettingsRowsGroup {
+                    SettingsControlRow(
+                        title: "Sync to iPhone",
+                        help: "Only the aggregate report is written. The iPhone app reads it and never collects on its own."
+                    ) {
+                        Toggle("Sync to iPhone", isOn: $settings.mobileReportEnabled)
+                            .labelsHidden()
+                            .toggleStyle(GlassToggleStyle())
+                            .accessibilityLabel(Text("Sync to iPhone"))
+                    }
+
+                    if settings.mobileReportEnabled {
+                        SettingsHairline()
+                        TimelineView(.everyMinute) { _ in
+                            mobileReportStatusRow(refreshCoordinator?.mobileReportStatus ?? .disabled)
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(title: "Devices")
 
                 SettingsRowsGroup {
@@ -1277,6 +1303,40 @@ private struct SyncSettingsTab: View {
         }
         .padding(.vertical, 8)
         .frame(minHeight: 48)
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func mobileReportStatusRow(_ status: MobileReportPublishStatus) -> some View {
+        switch status {
+        case .unavailable:
+            // Debug builds ship empty entitlements, so no container exists and nothing can be published.
+            statusLine(Text("iCloud container unavailable in this build"), isWarning: true)
+        case .failed:
+            statusLine(Text("Publish failed"), isWarning: true)
+        case .published(let date):
+            statusLine(Text("Last published \(Self.relativeFormatter.localizedString(for: date, relativeTo: .now))"),
+                isWarning: false)
+        case .disabled:
+            statusLine(Text("Not published yet"), isWarning: false)
+        }
+    }
+
+    private func statusLine(_ text: Text, isWarning: Bool) -> some View {
+        HStack(spacing: 6) {
+            if isWarning {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.healthWarn)
+                    .accessibilityHidden(true)
+            }
+            text
+                .font(.system(size: 11.5))
+                .foregroundStyle(isWarning ? Palette.healthWarn : Palette.ink3)
+                .monospacedDigit()
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 

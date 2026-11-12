@@ -33,6 +33,14 @@ Accepted
 - Give the app and CLI separate minimal entitlements files. Neither contains `com.apple.security.app-sandbox`; both entitlement dictionaries are empty.
 - The CLI keeps `@executable_path/../Frameworks` in `LD_RUNPATH_SEARCH_PATHS`. From `Contents/Helpers/token-taken`, this resolves to `Contents/Frameworks/TokenTakenKit.framework`, so no external framework path or library-validation exception is required.
 
+### Amendment 2026-11-12: iCloud container signing
+
+- Release now shares the iCloud Documents container `iCloud.io.github.elijah7x.TokenTaken` described in [ADR-0011](0011-mobile-report.md). `TokenTaken/TokenTaken.entitlements` declares `CloudDocuments` with the container and ubiquity container identifiers, and replaces the empty app entitlement dictionary above for Release. It still grants no app sandbox, no CloudKit environment, and no key-value storage.
+- iCloud entitlements are only valid on a Developer ID build together with a provisioning profile, so the app target's Release configuration signs with `TokenTaken/TokenTaken.entitlements` and the installed Developer ID profile named `TokenTaken Developer ID`. Xcode embeds that profile in the bundle and `scripts/release.sh` refuses to package an app without it.
+- Renew the profile when it expires or when the container, capabilities, or Developer ID certificate change, then rebuild and re-notarize. `TOKEN_TAKEN_PROVISIONING_PROFILE` overrides the profile name for a release run.
+- Debug keeps `TokenTaken/TokenTakenDebug.entitlements` (an empty dictionary) and an empty profile specifier, so a Debug build still needs no Apple credentials or provisioning profile.
+- Whether a notarized, non-sandboxed Developer ID app can actually use this container is still unverified; if it cannot, the document-picker fallback in ADR-0011 applies and this entitlement can be dropped again.
+
 ### Notarization and credentials
 
 - Authenticate `notarytool` only with `NOTARY_PROFILE` and `--keychain-profile`. Apple IDs, app-specific passwords, API keys, and signing private keys must not appear in the script, environment files, or Git. Create the keychain profile interactively before running a release.

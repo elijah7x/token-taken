@@ -1494,6 +1494,22 @@
         }
       }
     },
+    "Last published %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last published %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上次发布 %@"
+          }
+        }
+      }
+    },
     "Last synced %@" : {
       "localizations" : {
         "en" : {
@@ -1952,6 +1968,22 @@
         }
       }
     },
+    "Not published yet" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not published yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未发布"
+          }
+        }
+      }
+    },
     "Not updated yet" : {
       "localizations" : {
         "en" : {
@@ -2072,6 +2104,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iCloud 云盘中仅保存聚合 Token 计数与随机设备 ID，不含提示词、路径或费用。"
+          }
+        }
+      }
+    },
+    "Only the aggregate report is written. The iPhone app reads it and never collects on its own." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Only the aggregate report is written. The iPhone app reads it and never collects on its own."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅写入汇总后的用量报告；iPhone App 只做读取，不在手机上采集。"
           }
         }
       }
@@ -2342,6 +2390,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "隐私"
+          }
+        }
+      }
+    },
+    "Publish failed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Publish failed"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发布失败"
+          }
+        }
+      }
+    },
+    "Publishes this Mac's usage report to iCloud so the iPhone app can show it." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Publishes this Mac's usage report to iCloud so the iPhone app can show it."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把本机用量报告写入 iCloud 云盘，供 iPhone App 展示。"
           }
         }
       }
@@ -3038,6 +3118,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "同步"
+          }
+        }
+      }
+    },
+    "Sync to iPhone" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sync to iPhone"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同步到 iPhone"
           }
         }
       }
@@ -3752,6 +3848,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台 Mac 未开启 iCloud 云盘。"
+          }
+        }
+      }
+    },
+    "iCloud container unavailable in this build" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iCloud container unavailable in this build"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本无法使用 iCloud 容器"
           }
         }
       }

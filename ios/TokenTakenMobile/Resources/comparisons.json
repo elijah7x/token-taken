@@ -1,0 +1,322 @@
+[
+  {
+    "id": "weibo-post",
+    "unitTokens": 140,
+    "zh": "够发 {n} 条当年 140 字的微博",
+    "en": "Enough for {n} classic 140-character Weibo posts",
+    "source": "https://zh.wikipedia.org/wiki/%E5%BE%AE%E5%8D%9A",
+    "note": "1 Chinese character = 1 token, so the old 140-character Weibo limit is 140 tokens."
+  },
+  {
+    "id": "heart-sutra",
+    "unitTokens": 260,
+    "zh": "相当于把《心经》抄了 {n} 遍",
+    "en": "Like copying the Heart Sutra {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E8%88%AC%E8%8B%A5%E6%B3%A2%E7%BD%97%E8%9C%9C%E5%A4%9A%E5%BF%83%E7%BB%8F",
+    "note": "Xuanzang's Chinese Heart Sutra is 260 characters; 1 character = 1 token."
+  },
+  {
+    "id": "lantingji-xu",
+    "unitTokens": 324,
+    "zh": "够你默写《兰亭集序》{n} 遍",
+    "en": "Enough to write out the Lantingji Xu {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E5%85%B0%E4%BA%AD%E9%9B%86%E5%BA%8F",
+    "note": "The Lantingji Xu runs 324 characters; 1 character = 1 token."
+  },
+  {
+    "id": "thousand-character-classic",
+    "unitTokens": 1000,
+    "zh": "相当于把《千字文》从头背 {n} 遍",
+    "en": "Like reciting the Thousand Character Classic {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E5%8D%83%E5%AD%97%E6%96%87",
+    "note": "The Thousand Character Classic is exactly 1,000 characters; 1 character = 1 token."
+  },
+  {
+    "id": "daodejing",
+    "unitTokens": 5300,
+    "zh": "等于把《道德经》读了 {n} 遍",
+    "en": "Like reading the Tao Te Ching {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E9%81%93%E5%BE%B7%E7%B6%93",
+    "note": "The Peking University Han bamboo-slip Laozi has about 5,300 characters; 1 character = 1 token."
+  },
+  {
+    "id": "xinhua-dictionary",
+    "unitTokens": 13000,
+    "zh": "够把《新华字典》里每个字都过 {n} 遍",
+    "en": "Like going through every character in the Xinhua Dictionary {n} times",
+    "source": "https://www.cp.com.cn/book/506a1433-6.html",
+    "note": "The 12th edition of the Xinhua Dictionary has 13,000+ single characters; 1 character = 1 token."
+  },
+  {
+    "id": "analects",
+    "unitTokens": 15926,
+    "zh": "相当于把《论语》读了 {n} 遍",
+    "en": "Like reading the Analects {n} times",
+    "source": "https://journal.ccnu.edu.cn/sk/CN/abstract/abstract3173.shtml",
+    "note": "The Analects body text is 15,926 characters; 1 character = 1 token."
+  },
+  {
+    "id": "kangxi-dictionary",
+    "unitTokens": 47043,
+    "zh": "把《康熙字典》四万七千多个字头全扫一遍，能扫 {n} 轮",
+    "en": "Like scanning all 47,043 entries in the Kangxi Dictionary {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E5%BA%B7%E7%86%99%E5%AD%97%E5%85%B8",
+    "note": "The Kangxi Dictionary lists 47,043 head characters; 1 character = 1 token."
+  },
+  {
+    "id": "shiji",
+    "unitTokens": 526500,
+    "zh": "相当于把《史记》读完 {n} 遍",
+    "en": "Like reading Sima Qian's Records of the Grand Historian {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E5%8F%B2%E8%AE%B0",
+    "note": "The Shiji is about 526,500 characters; 1 character = 1 token."
+  },
+  {
+    "id": "journey-to-the-west",
+    "unitTokens": 585000,
+    "zh": "够把《西游记》从头到尾读 {n} 遍",
+    "en": "Like reading Journey to the West {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E8%A5%BF%E6%B8%B8%E8%AE%B0",
+    "note": "The 100-chapter Shidetang edition is about 585,000 characters; 1 character = 1 token."
+  },
+  {
+    "id": "romance-of-the-three-kingdoms",
+    "unitTokens": 617205,
+    "zh": "相当于把《三国演义》读了 {n} 遍",
+    "en": "Like reading Romance of the Three Kingdoms {n} times",
+    "source": "https://weread.qq.com/web/bookDetail/73c32c5071c790f073c460a",
+    "note": "The People's Literature Publishing House edition is 617,205 characters; 1 character = 1 token."
+  },
+  {
+    "id": "three-body-trilogy",
+    "unitTokens": 900000,
+    "zh": "相当于把《三体》三部曲读了 {n} 遍",
+    "en": "Like reading the Three-Body trilogy {n} times",
+    "source": "https://finance.sina.cn/2023-02-20/detail-imyhicpz5243113.d.html",
+    "note": "Liu Cixin's trilogy totals about 900,000 characters; 1 character = 1 token."
+  },
+  {
+    "id": "dream-of-the-red-chamber",
+    "unitTokens": 1089335,
+    "zh": "够把《红楼梦》读 {n} 遍，连判词都不跳过",
+    "en": "Like reading Dream of the Red Chamber {n} times, poems and all",
+    "source": "https://weread.qq.com/web/reader/0da329707210329f0da4d39",
+    "note": "The People's Literature Publishing House edition is 1,089,335 characters; 1 character = 1 token."
+  },
+  {
+    "id": "bencao-gangmu",
+    "unitTokens": 1900000,
+    "zh": "相当于把《本草纲目》190 万字翻 {n} 遍",
+    "en": "Like reading Li Shizhen's Compendium of Materia Medica {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E6%9C%AC%E8%8D%89%E7%B6%B1%E7%9B%AE",
+    "note": "The Bencao Gangmu is about 1.9 million characters; 1 character = 1 token."
+  },
+  {
+    "id": "zizhi-tongjian",
+    "unitTokens": 3000000,
+    "zh": "够把《资治通鉴》从头读到尾 {n} 遍",
+    "en": "Like reading the Zizhi Tongjian cover to cover {n} times",
+    "source": "https://zh.wikipedia.org/zh-hans/%E8%B3%87%E6%B2%BB%E9%80%9A%E9%91%91",
+    "note": "The Zizhi Tongjian is about 3 million characters in 294 rolls; 1 character = 1 token."
+  },
+  {
+    "id": "jinyong-collection",
+    "unitTokens": 8897407,
+    "zh": "相当于把金庸全集 36 册读 {n} 遍",
+    "en": "Like reading all 36 volumes of Jin Yong's collected works {n} times",
+    "source": "https://weread.qq.com/web/reader/d20320905c66ead2099adbc",
+    "note": "The 36-volume Jin Yong collection is 8,897,407 characters; 1 character = 1 token."
+  },
+  {
+    "id": "twenty-four-histories",
+    "unitTokens": 40000000,
+    "zh": "够把《二十四史》通读 {n} 遍，从黄帝看到崇祯",
+    "en": "Like reading all Twenty-Four Histories {n} times",
+    "source": "https://zh.wikipedia.org/zh-cn/%E4%BA%8C%E5%8D%81%E5%9B%9B%E5%8F%B2",
+    "note": "The Twenty-Four Histories total about 40 million characters; 1 character = 1 token."
+  },
+  {
+    "id": "chinese-wikipedia",
+    "unitTokens": 85902608,
+    "zh": "相当于把中文维基百科的全部正文读 {n} 遍",
+    "en": "Like reading the entire Chinese Wikipedia {n} times",
+    "source": "https://zh.wikipedia.org/zh-cn/Wikipedia:%E5%AD%97%E6%95%B8%E7%B5%B1%E8%A8%88",
+    "note": "A 2006 count of Chinese Wikipedia text (no punctuation) came to 85,902,608 characters; 1 character = 1 token."
+  },
+  {
+    "id": "yongle-encyclopedia",
+    "unitTokens": 370000000,
+    "zh": "够把《永乐大典》3.7 亿字通读 {n} 遍",
+    "en": "Like reading the whole Yongle Encyclopedia {n} times",
+    "source": "https://zh.wikipedia.org/zh-hans/%E6%B0%B8%E4%B9%90%E5%A4%A7%E5%85%B8",
+    "note": "The Yongle Encyclopedia is about 370 million characters; 1 character = 1 token."
+  },
+  {
+    "id": "siku-quanshu",
+    "unitTokens": 997000000,
+    "zh": "相当于把《四库全书》近十亿字读完 {n} 遍",
+    "en": "Like reading the Complete Library of the Four Treasuries {n} times",
+    "source": "https://zh.wikipedia.org/wiki/%E5%9B%9B%E5%BA%AB%E5%85%A8%E6%9B%B8",
+    "note": "The Siku Quanshu is about 997 million characters; 1 character = 1 token."
+  },
+  {
+    "id": "book-page",
+    "unitTokens": 333,
+    "zh": "够写 {n} 页英文书（按每页 250 词算）",
+    "en": "Enough to fill {n} printed book pages (250 words each)",
+    "source": "https://www.barringerpublishing.com/post/typical-word-count-to-page-count-average",
+    "note": "1 token = 0.75 English words: a 250-word page is 333 tokens."
+  },
+  {
+    "id": "wikipedia-article",
+    "unitTokens": 956,
+    "zh": "相当于写了 {n} 篇标准维基百科条目",
+    "en": "Like writing {n} average Wikipedia articles",
+    "source": "https://en.wikipedia.org/wiki/Size_of_Wikipedia",
+    "note": "1 token = 0.75 English words: English Wikipedia averages 717 words per article, or 956 tokens."
+  },
+  {
+    "id": "one-hour-of-speech",
+    "unitTokens": 12000,
+    "zh": "够你连续说 {n} 个小时的话",
+    "en": "Enough for {n} hours of nonstop talking",
+    "source": "https://en.wikipedia.org/wiki/Words_per_minute",
+    "note": "1 token = 0.75 English words: 150 spoken words a minute for an hour is 9,000 words, or 12,000 tokens."
+  },
+  {
+    "id": "harry-potter-book-one",
+    "unitTokens": 103100,
+    "zh": "相当于把《哈利·波特与魔法石》读了 {n} 遍",
+    "en": "Like reading Harry Potter and the Philosopher's Stone {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 77,325 words ÷ 0.75."
+  },
+  {
+    "id": "average-novel",
+    "unitTokens": 120000,
+    "zh": "够写 {n} 本长度达标的英文小说",
+    "en": "Enough to write {n} full-length novels",
+    "source": "https://www.asauthors.org.au/faq/demystifying-publishing/",
+    "note": "1 token = 0.75 English words: a 90,000-word adult novel is 120,000 tokens."
+  },
+  {
+    "id": "the-silmarillion",
+    "unitTokens": 173487,
+    "zh": "相当于把《精灵宝钻》读了 {n} 遍",
+    "en": "Like reading The Silmarillion {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 130,115 words ÷ 0.75."
+  },
+  {
+    "id": "narnia-series",
+    "unitTokens": 460713,
+    "zh": "够把《纳尼亚传奇》七册读 {n} 遍",
+    "en": "Like reading all seven Narnia books {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 345,535 words ÷ 0.75."
+  },
+  {
+    "id": "infinite-jest",
+    "unitTokens": 651920,
+    "zh": "相当于把《无尽的玩笑》读了 {n} 遍",
+    "en": "Like reading Infinite Jest {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 488,940 words ÷ 0.75."
+  },
+  {
+    "id": "lord-of-the-rings",
+    "unitTokens": 768612,
+    "zh": "够把《魔戒》三部曲读 {n} 遍",
+    "en": "Like reading The Lord of the Rings {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 576,459 words ÷ 0.75."
+  },
+  {
+    "id": "king-james-bible",
+    "unitTokens": 1044183,
+    "zh": "相当于把《圣经》钦定本读 {n} 遍",
+    "en": "Like reading the King James Bible {n} times",
+    "source": "https://biblecentral.info/bible-statistics/",
+    "note": "1 token = 0.75 English words: 783,137 words ÷ 0.75."
+  },
+  {
+    "id": "shakespeare-complete-works",
+    "unitTokens": 1179529,
+    "zh": "够把莎士比亚全集读 {n} 遍",
+    "en": "Like reading Shakespeare's complete works {n} times",
+    "source": "https://www.folger.edu/explore/shakespeares-works/frequently-asked-questions/",
+    "note": "1 token = 0.75 English words: 884,647 words ÷ 0.75."
+  },
+  {
+    "id": "harry-potter-series",
+    "unitTokens": 1446167,
+    "zh": "相当于把《哈利·波特》七本读完 {n} 遍",
+    "en": "Like reading the entire Harry Potter series {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 1,084,625 words ÷ 0.75."
+  },
+  {
+    "id": "a-song-of-ice-and-fire",
+    "unitTokens": 2360000,
+    "zh": "够把《冰与火之歌》已出的五卷读 {n} 遍",
+    "en": "Like reading all five published A Song of Ice and Fire books {n} times",
+    "source": "https://brokebybooks.com/the-word-count-of-175-favorite-novels/",
+    "note": "1 token = 0.75 English words: 1,770,000 words ÷ 0.75."
+  },
+  {
+    "id": "an-hour-of-talk-a-day",
+    "unitTokens": 4380000,
+    "zh": "够你每天聊一小时，聊满 {n} 年",
+    "en": "Enough for an hour of talking a day for {n} years",
+    "source": "https://en.wikipedia.org/wiki/Words_per_minute",
+    "note": "1 token = 0.75 English words: 9,000 words an hour × 365 days = 3,285,000 words, or 4.38 million tokens."
+  },
+  {
+    "id": "thousand-hours-of-speech",
+    "unitTokens": 12000000,
+    "zh": "够把 {n} 千小时的播客逐字转完",
+    "en": "Enough to transcribe {n} thousand hours of podcasts",
+    "source": "https://en.wikipedia.org/wiki/Words_per_minute",
+    "note": "1 token = 0.75 English words: 9,000 words an hour × 1,000 hours = 9 million words, or 12 million tokens."
+  },
+  {
+    "id": "ten-thousand-hours-of-speech",
+    "unitTokens": 120000000,
+    "zh": "够把 {n} 万小时的会议录音逐字转写一遍",
+    "en": "Enough to transcribe {n} ten-thousand-hour meeting marathons",
+    "source": "https://en.wikipedia.org/wiki/Words_per_minute",
+    "note": "1 token = 0.75 English words: 9,000 words an hour × 10,000 hours = 90 million words, or 120 million tokens."
+  },
+  {
+    "id": "lifetime-of-spoken-words",
+    "unitTokens": 622933333,
+    "zh": "相当于一个人一辈子说的话（80 年、每天 1.6 万词）再说 {n} 遍",
+    "en": "Like every word a person speaks in 80 years, {n} times over",
+    "source": "https://www.science.org/doi/10.1126/science.1139940",
+    "note": "1 token = 0.75 English words: 16,000 words a day × 365 × 80 years = 467.2 million words, or 622.9 million tokens."
+  },
+  {
+    "id": "english-wikipedia",
+    "unitTokens": 6666666667,
+    "zh": "相当于把英文维基百科的全部正文读 {n} 遍",
+    "en": "Like reading the entire English Wikipedia {n} times",
+    "source": "https://en.wikipedia.org/wiki/Size_of_Wikipedia",
+    "note": "1 token = 0.75 English words: English Wikipedia holds over 5 billion words, or 6.67 billion tokens."
+  },
+  {
+    "id": "all-wikipedias",
+    "unitTokens": 38666666667,
+    "zh": "够把所有语言的维基百科全读 {n} 遍",
+    "en": "Like reading every Wikipedia in every language {n} times",
+    "source": "https://en.wikipedia.org/wiki/Wikipedia:Size_comparisons",
+    "note": "1 token = 0.75 English words: all language editions together hold about 29 billion words, or 38.7 billion tokens."
+  },
+  {
+    "id": "library-of-congress",
+    "unitTokens": 6120000000000,
+    "zh": "相当于把美国国会图书馆 5100 万册藏书全读 {n} 遍",
+    "en": "Like reading all 51 million books in the Library of Congress {n} times",
+    "source": "https://www.loc.gov/about/general-information/",
+    "note": "51 million catalogued books × a 90,000-word average novel = 4.59 trillion words; 1 token = 0.75 words, so 6.12 trillion tokens."
+  }
+]

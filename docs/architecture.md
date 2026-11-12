@@ -82,6 +82,14 @@ See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merg
 
 See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity decision [ADR-0005](decisions/0005-collection-granularity.md), and `docs/contracts/sync.md`. Daily cross-zone re-bucketing is inexact; fractional-offset boundaries and ambiguous fall-back hour labels also limit hourly attribution.
 
+### Mobile report
+
+- Builds one aggregate-only v1 report from the merged daily records the app already shows and publishes it, only while the opt-in "Sync to iPhone" setting is on, to `Documents/mobile/v1/report-<deviceId>.json` in the shared iCloud Documents container.
+- Republishes after every successful refresh and at least hourly through a sleep-tolerant timer; turning the setting off deletes only this Mac's own report. Only the app publishes, because the CLI cannot carry the restricted iCloud entitlement.
+- Carries no cost, paths, or project names. The companion iOS app is display-only: it never collects, merges, or prices.
+- `TOKEN_TAKEN_MOBILE_REPORT_ROOT` points publication at an existing test folder, like `TOKEN_TAKEN_SYNC_ROOT` for sync.
+- Follows `docs/contracts/mobile-report.md` and [ADR-0011](decisions/0011-mobile-report.md).
+
 ### Presentation and themes
 
 - Provides main-window view models and SwiftUI views for day, week (Monday start), month, year, and all-time periods, with model, source, and enabled device breakdowns.
@@ -116,7 +124,7 @@ Approximating an account-level source from device-local aggregates remains unsup
 
 - **On launch:** display cached data first, then start a refresh. Keep stale data labeled until the refresh succeeds.
 - **On demand (manual-first):** let the user refresh from the main window (`Cmd-R`), menu bar extra, or Settings. There is no user-configurable refresh interval, keeping background work minimal (owner decision 2026-11-10).
-- **Fallback:** run an automatic fallback refresh every 4 hours through a single sleep-tolerant timer (`>= 10` minute tolerance), skipping when a refresh is already running and refreshing on wake from sleep if more than 4 hours have passed since the last success. Collection is incremental per ADR-0006: unchanged sources keep their stored rows and only changed inputs are re-read. No other periodic background work runs; sync reads happen with each refresh, except that a remote Mac read as `unavailable` or `partial` (not `stale`) triggers a remote-only re-read after 2 and 10 minutes, then returns to the normal schedule. Independent source collectors run concurrently and expose last success and errors; `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records, and source health becomes stale by default after 24 hours.
+- **Fallback:** run an automatic fallback refresh every 4 hours through a single sleep-tolerant timer (`>= 10` minute tolerance), skipping when a refresh is already running and refreshing on wake from sleep if more than 4 hours have passed since the last success. Collection is incremental per ADR-0006: unchanged sources keep their stored rows and only changed inputs are re-read. No other periodic background work runs, except the opt-in hourly iPhone-report timer in the Mobile report module, which stops when its setting is off. Sync reads happen with each refresh, except that a remote Mac read as `unavailable` or `partial` (not `stale`) triggers a remote-only re-read after 2 and 10 minutes, then returns to the normal schedule. Independent source collectors run concurrently and expose last success and errors; `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records, and source health becomes stale by default after 24 hours.
 - **Incremental:** use source cursors or incremental engine output when available and verified. Otherwise run a complete enough collection to prevent gaps. Never treat an unsupported incremental mode as complete.
 - **Engine boundary:** ADR-0005 accepts complete daily history and rolling per-source hourly exports without a per-event export. Model-level hourly attribution and recovery of Codex total-only legacy records are not available.
 

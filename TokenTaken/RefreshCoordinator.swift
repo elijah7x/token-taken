@@ -20,6 +20,10 @@ final class RefreshCoordinator {
     /// Re-read remotes caught mid-write or awaiting iCloud download without waiting for the 4-hour fallback.
     static let remoteRetryDelays: [TimeInterval] = [120, 600]
     static let remoteRetryTolerance: TimeInterval = 15
+    /// Opt-in hourly republication keeps the iPhone report at most one refresh cycle old (ADR-0011);
+    /// it is the only periodic work beyond the 4-hour fallback and stops when the setting is off.
+    static let mobileReportInterval: TimeInterval = 60 * 60
+    static let mobileReportTolerance: TimeInterval = 5 * 60
 
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
@@ -31,6 +35,8 @@ final class RefreshCoordinator {
     private(set) var syncReadFailed = false
     private(set) var syncWriteFailed = false
     var syncFailed: Bool { syncReadFailed || syncWriteFailed }
+    /// Last outcome of the "Sync to iPhone" publication, shown in Settings.
+    private(set) var mobileReportStatus: MobileReportPublishStatus = .disabled
 
     @ObservationIgnored let store: SQLiteUsageStore
     @ObservationIgnored var onChange: (() -> Void)?
@@ -43,6 +49,8 @@ final class RefreshCoordinator {
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
     @ObservationIgnored private var lastAttempt: Date?
     @ObservationIgnored private let syncWorker = SyncWorker()
+    @ObservationIgnored private var mobileReportTask: Task<Void, Never>?
+    @ObservationIgnored private let mobileReportWorker = MobileReportWorker()
 
     init(settings: AppSettings) throws {
         self.settings = settings
@@ -69,12 +77,25 @@ final class RefreshCoordinator {
             guard let self, self.settings.cursorAccountCollection else { return }
             Task { [weak self] in await self?.refresh() }
         }
+        settings.onMobileReportEnabledChange = { [weak self] in
+            guard let self else { return }
+            if self.settings.mobileReportEnabled {
+                self.startMobileReportLoop()
+                Task { [weak self] in await self?.publishMobileReport() }
+            } else {
+                // Disabling deletes only this Mac's report; other Macs keep theirs.
+                self.mobileReportTask?.cancel()
+                self.mobileReportTask = nil
+                Task { [weak self] in await self?.removeMobileReport() }
+            }
+        }
     }
 
     func start() {
         guard refreshTask == nil else { return }
         observeWakeIfNeeded()
         scheduleLoop(refreshImmediately: true)
+        if settings.mobileReportEnabled { startMobileReportLoop() }
     }
 
     func updateEngineStatus() {
@@ -123,6 +144,9 @@ final class RefreshCoordinator {
             lastRefresh = health.compactMap(\.lastSuccess).max()
             await scheduleSyncWrite()
         }
+        // A failed collection still publishes whatever the store can read; an unreadable store keeps
+        // the previous report, because publication requires reading every record first.
+        await publishMobileReport()
     }
 
     private func readRemotes(isRetry: Bool = false) async {
@@ -235,6 +259,74 @@ final class RefreshCoordinator {
             self.syncWriteFailed = !succeeded
             await self.readRemotes()
         }
+    }
+
+    // MARK: - Mobile report
+
+    /// Publishes the merged view of every device this Mac can read. Sync off means this Mac only.
+    private func publishMobileReport() async {
+        guard settings.mobileReportEnabled else {
+            mobileReportStatus = .disabled
+            return
+        }
+        let mergesRemotes = settings.syncEnabled
+        let remotes = mergesRemotes ? remoteSnapshots.map(\.status) : []
+        let store: any UsageStore = mergesRemotes
+            ? MergedUsageStore(local: self.store, remote: remoteSnapshots)
+            : self.store
+        let device = device
+        let localStatus = MobileReportBuilder.localStatus(health)
+        let version = Self.appVersion
+        // Reading every record and building the report is CPU work; keep it off the main actor.
+        let report = await Task.detached(priority: .utility) { () -> MobileReport? in
+            guard let records = try? store.records() else { return nil }
+            return MobileReportBuilder.build(
+                records: records,
+                device: device,
+                appVersion: version,
+                generatedAt: .now,
+                timeZone: .current,
+                localStatus: localStatus,
+                remotes: remotes
+            )
+        }.value
+        guard settings.mobileReportEnabled else { return }
+        guard let report else {
+            mobileReportStatus = .failed("Could not read usage")
+            return
+        }
+        mobileReportStatus = await mobileReportWorker.publish(report)
+    }
+
+    private func removeMobileReport() async {
+        mobileReportStatus = await mobileReportWorker.stop(deviceId: device.id)
+    }
+
+    /// Sleep-tolerant hourly timer: it refreshes, which publishes, so the report never lags one interval.
+    private func startMobileReportLoop() {
+        guard mobileReportTask == nil else { return }
+        mobileReportTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(
+                        for: .seconds(Self.mobileReportInterval),
+                        tolerance: .seconds(Self.mobileReportTolerance)
+                    )
+                } catch {
+                    break
+                }
+                guard let self, !Task.isCancelled, self.settings.mobileReportEnabled else { break }
+                await self.refresh()
+            }
+        }
+    }
+
+    /// Marketing version and build, for example `0.1.0 (12)`.
+    private static var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let marketing = info?["CFBundleShortVersionString"] as? String ?? "0.1.0"
+        guard let build = info?["CFBundleVersion"] as? String, !build.isEmpty else { return marketing }
+        return "\(marketing) (\(build))"
     }
 
     private func makeCollectors() -> [any UsageCollector] {
@@ -357,5 +449,16 @@ private actor SyncWorker {
         } catch {
             return false
         }
+    }
+}
+
+/// Keeps container resolution and report writes off the main actor.
+private actor MobileReportWorker {
+    func publish(_ report: MobileReport) async -> MobileReportPublishStatus {
+        await MobileReportPublisher.publish(report, enabled: true)
+    }
+
+    func stop(deviceId: String) async -> MobileReportPublishStatus {
+        await MobileReportPublisher.stop(deviceId: deviceId)
     }
 }

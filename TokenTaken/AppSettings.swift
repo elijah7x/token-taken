@@ -180,6 +180,15 @@ final class AppSettings {
         }
     }
 
+    /// Opt-in publication of this Mac's usage report for the iPhone app (ADR-0011).
+    var mobileReportEnabled: Bool {
+        didSet {
+            guard mobileReportEnabled != oldValue else { return }
+            defaults.set(mobileReportEnabled, forKey: Keys.mobileReportEnabled)
+            onMobileReportEnabledChange?()
+        }
+    }
+
     func relaunch() {
         CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -222,6 +231,7 @@ final class AppSettings {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored var onSyncEnabledChange: (() -> Void)?
     @ObservationIgnored var onCursorAccountCollectionChange: (() -> Void)?
+    @ObservationIgnored var onMobileReportEnabledChange: (() -> Void)?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -233,6 +243,7 @@ final class AppSettings {
             Keys.numberUnits: NumberUnits.automatic.rawValue,
             Keys.syncEnabled: false,
             Keys.cursorAccountCollection: false,
+            Keys.mobileReportEnabled: false,
         ])
 
         appearance = AppAppearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
@@ -246,6 +257,7 @@ final class AppSettings {
         tokscalePathOverride = defaults.string(forKey: Keys.tokscalePathOverride)
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
         cursorAccountCollection = defaults.bool(forKey: Keys.cursorAccountCollection)
+        mobileReportEnabled = defaults.bool(forKey: Keys.mobileReportEnabled)
         launchAtLoginStatus = SMAppService.mainApp.status
         applyUnitStyle(bumpRevision: false)
         // NSApp is not up yet while the app's state is built; apply once launch finishes so a session
@@ -283,5 +295,6 @@ final class AppSettings {
         static let tokscalePathOverride = "tokscalePathOverride"
         static let syncEnabled = "syncEnabled"
         static let cursorAccountCollection = "cursorAccountCollection"
+        static let mobileReportEnabled = "mobileReportEnabled"
     }
 }

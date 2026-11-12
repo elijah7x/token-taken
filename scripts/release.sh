@@ -102,6 +102,24 @@ codesign --force --options runtime --timestamp \
     --entitlements "$root/TokenTaken/TokenTaken.entitlements" \
     --sign "$identity" "$app"
 
+# The iCloud container entitlement is only valid together with this profile.
+embedded_profile="$app/Contents/embedded.provisionprofile"
+if [[ ! -f "$embedded_profile" ]]; then
+    echo "Missing embedded Developer ID provisioning profile: $embedded_profile" >&2
+    exit 1
+fi
+# A command-line PROVISIONING_PROFILE_SPECIFIER would apply to every target, so the
+# profile name lives only on the app target in project.yml.
+container="iCloud.io.github.elijah7x.TokenTaken"
+if ! codesign -d --entitlements - "$app" 2>/dev/null | grep -q "$container"; then
+    echo "Signed app is missing the iCloud container entitlement: $container" >&2
+    exit 1
+fi
+if ! security cms -D -i "$embedded_profile" 2>/dev/null | grep -q "$container"; then
+    echo "Embedded profile does not grant the iCloud container: $container" >&2
+    exit 1
+fi
+
 app_kb="$(du -sk "$app" | awk '{print $1}')"
 if [[ "$app_kb" -gt 102400 ]]; then
     echo "App bundle exceeds 100 MB limit (${app_kb} KB): $app" >&2

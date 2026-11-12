@@ -9,7 +9,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "17"
+    CURRENT_PROJECT_VERSION: "18"
     ENABLE_HARDENED_RUNTIME: "YES"
     CODE_SIGN_IDENTITY: "-"
     CODE_SIGN_STYLE: Manual
@@ -18,7 +18,7 @@ targets:
   TokenTakenKit:
     type: framework
     platform: macOS
-    sources: [TokenTakenKit]
+    sources: [TokenTakenKit, Shared]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTakenKit
@@ -27,7 +27,12 @@ targets:
   TokenTaken:
     type: application
     platform: macOS
-    sources: [TokenTaken]
+    sources:
+      - path: TokenTaken
+        excludes:
+          - Info.plist
+          - TokenTaken.entitlements
+          - TokenTakenDebug.entitlements
     dependencies:
       - target: TokenTakenKit
         embed: true
@@ -81,9 +86,16 @@ targets:
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_APP_SANDBOX: "NO"
-        CODE_SIGN_ENTITLEMENTS: TokenTaken/TokenTaken.entitlements
+        INFOPLIST_FILE: TokenTaken/Info.plist
         SWIFT_EMIT_LOC_STRINGS: "YES"
         LOCALIZATION_PREFERS_STRING_CATALOGS: "YES"
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: TokenTaken/TokenTakenDebug.entitlements
+          PROVISIONING_PROFILE_SPECIFIER: ""
+        Release:
+          CODE_SIGN_ENTITLEMENTS: TokenTaken/TokenTaken.entitlements
+          PROVISIONING_PROFILE_SPECIFIER: "TokenTaken Developer ID"
   TokenTakenCLI:
     type: tool
     platform: macOS
