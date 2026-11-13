@@ -232,17 +232,34 @@ struct FieldAppIcon: View {
 
 @MainActor
 enum FieldAppIconSwitcher {
-    /// The Dock icon follows the theme. The Finder icon stays the bundle icon.
+    /// Last icon written to the bundle: nil means not yet written this launch.
+    private static var bundleIconKey: String?
+
+    /// The Dock icon follows the theme. Stage Manager, Finder and Launchpad read the bundle's icon rather than
+    /// `applicationIconImage`, so the same image is also set as the bundle's custom icon and cleared for other themes.
     static func apply(_ theme: AppTheme) {
         guard let app = NSApp else { return }
         switch theme {
         case .liquidGlass, .cosmos:
             app.applicationIconImage = nil
+            setBundleIcon(nil, key: "default")
         case .field:
             let isDark = app.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
             let renderer = ImageRenderer(content: FieldAppIcon(isDark: isDark))
             renderer.scale = 2
-            if let image = renderer.nsImage { app.applicationIconImage = image }
+            guard let image = renderer.nsImage else { return }
+            app.applicationIconImage = image
+            setBundleIcon(image, key: isDark ? "field-dark" : "field-light")
         }
+    }
+
+    /// A custom icon is Finder metadata on the bundle; it fails `codesign --strict` but not Gatekeeper or launch checks.
+    /// Writing fails quietly when the bundle isn't writable, which leaves the shipped icon in place.
+    private static func setBundleIcon(_ image: NSImage?, key: String) {
+        guard key != bundleIconKey else { return }
+        bundleIconKey = key
+        let path = Bundle.main.bundlePath
+        if image == nil, !FileManager.default.fileExists(atPath: path + "/Icon\r") { return }
+        NSWorkspace.shared.setIcon(image, forFile: path, options: [])
     }
 }
