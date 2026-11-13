@@ -6,10 +6,10 @@ Token Taken bundles the pinned `tokscale` CLI binary and a versioned price snaps
 
 ### tokscale
 
-- **Name:** tokscale (`@tokscale/cli-darwin-arm64` and `@tokscale/cli-darwin-x64`)
+- **Name:** tokscale (`@tokscale/cli-darwin-arm64`)
 - **Version:** `4.21.0` (pinned with SHA-256 checksums in `engine/engine.lock.json`)
 - **Upstream URL:** <https://github.com/junhoyeo/tokscale>
-- **Bundled component:** Universal macOS executable assembled from the unmodified `bin/tokscale` binaries in `@tokscale/cli-darwin-arm64` `4.21.0` and `@tokscale/cli-darwin-x64` `4.21.0`, packaged at `Contents/Helpers/tokscale`
+- **Bundled component:** The unmodified `bin/tokscale` from `@tokscale/cli-darwin-arm64` `4.21.0`, packaged at `Contents/Helpers/tokscale`
 - **Local modifications:** None to the binary
 - **License:** MIT
 
@@ -78,7 +78,7 @@ React Bits assets from TokenTracker must not be copied. Other separately license
 >
 > On request, the maintainers of Token Taken will also provide a copy of each. No GPL, LGPL, EPL or CDDL crate is in the tree.
 
-The dependency set below is the macOS (`aarch64-apple-darwin` / `x86_64-apple-darwin`) build of the `tokscale` binary defined by `crates/tokscale-cli` in the `v4.21.0` tag (commit `b26c433d`), which is the release the bundled binaries in `engine/engine.lock.json` come from. `Cargo.lock` at `v4.21.0` is byte-identical to the lockfile at current upstream `HEAD` (`82613d2f`), so either revision identifies the same graph. Crates reachable only through `[dev-dependencies]`, or only for Windows, WebAssembly, Android, Linux, Redox or EFI targets, are excluded. Build-time dependencies (proc macros and build scripts) that Cargo.lock does not distinguish from ordinary ones are included rather than dropped, so this table over-includes rather than under-includes.
+The dependency set below is the macOS `aarch64-apple-darwin` build of the `tokscale` binary defined by `crates/tokscale-cli` in the `v4.21.0` tag (commit `b26c433d`), which is the release the bundled binaries in `engine/engine.lock.json` come from. `Cargo.lock` at `v4.21.0` is byte-identical to the lockfile at current upstream `HEAD` (`82613d2f`), so either revision identifies the same graph. Crates reachable only through `[dev-dependencies]`, or only for Windows, WebAssembly, Android, Linux, Redox or EFI targets, are excluded. Build-time dependencies (proc macros and build scripts) that Cargo.lock does not distinguish from ordinary ones are included rather than dropped, so this table over-includes rather than under-includes.
 
 Crates are grouped by identical or equivalent licence expressions; a crate appearing under a disjunction is redistributed under whichever branch Token Taken relies on, and every branch's text is reproduced below. Feature-gated optional dependencies cannot be resolved without the enabled feature set, so a crate present in `Cargo.lock` but only reachable through an optional dependency that tokscale does not enable can appear here unnecessarily.
 

@@ -23,7 +23,7 @@ Status: Implemented v1 (2026-11-11)
 
 - Architecture decision records (ADRs) record why an approach was chosen, its context, alternatives, and consequences. Contracts record what MUST hold in the product.
 - An ADR can motivate a contract, but implementation MUST follow the current contract. When an ADR changes contracted behavior, update both documents and the changelog in the same approved change.
-- Current decision context: [native macOS app](../decisions/0001-native-macos-app.md), [iCloud Drive sync](../decisions/0002-icloud-drive-sync.md), [usage engine](../decisions/0003-usage-engine.md), [Developer ID distribution](../decisions/0004-distribution.md), [collection granularity](../decisions/0005-collection-granularity.md), and [incremental collection](../decisions/0006-incremental-collection.md), with the accepted [mobile report](../decisions/0011-mobile-report.md).
+- Current decision context: [native macOS app](../decisions/0001-native-macos-app.md), [iCloud Drive sync](../decisions/0002-icloud-drive-sync.md), [usage engine](../decisions/0003-usage-engine.md), [Developer ID distribution](../decisions/0004-distribution.md), [collection granularity](../decisions/0005-collection-granularity.md), and [incremental collection](../decisions/0006-incremental-collection.md), with the accepted [mobile report](../decisions/0011-mobile-report.md) and [Apple silicon only](../decisions/0012-apple-silicon-only.md).
 - Product goals and system structure are described in [product.md](../product.md) and [architecture.md](../architecture.md); neither may quietly redefine these contracts.
 
 ## Open questions

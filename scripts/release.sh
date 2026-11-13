@@ -27,7 +27,7 @@ fi
 identity="${TOKEN_TAKEN_SIGNING_IDENTITY:-Developer ID Application}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-for tool in python3 xcodegen xcodebuild codesign diskutil xcrun; do
+for tool in python3 xcodegen xcodebuild codesign diskutil lipo xcrun; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "$tool is required" >&2
         exit 1
@@ -72,7 +72,7 @@ xcodebuild \
     -scheme TokenTaken \
     -configuration Release \
     -derivedDataPath "$derived_data" \
-    ARCHS="arm64 x86_64" \
+    ARCHS="arm64" \
     ONLY_ACTIVE_ARCH=NO \
     DEVELOPMENT_TEAM="$team_id" \
     CODE_SIGN_IDENTITY="$identity" \
@@ -89,6 +89,15 @@ tokscale="$app/Contents/Helpers/tokscale"
 for product in "$app" "$framework" "$cli" "$tokscale"; do
     if [[ ! -e "$product" ]]; then
         echo "Missing release product: $product" >&2
+        exit 1
+    fi
+done
+
+# The app ships for Apple silicon only (ADR-0012); a stray Intel slice doubles the download.
+for binary in "$app/Contents/MacOS/Token Taken" "$framework/Versions/A/TokenTakenKit" "$cli" "$tokscale"; do
+    archs="$(lipo -archs "$binary")"
+    if [[ "$archs" != "arm64" ]]; then
+        echo "$binary reports '$archs'; the release must be arm64 only" >&2
         exit 1
     fi
 done

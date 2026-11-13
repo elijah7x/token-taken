@@ -32,6 +32,7 @@ See the [privacy contract](docs/contracts/privacy.md) and [sync contract](docs/c
 ## Requirements
 
 - macOS 26.0 or later
+- Apple silicon Mac
 
 ## CLI
 

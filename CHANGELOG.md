@@ -32,6 +32,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Token Taken now runs on Apple silicon Macs only: the app, `TokenTakenKit`, `token-taken`, and the bundled `tokscale` engine are built and checked as arm64 alone (ADR-0012), which makes the download smaller.
 - Date Devin turns by the request stamp (`metadata.started_generation_at`) instead of the row write time, and count Antigravity input as new input only: 302M Devin tokens move to the local day they were requested on, and Antigravity no longer bills its fixed per-model preamble (3.18M tokens). Both history epochs are now `2`, so recent days rebaseline (ADR-0009).
 - Devin is no longer requested from the pinned `tokscale` engine (`devin-cli` and `devin-desktop` leave its client list); Antigravity also leaves it now that its native collector counts it.
 - Keep counted daily usage when an agent prunes or rotates its own logs: a collection now replaces a day only when its total is not smaller, keeps stored days the batch no longer reports, and rebaselines days after the earliest reported day when a source's history epoch or the collection time zone changes (`history_epochs`, schema version 3).

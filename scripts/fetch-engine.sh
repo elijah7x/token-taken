@@ -88,11 +88,7 @@ PY
     chmod 755 "$vendor/$platform/tokscale"
 done
 
-lipo -create \
-    "$vendor/darwin-arm64/tokscale" \
-    "$vendor/darwin-x64/tokscale" \
-    -output "$work/tokscale"
-cp "$work/tokscale" "$vendor/tokscale"
+cp "$vendor/darwin-arm64/tokscale" "$vendor/tokscale"
 chmod 755 "$vendor/tokscale"
 
 if [[ $update_lock -eq 1 ]]; then

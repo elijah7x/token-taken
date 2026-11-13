@@ -101,11 +101,7 @@ public struct TokscaleCollector: UsageCollector {
         var candidates = [
             Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/tokscale"),
         ]
-        #if arch(arm64)
-        let architectures = ["arm64", "x64"]
-        #else
-        let architectures = ["x64", "arm64"]
-        #endif
+        let architectures = ["arm64"]
         for root in [
             home.appendingPathComponent(".npm-global/lib/node_modules"),
             URL(fileURLWithPath: "/opt/homebrew/lib/node_modules"),

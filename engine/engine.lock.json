@@ -2,15 +2,11 @@
   "engine": "tokscale",
   "version": "4.21.0",
   "commit": "b26c433d03f23a2255ad9f212512ce83ede83da3",
-  "source": "npm @tokscale/cli-darwin-arm64 and -x64",
+  "source": "npm @tokscale/cli-darwin-arm64",
   "platforms": {
     "darwin-arm64": {
       "tarball": "https://registry.npmjs.org/@tokscale/cli-darwin-arm64/-/cli-darwin-arm64-4.21.0.tgz",
       "sha256": "16a08b6d327287f5f022179d1271354c7192cc09403be82219624676c69342d3"
-    },
-    "darwin-x64": {
-      "tarball": "https://registry.npmjs.org/@tokscale/cli-darwin-x64/-/cli-darwin-x64-4.21.0.tgz",
-      "sha256": "5ce121335eb3a5381ca32f95cbf327dddb4b282c00616d835ac668bcb272a12b"
     }
   }
 }

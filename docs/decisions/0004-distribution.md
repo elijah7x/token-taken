@@ -20,7 +20,8 @@ Accepted
 
 ### Artifact and updates
 
-- Distribute a notarized, stapled DMG containing `Token Taken.app` and an `/Applications` symlink. `scripts/release.sh` builds universal arm64 and x86_64 binaries, verifies the locked engine archives, signs inside out, creates the DMG, and submits it with `notarytool`.
+- Distribute a notarized, stapled DMG containing `Token Taken.app` and an `/Applications` symlink. `scripts/release.sh` builds arm64 binaries, verifies the locked engine archive, signs inside out, creates the DMG, and submits it with `notarytool`.
+- Ship arm64 only. Token Taken runs on Apple silicon Macs only ([ADR-0012](0012-apple-silicon-only.md)), and the release script fails when any bundled executable reports an architecture other than `arm64`.
 - Use manual downloads and updates for v0.1. Do not add Sparkle or another automatic updater in v0.1; revisit update delivery after the first release.
 - Keep DerivedData, DMG staging, and release DMGs under the artifact root's `local-packages/` directory, never in the repository.
 - Submit an initial Developer ID build for notarization as early as possible, even with a placeholder icon. Do not postpone the first submission for final artwork. Rebuild, notarize, and staple the final DMG before publication.
@@ -49,12 +50,12 @@ Accepted
 
 ### Tokscale runtime evidence
 
-The lock file pins tokscale 4.21.0 from `@tokscale/cli-darwin-arm64` and `@tokscale/cli-darwin-x64`.
+The lock file pins tokscale 4.21.0 from `@tokscale/cli-darwin-arm64`.
 
 - The upstream [root package at v4.21.0](https://github.com/junhoyeo/tokscale/blob/v4.21.0/package.json) builds `tokscale-cli` with Cargo. Bun builds the JavaScript package launcher; that launcher is not the vendored executable.
 - The Darwin package metadata points directly to `bin/tokscale`. Inspection of the locally installed arm64 4.21.0 artifact found a Mach-O executable, only system libraries in its load commands, and no existing entitlements. It is not a Bun or Node single-file executable.
 - Therefore tokscale receives the normal hardened runtime and secure timestamp without `com.apple.security.cs.allow-jit`, `com.apple.security.cs.allow-unsigned-executable-memory`, or `com.apple.security.cs.disable-library-validation`. No tokscale-specific entitlements file is generated.
-- The x64 artifact and final universal binary were not inspected during this decision. The release check must confirm that tokscale still launches and notarizes without runtime exceptions when the engine version or packaging changes. The npm package's optional `libFoundationModels.dylib` is not currently vendored; if it is bundled later, it must also be signed before the app and reassessed.
+- Only the arm64 artifact is vendored; no x64 artifact is downloaded and no universal binary is assembled ([ADR-0012](0012-apple-silicon-only.md)). The release check must confirm that tokscale still launches and notarizes without runtime exceptions when the engine version or packaging changes. The npm package's optional `libFoundationModels.dylib` is not currently vendored; if it is bundled later, it must also be signed before the app and reassessed.
 
 ## Consequences
 

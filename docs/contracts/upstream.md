@@ -41,7 +41,7 @@ Status: Implemented v1 (2026-11-11)
 
 ## Current pin
 
-The tokscale v4.21.0 distribution (tag commit `b26c433d03f23a2255ad9f212512ce83ede83da3`) is pinned in `engine/engine.lock.json`. `scripts/fetch-engine.sh` verifies the per-architecture archives and assembles the universal binary under `Vendor/engine/`.
+The tokscale v4.21.0 distribution (tag commit `b26c433d03f23a2255ad9f212512ce83ede83da3`) is pinned in `engine/engine.lock.json`. `scripts/fetch-engine.sh` verifies the `darwin-arm64` archive and installs its `bin/tokscale` under `Vendor/engine/`.
 
 ## Open questions
 
