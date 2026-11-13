@@ -102,6 +102,31 @@ for binary in "$app/Contents/MacOS/Token Taken" "$framework/Versions/A/TokenTake
     fi
 done
 
+# Release binaries are stripped (project.yml); a stripped executable keeps no local
+# symbol table, so a large `nm -a` dump means stripping did not run.
+main_executable="$app/Contents/MacOS/Token Taken"
+# Count defined symbols only (nm -U); imported symbols stay after stripping (about 1,700 today).
+symbol_lines="$(nm -a -U "$main_executable" 2>/dev/null | wc -l | tr -d ' ')"
+if [[ "$symbol_lines" -ge 200 ]]; then
+    echo "$main_executable still defines $symbol_lines symbols; release binaries must be stripped" >&2
+    exit 1
+fi
+
+# dSYMs stay beside the package so crash reports remain symbolicated after stripping.
+products="$derived_data/Build/Products/Release"
+mkdir -p "$release_dir/dSYMs"
+dsym_count=0
+for dsym in "$products"/*.dSYM; do
+    if [[ -d "$dsym" ]]; then
+        ditto "$dsym" "$release_dir/dSYMs/$(basename "$dsym")"
+        dsym_count=$((dsym_count + 1))
+    fi
+done
+if [[ "$dsym_count" -eq 0 ]]; then
+    echo "No dSYMs found in $products; stripped release binaries need them for symbolication" >&2
+    exit 1
+fi
+
 codesign --force --options runtime --timestamp --sign "$identity" "$framework"
 codesign --force --options runtime --timestamp \
     --entitlements "$root/TokenTakenCLI/TokenTakenCLI.entitlements" \
@@ -140,7 +165,7 @@ mkdir -p "$stage"
 ditto "$app" "$stage/Token Taken.app"
 ln -s /Applications "$stage/Applications"
 rm -f "$dmg"
-diskutil image create from --format UDZO --volumeName "Token Taken" "$stage" "$dmg"
+diskutil image create from --format ULMO --volumeName "Token Taken" "$stage" "$dmg"
 
 if [[ $wait_for_notarization -eq 1 ]]; then
     xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait

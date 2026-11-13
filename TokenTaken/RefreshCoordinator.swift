@@ -17,6 +17,9 @@ final class RefreshCoordinator {
     /// a 4-hour fallback only keeps long-running sessions from going stale.
     static let fallbackRefreshInterval: TimeInterval = 4 * 60 * 60
     static let fallbackRefreshTolerance: TimeInterval = 15 * 60
+    /// A launch sooner than this after the last successful collection reuses the stored numbers;
+    /// re-reading every log seconds after the previous read cannot find new data.
+    static let launchRefreshFreshness: TimeInterval = 15 * 60
     /// Re-read remotes caught mid-write or awaiting iCloud download without waiting for the 4-hour fallback.
     static let remoteRetryDelays: [TimeInterval] = [120, 600]
     static let remoteRetryTolerance: TimeInterval = 15
@@ -51,6 +54,9 @@ final class RefreshCoordinator {
     @ObservationIgnored private let syncWorker = SyncWorker()
     @ObservationIgnored private var mobileReportTask: Task<Void, Never>?
     @ObservationIgnored private let mobileReportWorker = MobileReportWorker()
+    /// Bumped by every real state change; `notifyIfChanged()` republishes once per phase of a refresh.
+    @ObservationIgnored private var stateRevision = 0
+    @ObservationIgnored private var notifiedRevision = 0
 
     init(settings: AppSettings) throws {
         self.settings = settings
@@ -66,9 +72,13 @@ final class RefreshCoordinator {
             if self.settings.syncEnabled {
                 Task { [weak self] in await self?.readRemotes() }
             } else {
-                self.remoteSnapshots = []
-                self.syncReadFailed = false; self.syncWriteFailed = false
-                self.onChange?()
+                if !self.remoteSnapshots.isEmpty {
+                    self.remoteSnapshots = []
+                    self.markChanged()
+                }
+                self.setSyncReadFailed(false)
+                self.setSyncWriteFailed(false)
+                self.notifyIfChanged()
             }
         }
         // Enabling account-wide collection is a user action worth a fresh read; disabling keeps the
@@ -94,8 +104,28 @@ final class RefreshCoordinator {
     func start() {
         guard refreshTask == nil else { return }
         observeWakeIfNeeded()
-        scheduleLoop(refreshImmediately: true)
+        let refreshImmediately = needsLaunchRefresh
+        scheduleLoop(refreshImmediately: refreshImmediately)
+        // A skipped launch refresh still reads the other Macs: their rows are not this Mac's logs, and
+        // leaving them unread would hide synced devices until the next collection.
+        if !refreshImmediately {
+            Task { [weak self] in
+                await self?.readRemotes()
+                // Republish too, or Settings reports the iPhone report as unpublished until the hourly loop runs.
+                if self?.settings.mobileReportEnabled == true { await self?.publishMobileReport() }
+            }
+        }
         if settings.mobileReportEnabled { startMobileReportLoop() }
+    }
+
+    /// Fresh data is reused at launch; a failed or stale source and an old success still collect. The
+    /// loop in `scheduleLoop` picks the deferred run up from `lastRefresh`.
+    private var needsLaunchRefresh: Bool {
+        if health.contains(where: { $0.state == .failed || $0.state == .unavailable || $0.state == .stale }) {
+            return true
+        }
+        guard let lastRefresh else { return true }
+        return Date.now.timeIntervalSince(lastRefresh) >= Self.launchRefreshFreshness
     }
 
     func updateEngineStatus() {
@@ -120,10 +150,10 @@ final class RefreshCoordinator {
         updateEngineStatus()
         guard !isRefreshing else { return }
 
-        isRefreshing = true
+        setRefreshing(true)
         defer {
-            isRefreshing = false
-            onChange?()
+            setRefreshing(false)
+            notifyIfChanged()
         }
         cancelRemoteRetry()
         await readRemotes()
@@ -133,15 +163,33 @@ final class RefreshCoordinator {
         let attemptedAt = Date.now
         lastAttempt = attemptedAt
         let runner = CollectionRunner(store: store, device: device, collectors: collectors)
-        let results = await Task.detached(priority: .utility) {
-            await runner.runAll(now: attemptedAt)
-        }.value
-        // Return freed pages so the menu bar app's resident memory drops after collection.
-        malloc_zone_pressure_relief(nil, 0)
+        let collection = Task.detached(priority: .utility) {
+            let results = await runner.runAll(now: attemptedAt)
+            // Return freed pages off the main actor so the menu bar app's resident memory drops
+            // after collection without stalling the window.
+            malloc_zone_pressure_relief(nil, 0)
+            return results
+        }
+        // A detached task ignores the caller's cancellation unless it is told, so cancel it here and
+        // drop the commit below: a cancelled refresh must not publish state nobody is waiting for.
+        let results = await withTaskCancellationHandler {
+            await collection.value
+        } onCancel: {
+            collection.cancel()
+        }
+        guard !Task.isCancelled else { return }
 
-        health = results.map { $0.markingStale() }
-        if health.contains(where: { $0.state == .ok && ($0.lastSuccess.map({ $0 >= attemptedAt }) ?? false) }) {
-            lastRefresh = health.compactMap(\.lastSuccess).max()
+        let nextHealth = results.map { $0.markingStale() }
+        if nextHealth != health {
+            health = nextHealth
+            markChanged()
+        }
+        if nextHealth.contains(where: { $0.state == .ok && ($0.lastSuccess.map({ $0 >= attemptedAt }) ?? false) }) {
+            let latest = nextHealth.compactMap(\.lastSuccess).max()
+            if latest != lastRefresh {
+                lastRefresh = latest
+                markChanged()
+            }
             await scheduleSyncWrite()
         }
         // A failed collection still publishes whatever the store can read; an unreadable store keeps
@@ -150,24 +198,24 @@ final class RefreshCoordinator {
     }
 
     private func readRemotes(isRetry: Bool = false) async {
-        iCloudAvailable = ICloudSync.defaultRoot != nil
+        refreshICloudAvailability()
         guard settings.syncEnabled else { return }
         guard let root = ICloudSync.defaultRoot else {
             markRemotesUnavailable()
             updateRemoteRetry(isRetry: isRetry, readFailed: true)
-            onChange?()
+            notifyIfChanged()
             return
         }
         let snapshots = await syncWorker.read(root: root, excludingDeviceID: device.id)
         guard settings.syncEnabled, !Task.isCancelled else { return }
         guard let snapshots else {
             markRemotesUnavailable()
-            syncReadFailed = true
+            setSyncReadFailed(true)
             updateRemoteRetry(isRetry: isRetry, readFailed: true)
-            onChange?()
+            notifyIfChanged()
             return
         }
-        syncReadFailed = false
+        setSyncReadFailed(false)
         let previous = Dictionary(remoteSnapshots.map { ($0.device.id, $0) }, uniquingKeysWith: { first, _ in first })
         remoteSnapshots = snapshots.map { snapshot in
             // A stale snapshot still carries its newest data; fall back to the cache only when this read got none.
@@ -179,8 +227,9 @@ final class RefreshCoordinator {
                 deviceID: cached.device.id, displayName: cached.device.name,
                 lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state), accounts: cached.accounts)
         }
+        markChanged()
         updateRemoteRetry(isRetry: isRetry)
-        onChange?()
+        notifyIfChanged()
     }
 
     private func updateRemoteRetry(isRetry: Bool, readFailed: Bool = false) {
@@ -228,6 +277,7 @@ final class RefreshCoordinator {
             RemoteDeviceSnapshot(device: snapshot.device, daily: snapshot.daily, hourly: snapshot.hourly, status: RemoteDeviceStatus(
                 deviceID: snapshot.device.id, displayName: snapshot.device.name, lastWrite: snapshot.status.lastWrite, state: .unavailable), accounts: snapshot.accounts)
         }
+        markChanged()
     }
 
     private func scheduleSyncWrite() async {
@@ -239,26 +289,65 @@ final class RefreshCoordinator {
         }.value
         guard settings.syncEnabled else { return }
         guard case .success(let snapshot) = publication else {
-            syncWriteFailed = true
+            setSyncWriteFailed(true)
             return
         }
         let health = health
         syncTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(1)) } catch { return }
             guard let self, self.settings.syncEnabled else { return }
-            self.iCloudAvailable = ICloudSync.defaultRoot != nil
+            self.refreshICloudAvailability()
             guard let root = ICloudSync.defaultRoot else {
-                self.syncWriteFailed = true
-                self.onChange?()
+                self.setSyncWriteFailed(true)
+                self.notifyIfChanged()
                 return
             }
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
             let succeeded = await self.syncWorker.write(store: snapshot, device: self.device, root: root,
                 appVersion: version, health: health)
             guard self.settings.syncEnabled else { return }
-            self.syncWriteFailed = !succeeded
+            self.setSyncWriteFailed(!succeeded)
             await self.readRemotes()
         }
+    }
+
+    // MARK: - State publication
+
+    /// Records a real state change. Every mutation goes through here or a guarded setter, so a refresh
+    /// that changes nothing stays silent.
+    private func markChanged() { stateRevision &+= 1 }
+
+    /// Publishes any pending change once. A refresh therefore notifies at most once after the remote
+    /// reads and once after collection, instead of once per assignment.
+    private func notifyIfChanged() {
+        guard stateRevision != notifiedRevision else { return }
+        notifiedRevision = stateRevision
+        onChange?()
+    }
+
+    private func setRefreshing(_ value: Bool) {
+        guard isRefreshing != value else { return }
+        isRefreshing = value
+        markChanged()
+    }
+
+    private func refreshICloudAvailability() {
+        let available = ICloudSync.defaultRoot != nil
+        guard available != iCloudAvailable else { return }
+        iCloudAvailable = available
+        markChanged()
+    }
+
+    private func setSyncReadFailed(_ value: Bool) {
+        guard value != syncReadFailed else { return }
+        syncReadFailed = value
+        markChanged()
+    }
+
+    private func setSyncWriteFailed(_ value: Bool) {
+        guard value != syncWriteFailed else { return }
+        syncWriteFailed = value
+        markChanged()
     }
 
     // MARK: - Mobile report

@@ -41,3 +41,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Keep a `:free` model suffix out of alias lookup: a free variant stays unpriced unless the snapshot carries an exact reviewed key for it.
 - Streamed `pi` and `oh-my-pi` session JSONL scanning with minimal decoding and bounded retention to reduce collector peak memory use.
 - Split Confluence into static and Core Animation particle layers, hid particles while ribbons spring to new data, and paused hero animation when the window is inactive to keep idle app CPU near zero.
+- Release builds strip their binaries and the DMG is now LZMA-compressed, so the download is smaller; the matching dSYMs are kept beside the package.
+- Much lower idle CPU with the main window open: animations pause while the window is covered or in the background.
+- Switching between Sources and Models settles noticeably faster.
+- Launching skips a fresh collection when the last one is under 15 minutes old, so the first numbers appear sooner.
+
+### Fixed
+
+- A refresh can no longer hang forever when the `tokscale` engine stops responding.

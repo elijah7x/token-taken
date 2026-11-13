@@ -210,6 +210,40 @@ final class TokscaleCollectorTests: XCTestCase {
         }
     }
 
+    func testTimeoutKillsChildThatIgnoresSIGTERM() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("stubborn-tokscale.sh")
+        // SIGTERM is ignored here, so only the SIGKILL escalation can end the wait.
+        let script = """
+            #!/bin/sh
+            trap '' TERM
+            while :; do sleep 1; done
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude"],
+            deviceID: "device-a",
+            timeoutSeconds: 0.5,
+            isClientAvailable: { _ in true }
+        )
+        let started = Date.now
+        do {
+            _ = try await collector.collect()
+            XCTFail("Expected a timeout")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "tokscale timed out")
+        }
+        // The wait ends at the SIGKILL deadline, far before the child's own exit.
+        XCTAssertLessThan(Date.now.timeIntervalSince(started), 30)
+    }
+
     func testSingleCollectorRunsOneGraphAndReportsUnavailableClients() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

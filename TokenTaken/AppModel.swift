@@ -17,7 +17,6 @@ final class AppModel {
 
     private(set) var summary: UsageSummary
     private(set) var todaySummary: UsageSummary
-    private(set) var last7: [SeriesPoint]
     private(set) var storageError: String?
     /// Set when the last read failed; the previous numbers stay on screen instead of partial ones.
     private(set) var readError: String?
@@ -114,8 +113,8 @@ final class AppModel {
         storageError = nil
         selectedPeriod = period
         let loaded = Self.load(store, period: period)
-        (summary, todaySummary, last7, readError) = (loaded.summary, loaded.today, loaded.last7, loaded.error)
-        isEmpty = Self.storeIsEmpty(store, summary: loaded.summary)
+        (summary, todaySummary, readError) = (loaded.summary, loaded.today, loaded.error)
+        isEmpty = Self.storeIsEmpty(records: loaded.records, summary: loaded.summary)
     }
 
     init(settings: AppSettings, store: SQLiteUsageStore?, period: Period = .month, storageError: String? = nil) {
@@ -133,13 +132,14 @@ final class AppModel {
             initialStore = emptyStore
         }
         let loaded = Self.load(initialStore, period: period)
-        (summary, todaySummary, last7, readError) = (loaded.summary, loaded.today, loaded.last7, loaded.error)
-        isEmpty = Self.storeIsEmpty(initialStore, summary: loaded.summary)
+        (summary, todaySummary, readError) = (loaded.summary, loaded.today, loaded.error)
+        isEmpty = Self.storeIsEmpty(records: loaded.records, summary: loaded.summary)
     }
 
-    private static func storeIsEmpty(_ store: any UsageStore, summary: UsageSummary) -> Bool {
+    /// The store is read once per refresh; emptiness is judged from those same rows.
+    private static func storeIsEmpty(records: [UsageRecord], summary: UsageSummary) -> Bool {
         guard summary.total.total == 0 else { return false }
-        return (try? store.records().isEmpty) ?? true
+        return records.isEmpty
     }
 
     func attach(to refreshCoordinator: RefreshCoordinator) {
@@ -147,14 +147,16 @@ final class AppModel {
     }
 
     func refresh() {
-        let aggregator = aggregator()
+        let store = store
         do {
-            (summary, todaySummary, last7) = (
-                try aggregator.summary(for: selectedPeriod),
-                try aggregator.summary(for: .day),
-                try aggregator.dailyTotals(lastDays: 7)
-            )
-            isEmpty = Self.storeIsEmpty(store, summary: summary)
+            // One read of the store serves both summaries, instead of one scan per summary.
+            let rows = try UsageAggregator.preload(store)
+            let aggregator = Self.makeAggregator(store, rows: rows)
+            let newSummary = try aggregator.summary(for: selectedPeriod)
+            let newToday = try aggregator.summary(for: .day)
+            (summary, todaySummary) = (newSummary, newToday)
+            let empty = Self.storeIsEmpty(records: rows.records, summary: newSummary)
+            if empty != isEmpty { isEmpty = empty }
             readError = nil
         } catch {
             readError = error.localizedDescription
@@ -163,16 +165,17 @@ final class AppModel {
 
     private static func load(
         _ store: any UsageStore, period: Period
-    ) -> (summary: UsageSummary, today: UsageSummary, last7: [SeriesPoint], error: String?) {
+    ) -> (summary: UsageSummary, today: UsageSummary, records: [UsageRecord], error: String?) {
         do {
-            let aggregator = makeAggregator(store)
+            let rows = try UsageAggregator.preload(store)
+            let aggregator = makeAggregator(store, rows: rows)
             return (try aggregator.summary(for: period), try aggregator.summary(for: .day),
-                    try aggregator.dailyTotals(lastDays: 7), nil)
+                    rows.records, nil)
         } catch {
             // The empty store cannot fail, so the window starts blank with the error shown.
             let empty = makeAggregator(EmptyUsageStore())
             return (try! empty.summary(for: period), try! empty.summary(for: .day),
-                    try! empty.dailyTotals(lastDays: 7), error.localizedDescription)
+                    [], error.localizedDescription)
         }
     }
 
@@ -189,10 +192,8 @@ final class AppModel {
         return emptyStore
     }
 
-    private func aggregator() -> UsageAggregator { Self.makeAggregator(store) }
-
-    private static func makeAggregator(_ store: any UsageStore) -> UsageAggregator {
-        UsageAggregator(store: store, now: store is SyntheticUsageStore ? SyntheticUsageStore.defaultToday : .now)
+    private static func makeAggregator(_ store: any UsageStore, rows: UsageAggregator.Rows? = nil) -> UsageAggregator {
+        UsageAggregator(store: store, rows: rows, now: store is SyntheticUsageStore ? SyntheticUsageStore.defaultToday : .now)
     }
 
     private static let relativeFormatter: RelativeDateTimeFormatter = {

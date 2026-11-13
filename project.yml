@@ -26,6 +26,14 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.elijah7x.TokenTakenKit
         GENERATE_INFOPLIST_FILE: "YES"
         SKIP_INSTALL: "YES"
+      configs:
+        Release:
+          # The framework must keep its exported symbols; only local symbols go.
+          STRIP_STYLE: non-global
+          STRIP_INSTALLED_PRODUCT: "YES"
+          DEPLOYMENT_POSTPROCESSING: "YES"
+          DEAD_CODE_STRIPPING: "YES"
+          DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
   TokenTaken:
     type: application
     platform: macOS
@@ -98,6 +106,12 @@ targets:
         Release:
           CODE_SIGN_ENTITLEMENTS: TokenTaken/TokenTaken.entitlements
           PROVISIONING_PROFILE_SPECIFIER: "TokenTaken Developer ID"
+          STRIP_STYLE: all
+          STRIP_INSTALLED_PRODUCT: "YES"
+          DEPLOYMENT_POSTPROCESSING: "YES"
+          DEAD_CODE_STRIPPING: "YES"
+          # Stripping is only safe while dSYMs are still emitted for symbolication.
+          DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
   TokenTakenCLI:
     type: tool
     platform: macOS
@@ -111,6 +125,13 @@ targets:
         CODE_SIGN_ENTITLEMENTS: TokenTakenCLI/TokenTakenCLI.entitlements
         # A command-line tool cannot embed the framework; find it beside the tool or in an app bundle.
         LD_RUNPATH_SEARCH_PATHS: "@executable_path @executable_path/../Frameworks @loader_path/../Frameworks"
+      configs:
+        Release:
+          STRIP_STYLE: all
+          STRIP_INSTALLED_PRODUCT: "YES"
+          DEPLOYMENT_POSTPROCESSING: "YES"
+          DEAD_CODE_STRIPPING: "YES"
+          DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
   TokenTakenKitTests:
     type: bundle.unit-test
     platform: macOS

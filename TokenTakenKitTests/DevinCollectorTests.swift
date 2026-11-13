@@ -318,6 +318,38 @@ final class DevinCollectorTests: XCTestCase {
         XCTAssertTrue(second.stateCommits.isEmpty)
     }
 
+    func testSharedMemoryIndexDoesNotTriggerRescan() async throws {
+        try makeDatabase(
+            sessions: [Session(id: "session-a", title: nil, model: "swe-2")],
+            rows: [
+                Row(rowID: 1, session: "session-a", createdAt: seconds("2026-01-02T10:00:00Z"),
+                    message: chatMessage(
+                        requestID: "request-1", generationModel: "swe-2",
+                        startedGenerationAt: "2026-01-02T10:00:00.000Z", input: 100
+                    )),
+            ]
+        )
+        let state = directory.appendingPathComponent("collector-state", isDirectory: true)
+        let first = try await collector(stateDirectory: state).collect()
+        XCTAssertEqual(first.daily.count, 1)
+        for commit in first.stateCommits { try commit() }
+
+        // Opening the database rewrites only the shared-memory index, never the content.
+        let shm = URL(fileURLWithPath: cliDatabaseURL.path + "-shm")
+        try Data(count: 4_096).write(to: shm)
+        let afterSharedMemory = try await collector(stateDirectory: state).collect()
+        XCTAssertEqual(afterSharedMemory.unchangedSourceIDs, ["devin"])
+        XCTAssertTrue(afterSharedMemory.daily.isEmpty && afterSharedMemory.hourly.isEmpty)
+
+        // A real change to the database still rescans; the stray index file must not disturb SQLite.
+        try? FileManager.default.removeItem(at: shm)
+        try FileManager.default.setAttributes([.modificationDate: Date.now.addingTimeInterval(60)],
+            ofItemAtPath: cliDatabaseURL.path)
+        let afterChange = try await collector(stateDirectory: state).collect()
+        XCTAssertTrue(afterChange.unchangedSourceIDs.isEmpty)
+        XCTAssertEqual(afterChange.daily.count, 1)
+    }
+
     func testMissingSourceThrowsUnavailable() async throws {
         do {
             _ = try await collector().collect()

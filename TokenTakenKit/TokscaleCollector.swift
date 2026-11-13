@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import os
 
@@ -457,50 +458,60 @@ public struct TokscaleCollector: UsageCollector {
         let sendableProcess = SendableProcess(value: process, stdoutHandle: stdoutHandle)
         let timeoutSeconds = timeoutSeconds
 
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-            DispatchQueue.global(qos: .utility).async {
-                let process = sendableProcess.value
-                defer {
-                    try? sendableProcess.stdoutHandle.close()
-                    try? FileManager.default.removeItem(at: temporaryDirectory)
-                }
-                do {
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                DispatchQueue.global(qos: .utility).async {
+                    let process = sendableProcess.value
+                    defer {
+                        try? sendableProcess.stdoutHandle.close()
+                        try? FileManager.default.removeItem(at: temporaryDirectory)
+                    }
                     do {
-                        try process.run()
+                        guard !sendableProcess.wasCancelled else { throw CancellationError() }
+                        do {
+                            try process.run()
+                        } catch {
+                            throw CollectorError.process("Could not run tokscale")
+                        }
+                        // A timeout or cancellation that arrived before the child existed stops it here.
+                        sendableProcess.stopIfRequested()
+                        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+                        timer.schedule(deadline: .now() + timeoutSeconds)
+                        timer.setEventHandler { sendableProcess.timeOut() }
+                        timer.resume()
+                        process.waitUntilExit()
+                        timer.cancel()
+                        if sendableProcess.didTimeOut {
+                            throw CollectorError.process("tokscale timed out")
+                        }
+                        if sendableProcess.wasCancelled { throw CancellationError() }
+                        guard process.terminationStatus == 0 else {
+                            throw CollectorError.process("tokscale exited with status \(process.terminationStatus)")
+                        }
+                        guard let output = try? Data(contentsOf: outputURL) else {
+                            throw CollectorError.invalidOutput("tokscale output was invalid")
+                        }
+                        continuation.resume(returning: output)
                     } catch {
-                        throw CollectorError.process("Could not run tokscale")
+                        continuation.resume(throwing: error)
                     }
-                    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-                    timer.schedule(deadline: .now() + timeoutSeconds)
-                    timer.setEventHandler {
-                        sendableProcess.markTimedOut()
-                        if sendableProcess.value.isRunning { sendableProcess.value.terminate() }
-                    }
-                    timer.resume()
-                    process.waitUntilExit()
-                    timer.cancel()
-                    if sendableProcess.didTimeOut {
-                        throw CollectorError.process("tokscale timed out")
-                    }
-                    guard process.terminationStatus == 0 else {
-                        throw CollectorError.process("tokscale exited with status \(process.terminationStatus)")
-                    }
-                    guard let output = try? Data(contentsOf: outputURL) else {
-                        throw CollectorError.invalidOutput("tokscale output was invalid")
-                    }
-                    continuation.resume(returning: output)
-                } catch {
-                    continuation.resume(throwing: error)
                 }
             }
+        } onCancel: {
+            sendableProcess.cancel()
         }
     }
 
     private final class SendableProcess: @unchecked Sendable {
+        /// A child that ignores SIGTERM would otherwise block `waitUntilExit` forever: the continuation never
+        /// resumes, `isRefreshing` stays true, and every later refresh becomes a no-op.
+        private static let killGrace: TimeInterval = 5
+
         let value: Process
         let stdoutHandle: FileHandle
         private let lock = NSLock()
         private var timedOut = false
+        private var cancelled = false
 
         init(value: Process, stdoutHandle: FileHandle) {
             self.value = value
@@ -513,10 +524,45 @@ public struct TokscaleCollector: UsageCollector {
             return timedOut
         }
 
+        var wasCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+
         func markTimedOut() {
             lock.lock()
             timedOut = true
             lock.unlock()
+        }
+
+        func timeOut() {
+            markTimedOut()
+            terminate()
+        }
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            lock.unlock()
+            terminate()
+        }
+
+        /// Stops a child that the timeout or cancellation requested before it was running.
+        func stopIfRequested() {
+            guard didTimeOut || wasCancelled else { return }
+            terminate()
+        }
+
+        /// SIGTERM, then SIGKILL once the grace period passes with the child still alive. SIGKILL cannot be
+        /// ignored, so `waitUntilExit` always returns and the continuation always resumes.
+        private func terminate() {
+            guard value.isRunning else { return }
+            value.terminate()
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.killGrace) { [self] in
+                guard value.isRunning else { return }
+                _ = kill(value.processIdentifier, SIGKILL)
+            }
         }
     }
 

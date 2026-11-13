@@ -117,13 +117,13 @@ public struct DevinCollector: UsageCollector {
     private struct Fingerprints: Codable, Hashable, Sendable {
         var database: FileFingerprint?
         var wal: FileFingerprint?
-        var shm: FileFingerprint?
         var events: EventsFingerprint
 
         init(databaseURL: URL, eventsDirectory: URL) {
             database = FileFingerprint(url: databaseURL)
             wal = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-wal"))
-            shm = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-shm"))
+            // `-shm` is the shared-memory index over the WAL, not content: any process opening the database
+            // rewrites it, so watching it would rescan the whole 1 GB database without a real change.
             events = DevinCollector.eventsFingerprint(eventsDirectory)
         }
 

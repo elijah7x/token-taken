@@ -398,6 +398,61 @@ struct CosmosScene: Equatable {
     private static func lerp(_ from: Double, _ to: Double, _ amount: Double) -> Double {
         from + (to - from) * amount
     }
+
+    /// SwiftUI asks for the scene several times per displayed frame (hover, focus, label layout),
+    /// and building it sorts breakdowns, hashes ids and reads the calendar. Rebuild only when the
+    /// summary, the dimension or the current hour (which drives `elapsedHours`) changes.
+    @MainActor
+    static func cached(summary: UsageSummary, dimension: BreakdownDimension) -> CosmosScene {
+        CosmosSceneCache.scene(summary: summary, dimension: dimension)
+    }
+}
+
+@MainActor
+private enum CosmosSceneCache {
+    private struct Key: Equatable {
+        let dimension: BreakdownDimension
+        let period: Period
+        let start: Date
+        let total: TokenCounts
+        let bySource: [Breakdown]
+        let byModel: [Breakdown]
+        let bucketCount: Int
+        let elapsedBuckets: Int
+        let hourStamp: Int
+    }
+
+    private static var entries: [(key: Key, scene: CosmosScene)] = []
+
+    /// Local hour bucket; `elapsedHours` reads the wall clock at that granularity.
+    private static func hourStamp(for now: Date) -> Int {
+        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour], from: now)
+        let day = (parts.year ?? 0) * 10_000 + (parts.month ?? 0) * 100 + (parts.day ?? 0)
+        return day * 100 + (parts.hour ?? 0)
+    }
+
+    static func scene(summary: UsageSummary, dimension: BreakdownDimension) -> CosmosScene {
+        let key = Key(
+            dimension: dimension,
+            period: summary.period,
+            start: summary.start,
+            total: summary.total,
+            bySource: summary.bySource,
+            byModel: summary.byModel,
+            bucketCount: summary.series.count,
+            elapsedBuckets: summary.series.lazy.filter { !$0.isFuture }.count,
+            hourStamp: hourStamp(for: Date())
+        )
+        if let index = entries.firstIndex(where: { $0.key == key }) {
+            let hit = entries.remove(at: index)
+            entries.insert(hit, at: 0)
+            return hit.scene
+        }
+        let scene = CosmosScene(summary: summary, dimension: dimension)
+        entries.insert((key, scene), at: 0)
+        if entries.count > 4 { entries.removeLast(entries.count - 4) }
+        return scene
+    }
 }
 
 struct CosmosCamera: Equatable {
@@ -567,6 +622,36 @@ struct CosmosFrame {
             }
         }
         return result
+    }
+
+    /// True when republishing would not move anything SwiftUI draws or hit-tests by a visible
+    /// amount: label anchors, hit targets, disk bands and the camera all stay within `tolerance`
+    /// points of `previous`. The camera sway and orbit drift stay below that for several frames.
+    func isVisuallySame(as previous: CosmosFrame, tolerance: Double = 0.5) -> Bool {
+        guard target == previous.target, size == previous.size, hoverCategory == previous.hoverCategory,
+              center == previous.center, focal == previous.focal,
+              scene.categories.count == previous.scene.categories.count,
+              placements.count == previous.placements.count,
+              length(camera.position - previous.camera.position) * focal / CosmosScene.cameraDistance <= tolerance
+        else { return false }
+        for (lhs, rhs) in zip(scene.categories, previous.scene.categories) {
+            if lhs.id != rhs.id || abs(lhs.edge - rhs.edge) > 0.01 { return false }
+        }
+        for (lhs, rhs) in zip(placements, previous.placements) {
+            guard lhs.id == rhs.id, lhs.isVisible == rhs.isVisible,
+                  abs(lhs.extent - rhs.extent) <= tolerance else { return false }
+            switch (lhs.point, rhs.point) {
+            case (nil, nil):
+                continue
+            case let (lhsPoint?, rhsPoint?):
+                if abs(lhsPoint.x - rhsPoint.x) > tolerance || abs(lhsPoint.y - rhsPoint.y) > tolerance {
+                    return false
+                }
+            default:
+                return false
+            }
+        }
+        return true
     }
 
     private static func rectCircleOverlap(_ rectangle: CGRect, center: CGPoint, radius: Double) -> Bool {

@@ -20,8 +20,9 @@ Accepted
 
 ### Artifact and updates
 
-- Distribute a notarized, stapled DMG containing `Token Taken.app` and an `/Applications` symlink. `scripts/release.sh` builds arm64 binaries, verifies the locked engine archive, signs inside out, creates the DMG, and submits it with `notarytool`.
+- Distribute a notarized, stapled DMG containing `Token Taken.app` and an `/Applications` symlink. `scripts/release.sh` builds arm64 binaries, verifies the locked engine archive, signs inside out, creates the DMG (ULMO, LZMA-compressed), and submits it with `notarytool`.
 - Ship arm64 only. Token Taken runs on Apple silicon Macs only ([ADR-0012](0012-apple-silicon-only.md)), and the release script fails when any bundled executable reports an architecture other than `arm64`.
+- Strip release binaries to keep the download small: the app and `token-taken` use `STRIP_STYLE: all`, `TokenTakenKit.framework` uses `non-global` so its exported symbols survive, and every Release configuration keeps `DEBUG_INFORMATION_FORMAT: dwarf-with-dsym`. `scripts/release.sh` fails when the main executable still carries a local symbol table, and copies the build's dSYMs to `dSYMs/` beside the DMG under `local-packages/` so crashes stay symbolicated even though the shipped binaries have no symbols.
 - Use manual downloads and updates for v0.1. Do not add Sparkle or another automatic updater in v0.1; revisit update delivery after the first release.
 - Keep DerivedData, DMG staging, and release DMGs under the artifact root's `local-packages/` directory, never in the repository.
 - Submit an initial Developer ID build for notarization as early as possible, even with a placeholder icon. Do not postpone the first submission for final artwork. Rebuild, notarize, and staple the final DMG before publication.
@@ -62,6 +63,7 @@ The lock file pins tokscale 4.21.0 from `@tokscale/cli-darwin-arm64`.
 - Releases require XcodeGen, a valid Developer ID identity, a notarytool keychain profile, network access for secure timestamps and notarization, and a final stapling step after acceptance.
 - Debug builds remain ad-hoc and do not need Apple's timestamp service.
 - Manual v0.1 updates avoid updater signing, feed hosting, and update-security work, but users must check for and install new releases themselves.
+- Stripped binaries cannot be symbolized without the dSYMs kept beside the DMG, so those files must survive with the release they belong to.
 - Changing an engine, adding nested code, or adding a runtime entitlement requires another signing and notarization review.
 
 ## Alternatives
@@ -69,5 +71,5 @@ The lock file pins tokscale 4.21.0 from `@tokscale/cli-darwin-arm64`.
 - **Mac App Store and sandboxing:** rejected because the app needs the non-sandboxed home-folder access established in ADR-0001.
 - **Ad-hoc or unsigned release artifacts:** rejected because they do not provide the required Developer ID and Gatekeeper distribution path.
 - **Sparkle in v0.1:** deferred to keep the first release pipeline small; this is not a permanent rejection.
-- **ZIP as the primary artifact:** rejected in favor of one DMG that can be notarized and stapled for an approachable drag-to-Applications install.
+- **ZIP as the primary artifact:** rejected in favor of one DMG that can be notarized and stapled for an approachable drag-to-Applications install. The DMG is LZMA-compressed (ULMO) rather than zlib (UDZO) because the smaller download outweighs the slower mount.
 - **Blanket JIT and library-validation exceptions:** rejected because the pinned native tokscale evidence does not justify weakening the hardened runtime.

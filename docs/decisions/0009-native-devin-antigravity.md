@@ -36,6 +36,6 @@ Devin and Antigravity were added as tokscale clients on 2026-11-11 carrying the 
 
 - Devin totals are unchanged (987,284,007 tokens on the reconciled sample) while 302M tokens move to the local day they were requested on. Per-day views and any daily floor now follow the request.
 - Antigravity drops 3.18M input tokens, and rows that carried only `#1` disappear rather than reporting a preamble as usage.
-- Devin no longer pays for the engine's 1.2 GB re-read on every change: the native collector streams the same rows, and its fingerprint covers the database, its `-wal`/`-shm` siblings and the Desktop event files.
+- Devin no longer pays for the engine's 1.2 GB re-read on every change: the native collector streams the same rows, and its fingerprint covers the database, its `-wal` sibling and the Desktop event files. The `-shm` file is left out: it is shared-memory index state that changes whenever any process opens the database, not content.
 - Residual uncertainty is recorded rather than resolved: whether a provider bills Antigravity's fixed preamble in a way the client never records, and why Devin reports 2–4 uncached input tokens on cache-write turns. Neither can be settled from local data.
 - The native Devin path never printed prompt or response text; only the fields above are decoded, and the database is opened read-only, never with `immutable=1`.

@@ -340,6 +340,26 @@ final class AccountSyncTests: XCTestCase {
             [record(deviceID: accountID, input: 42)])
     }
 
+    func testMergedStoreReadsTheLocalStoreOncePerCall() throws {
+        let local = CountingAccountStore(
+            devices: [publisher, account],
+            daily: [record(deviceID: publisher.id, source: "claude"), record(deviceID: accountID)],
+            hours: [hour(deviceID: accountID, offset: -1)]
+        )
+        let merged = MergedUsageStore(local: local, remote: [
+            snapshot(otherPublisher, accounts: [
+                publication(publisherID: otherPublisher.id, collectedAt: now,
+                    daily: [record(deviceID: accountID, input: 77)], hourly: [hour(deviceID: accountID, offset: -2)])
+            ])
+        ])
+        XCTAssertEqual(Set(try merged.records()), Set([
+            record(deviceID: publisher.id, source: "claude"), record(deviceID: accountID, input: 77)
+        ]))
+        XCTAssertEqual([local.recordReads, local.hourReads], [1, 1])
+        XCTAssertEqual(try merged.hourly(), [hour(deviceID: accountID, offset: -2)])
+        XCTAssertEqual([local.recordReads, local.hourReads], [2, 2])
+    }
+
     // MARK: - Helpers
 
     private func sqliteStore(lastSuccess: Date) throws -> SQLiteUsageStore {
@@ -364,4 +384,29 @@ private struct AccountFixtureStore: UsageStore {
     let hours: [HourlyUsage]
     func records() -> [UsageRecord] { daily }
     func hourly() -> [HourlyUsage] { hours }
+}
+
+/// Counts store reads so a test can prove a merge reads the local store once per call.
+private final class CountingAccountStore: UsageStore, @unchecked Sendable {
+    let devices: [Device]
+    private let daily: [UsageRecord]
+    private let hours: [HourlyUsage]
+    private(set) var recordReads = 0
+    private(set) var hourReads = 0
+
+    init(devices: [Device], daily: [UsageRecord], hours: [HourlyUsage]) {
+        self.devices = devices
+        self.daily = daily
+        self.hours = hours
+    }
+
+    func records() -> [UsageRecord] {
+        recordReads += 1
+        return daily
+    }
+
+    func hourly() -> [HourlyUsage] {
+        hourReads += 1
+        return hours
+    }
 }

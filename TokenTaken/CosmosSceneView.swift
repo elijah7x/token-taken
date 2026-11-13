@@ -40,18 +40,19 @@ struct CosmosSceneView: View {
     }
 
     var body: some View {
-        let scene = CosmosScene(summary: summary, dimension: dimension)
+        let scene = CosmosScene.cached(summary: summary, dimension: dimension)
         let activeBody = hoveredBody ?? focusedBody ?? highlight
         let activeCategory = hoveredCategory ?? focusedCategory
         GeometryReader { proxy in
-            let fallbackFrame = scene.stillFrame(
+            // `??` is lazy: the still frame (a full projection pass) is only built when no
+            // rendered frame matches the current scene and size.
+            let baseFrame = renderedFrame.flatMap {
+                $0.target == scene && $0.size == proxy.size ? $0 : nil
+            } ?? scene.stillFrame(
                 size: proxy.size,
                 compact: style == .menuBar,
                 hoverCategory: activeCategory ?? -1
             )
-            let baseFrame = renderedFrame.flatMap {
-                $0.target == scene && $0.size == proxy.size ? $0 : nil
-            } ?? fallbackFrame
             let labelSizes = Dictionary(uniqueKeysWithValues: baseFrame.scene.bodies.map {
                 ($0.id, Self.labelSize(for: $0, total: scene.total))
             })
@@ -379,14 +380,9 @@ struct CosmosSceneView: View {
         }
     }
 
+    @MainActor
     private static func labelSize(for body: CosmosBody, total: Int64) -> CGSize {
-        let name = NSAttributedString(string: body.name, attributes: [
-            .font: NSFont.systemFont(ofSize: 11)
-        ]).size()
-        let share = NSAttributedString(string: Share.percent(body.tokens, of: total), attributes: [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
-        ]).size()
-        return CGSize(width: ceil(max(name.width, share.width)), height: 29)
+        CosmosLabelMetrics.size(name: body.name, share: Share.percent(body.tokens, of: total))
     }
 
     private static func rate(_ value: Double) -> String {
@@ -399,7 +395,7 @@ enum CosmosSnapshot {
         guard size.width > 0, size.height > 0, scale > 0,
               let device = MTLCreateSystemDefaultDevice(),
               let renderer = CosmosRenderer(device: device) else { return nil }
-        let scene = CosmosScene(summary: summary, dimension: dimension)
+        let scene = CosmosScene.cached(summary: summary, dimension: dimension)
         let frame = scene.stillFrame(size: size)
         guard let image = renderer.snapshot(
             frame,
@@ -412,6 +408,28 @@ enum CosmosSnapshot {
 private enum CosmosFocus: Hashable {
     case body(String)
     case category(Int)
+}
+
+/// Label widths only change with the text, so measure each distinct string once instead of laying
+/// out two attributed strings for every body on every view evaluation.
+@MainActor
+private enum CosmosLabelMetrics {
+    private static var names: [String: CGFloat] = [:]
+    private static var shares: [String: CGFloat] = [:]
+
+    static func size(name: String, share: String) -> CGSize {
+        let nameWidth = width(name, cache: &names, font: .systemFont(ofSize: 11))
+        let shareWidth = width(share, cache: &shares, font: .monospacedDigitSystemFont(ofSize: 11, weight: .regular))
+        return CGSize(width: ceil(max(nameWidth, shareWidth)), height: 29)
+    }
+
+    private static func width(_ text: String, cache: inout [String: CGFloat], font: NSFont) -> CGFloat {
+        if let measured = cache[text] { return measured }
+        let measured = NSAttributedString(string: text, attributes: [.font: font]).size().width
+        if cache.count > 512 { cache.removeAll(keepingCapacity: true) }
+        cache[text] = measured
+        return measured
+    }
 }
 
 private enum CosmosSceneInk {
@@ -540,6 +558,9 @@ private final class CosmosCoordinator: NSObject, MTKViewDelegate {
     private var orbitTime = 0.0
     private var flowTime = 0.0
     private var motionTime = 0.0
+    private var publishedFrame: CosmosFrame?
+    private var publishPending = true
+    private var transitionSettled = true
 
     func update(
         scene: CosmosScene,
@@ -562,6 +583,7 @@ private final class CosmosCoordinator: NSObject, MTKViewDelegate {
             previous = current ?? scene
             target = scene
             transitionStart = now
+            transitionSettled = false
             orbitTime = 0
             changed = true
         }
@@ -577,6 +599,7 @@ private final class CosmosCoordinator: NSObject, MTKViewDelegate {
         updatePlayback(view)
         guard changed else { return }
         needsStaticRedraw = true
+        publishPending = true
         if renderer == nil {
             emitFallbackFrame(view)
         } else if view.isPaused {
@@ -628,10 +651,24 @@ private final class CosmosCoordinator: NSObject, MTKViewDelegate {
         )
         current = frame.scene
         needsStaticRedraw = false
-        onFrame?(frame)
+        let settled = now - transitionStart >= 0.9
+        publish(frame, forcing: publishPending || (settled && !transitionSettled))
+        if settled { transitionSettled = true }
         guard let renderPassDescriptor = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable else { return }
         renderer?.draw(frame, to: renderPassDescriptor, drawable: drawable, drawableSize: view.drawableSize)
+    }
+
+    /// Drawing stays at the display's rate, but SwiftUI lays out labels, hit targets and the
+    /// orbit overlay from the frame it holds. Handing it every drawn frame re-evaluated the whole
+    /// view 60 times a second for sub-pixel drift, so only frames it can visibly differ from are
+    /// published, plus one at the end of every transition (and one after any update that forces
+    /// a redraw).
+    private func publish(_ frame: CosmosFrame, forcing: Bool) {
+        if !forcing, let publishedFrame, frame.isVisuallySame(as: publishedFrame) { return }
+        publishPending = false
+        publishedFrame = frame
+        onFrame?(frame)
     }
 
     private func emitFallbackFrame(_ view: CosmosMTKView) {
@@ -643,6 +680,8 @@ private final class CosmosCoordinator: NSObject, MTKViewDelegate {
         )
         current = frame.scene
         needsStaticRedraw = false
+        publishPending = false
+        publishedFrame = frame
         onFrame?(frame)
     }
 }

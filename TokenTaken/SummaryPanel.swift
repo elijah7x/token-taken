@@ -775,13 +775,15 @@ struct BreakdownCard: View {
             } else {
                 let visible = isExpanded ? items : Array(items.prefix(limit))
                 let modelColors = dimension == .models ? Palette.modelColors(for: visible.map(\.id)) : [:]
+                // Row-independent, so resolved once for the whole list instead of per row.
+                let soleSource = soleActiveSourceName
                 if isExpanded && items.count > limit {
                     ScrollView {
-                        rowList(visible, modelColors: modelColors)
+                        rowList(visible, modelColors: modelColors, soleSource: soleSource)
                     }
                     .frame(maxHeight: 240)
                 } else {
-                    rowList(visible, modelColors: modelColors)
+                    rowList(visible, modelColors: modelColors, soleSource: soleSource)
                 }
 
                 if items.count > limit {
@@ -792,7 +794,11 @@ struct BreakdownCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func rowList(_ visible: [Breakdown], modelColors: [String: Color]) -> some View {
+    private func rowList(
+        _ visible: [Breakdown],
+        modelColors: [String: Color],
+        soleSource: String?
+    ) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(visible.enumerated()), id: \.element.id) { entry in
                 if entry.offset > 0 {
@@ -800,17 +806,17 @@ struct BreakdownCard: View {
                         .fill(Palette.hairline)
                         .frame(height: 0.5)
                 }
-                row(entry.element, modelColors: modelColors)
+                row(entry.element, modelColors: modelColors, soleSource: soleSource)
             }
         }
     }
 
-    private func row(_ item: Breakdown, modelColors: [String: Color]) -> some View {
+    private func row(_ item: Breakdown, modelColors: [String: Color], soleSource: String?) -> some View {
         let isModel = dimension == .models
         let color = isModel
             ? (modelColors[item.id] ?? Palette.color(for: .output))
             : Palette.color(forSource: item.id)
-        let secondary = isModel ? soleActiveSourceName : nil
+        let secondary = isModel ? soleSource : nil
 
         return Group {
             if let secondary {

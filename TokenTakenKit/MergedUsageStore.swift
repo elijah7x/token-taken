@@ -12,9 +12,10 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
     }
 
     public func records() throws -> [UsageRecord] {
-        let accounts = try resolvedAccounts()
+        let localRows = try local.records()
+        let accounts = try resolvedAccounts(localRows: localRows, localHours: local.hourly())
         let accountIDs = Set(accounts.map(\.deviceID))
-        var rows = try local.records().filter { !accountIDs.contains($0.deviceID) }
+        var rows = localRows.filter { !accountIDs.contains($0.deviceID) }
         rows += accounts.flatMap(\.daily)
         rows += remote.flatMap { snapshot in
             snapshot.daily.filter { $0.deviceID == snapshot.device.id }
@@ -23,9 +24,10 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
     }
 
     public func hourly() throws -> [HourlyUsage] {
-        let accounts = try resolvedAccounts()
+        let localHours = try local.hourly()
+        let accounts = try resolvedAccounts(localRows: local.records(), localHours: localHours)
         let accountIDs = Set(accounts.map(\.deviceID))
-        var rows = try local.hourly().filter { !accountIDs.contains($0.deviceID) }
+        var rows = localHours.filter { !accountIDs.contains($0.deviceID) }
         rows += accounts.flatMap(\.hourly)
         rows += remote.flatMap { snapshot in
             snapshot.hourly.filter { $0.deviceID == snapshot.device.id }
@@ -61,9 +63,8 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
         var isLocal: Bool { publisherID == nil }
     }
 
-    private func resolvedAccounts() throws -> [AccountCandidate] {
-        let localRows = try local.records()
-        let localHours = try local.hourly()
+    /// Local rows are passed in so each caller reads the local store once.
+    private func resolvedAccounts(localRows: [UsageRecord], localHours: [HourlyUsage]) throws -> [AccountCandidate] {
         let accountIDs = Set(local.devices.filter { $0.kind == .account }.map(\.id))
             .union(localRows.map(\.deviceID).filter(AccountDeviceID.isAccount))
             .union(localHours.map(\.deviceID).filter(AccountDeviceID.isAccount))

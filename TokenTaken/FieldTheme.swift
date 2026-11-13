@@ -36,6 +36,12 @@ struct FieldColors {
     let sun, groundShadow, stem, sign, post, soilL, soilR: FieldRGB
     let crops: [FieldRGB]
 
+    private static let light = FieldColors(isDark: false)
+    private static let dark = FieldColors(isDark: true)
+
+    /// Only two appearances exist, so the hex tables are parsed once instead of on every palette read.
+    static func cached(isDark: Bool) -> FieldColors { isDark ? dark : light }
+
     init(isDark: Bool) {
         self.isDark = isDark
         if isDark {
@@ -203,7 +209,7 @@ struct FieldAppIcon: View {
     var body: some View {
         Canvas { ctx, size in
             let s = size.width / 100
-            let c = FieldColors(isDark: isDark)
+            let c = FieldColors.cached(isDark: isDark)
             let bg = Path(roundedRect: CGRect(x: 8 * s, y: 8 * s, width: 84 * s, height: 84 * s), cornerRadius: 19 * s, style: .continuous)
             ctx.fill(bg, with: .color((isDark ? FieldRGB("#23271F") : FieldRGB("#F3EEDF")).color))
             ctx.stroke(bg, with: .color(c.rule.color), lineWidth: 1.2 * s)

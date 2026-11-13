@@ -54,14 +54,43 @@ extension FieldCrop {
     private static let lightHex = ["#B98E34", "#8270A8", "#B9673A", "#4F7F80", "#557A41", "#A99B2E", "#6F8F4C", "#BB7C82", "#6B8DAF", "#8E8C47"]
     private static let darkHex = ["#D9B465", "#AA9BD1", "#DB8E62", "#7FB0B0", "#86AA6F", "#CFC261", "#9DBB78", "#DAA0A6", "#99B6D4", "#B8B66F"]
 
-    var color: Color { Color(light: Self.lightHex[rawValue], dark: Self.darkHex[rawValue]) }
+    /// The ten crop colours, resolved once: reads happen per row and per frame, and every call used to
+    /// build a new dynamic `Color`.
+    private static let palette: [FieldCrop: Color] = Dictionary(uniqueKeysWithValues: FieldCrop.allCases.map { crop in
+        (crop, Color(light: lightHex[crop.rawValue], dark: darkHex[crop.rawValue]))
+    })
+
+    /// Source and model colours keep the crop assignment out of the render path the same way.
+    private static let cacheLock = NSLock()
+    nonisolated(unsafe) private static var sourceCache: [String: Color] = [:]
+    nonisolated(unsafe) private static var modelCache: [String: [String: Color]] = [:]
+
+    var color: Color { Self.palette[self] ?? Self.palette[.wheat] ?? .gray }
 
     static func color(forSource id: String) -> Color {
-        assign([Breakdown(id: id, name: SourceCatalog.info(for: id).name, counts: TokenCounts())])[id]?.color ?? FieldCrop.wheat.color
+        cacheLock.lock()
+        let cached = sourceCache[id]
+        cacheLock.unlock()
+        if let cached { return cached }
+        let color = assign([Breakdown(id: id, name: SourceCatalog.info(for: id).name, counts: TokenCounts())])[id]?.color ?? FieldCrop.wheat.color
+        cacheLock.lock()
+        sourceCache[id] = color
+        cacheLock.unlock()
+        return color
     }
 
+    /// Assigned jointly so models in one view avoid sharing a crop; cached per id list for that reason.
     static func colors(forModels ids: [String]) -> [String: Color] {
-        assign(ids.map { Breakdown(id: $0, name: $0, counts: TokenCounts()) }).mapValues(\.color)
+        let key = ids.joined(separator: "\u{1F}")
+        cacheLock.lock()
+        let cached = modelCache[key]
+        cacheLock.unlock()
+        if let cached { return cached }
+        let colors = assign(ids.map { Breakdown(id: $0, name: $0, counts: TokenCounts()) }).mapValues(\.color)
+        cacheLock.lock()
+        modelCache[key] = colors
+        cacheLock.unlock()
+        return colors
     }
 
     /// Token categories as grain tones, kept far enough apart to tell the five strata apart.

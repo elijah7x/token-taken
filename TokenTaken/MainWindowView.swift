@@ -1070,6 +1070,13 @@ private struct PeriodGroove: View {
 private struct LiquidPeriodFill: View {
     let reduceMotion: Bool
 
+    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.controlActiveState) private var controlActiveState
+    @State private var windowVisible = true
+
+    /// The sheen only needs redrawing while the window is on screen and key.
+    private var sheenActive: Bool { appearsActive && controlActiveState == .key && windowVisible }
+
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
         shape
@@ -1092,7 +1099,7 @@ private struct LiquidPeriodFill: View {
             }
             .overlay(alignment: .leading) {
                 if !reduceMotion {
-                    TimelineView(.animation) { context in
+                    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !sheenActive)) { context in
                         let phase = context.date.timeIntervalSinceReferenceDate
                             .truncatingRemainder(dividingBy: 3.6) / 3.6
                         let easedPhase = phase * phase * (3 - 2 * phase)
@@ -1109,6 +1116,7 @@ private struct LiquidPeriodFill: View {
                     }
                 }
             }
+            .background { WindowVisibilityProbe { windowVisible = $0 } }
             .clipShape(shape)
             .shadow(color: Color(hex: "#7CC8F2").opacity(0.35), radius: 5)
     }

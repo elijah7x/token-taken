@@ -1,16 +1,40 @@
 import Foundation
 
 public struct UsageAggregator: Sendable {
+    /// Store contents read once, so several summaries share one scan of the database.
+    public struct Rows: Sendable {
+        public let records: [UsageRecord]
+        public let hourly: [HourlyUsage]
+        public let devices: [Device]
+
+        public init(records: [UsageRecord], hourly: [HourlyUsage], devices: [Device]) {
+            self.records = records
+            self.hourly = hourly
+            self.devices = devices
+        }
+    }
+
     private let store: any UsageStore
+    /// Nil when the summaries should read the store themselves.
+    private let rows: Rows?
     private let calendar: Calendar
     private let now: Date
     private let priceTable: PriceTable
 
-    public init(store: any UsageStore, calendar: Calendar = .current, now: Date = .now, priceTable: PriceTable? = nil) {
+    public init(
+        store: any UsageStore, rows: Rows? = nil, calendar: Calendar = .current, now: Date = .now,
+        priceTable: PriceTable? = nil
+    ) {
         self.store = store
+        self.rows = rows
         self.calendar = calendar
         self.now = now
         self.priceTable = priceTable ?? (store is SyntheticUsageStore ? .synthetic : .bundled)
+    }
+
+    /// Reads the store once for `init(store:rows:)`; building several summaries then costs one read.
+    public static func preload(_ store: any UsageStore) throws -> Rows {
+        Rows(records: try store.records(), hourly: try store.hourly(), devices: store.devices)
     }
 
     /// Ranges run from the period start through the end of today in `calendar`'s time zone.
@@ -44,7 +68,7 @@ public struct UsageAggregator: Sendable {
             unpriced += estimate.unpricedTokens
         }
 
-        let devices = store.devices
+        let devices = rows?.devices ?? store.devices
         let deviceNames = Dictionary(devices.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         return UsageSummary(
             period: period,
@@ -163,8 +187,10 @@ public struct UsageAggregator: Sendable {
             starts.append(hour)
             hour = calendar.date(byAdding: .hour, value: 1, to: hour)!
         }
-        let rows = try store.hourly().filter { $0.hourStart >= dayStart && $0.hourStart < end }
-        let grouped = Dictionary(grouping: rows) { calendar.dateInterval(of: .hour, for: $0.hourStart)!.start }
+        var hourRows: [HourlyUsage]
+        if let rows { hourRows = rows.hourly } else { hourRows = try store.hourly() }
+        let inDay = hourRows.filter { $0.hourStart >= dayStart && $0.hourStart < end }
+        let grouped = Dictionary(grouping: inDay) { calendar.dateInterval(of: .hour, for: $0.hourStart)!.start }
         let expected = Set(entries.map { $0.record.deviceID + "\u{0}" + $0.record.sourceID })
         return starts.enumerated().map { index, start in
             let bucket = grouped[start] ?? []
@@ -187,7 +213,9 @@ public struct UsageAggregator: Sendable {
     /// Preserve the collecting device's date label; cross-zone daily re-bucketing is not possible (ADR-0005).
     private func localizedEntries() throws -> [Entry] {
         var cache: [String: Date] = [:]
-        return try store.records().map { record in
+        var records: [UsageRecord]
+        if let rows { records = rows.records } else { records = try store.records() }
+        return try records.map { record in
             if let day = cache[record.day] { return Entry(day: day, record: record) }
             guard let day = UsageDay.date(from: record.day, in: calendar.timeZone) else {
                 throw StoreError.sql("Invalid usage day")

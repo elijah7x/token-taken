@@ -57,7 +57,7 @@ struct ConfluenceView: View {
                 )
                 // A refresh that leaves the displayed values unchanged gets no spring.
                 .animation(
-                    reduceMotion || values == settledValues ? nil : .spring(response: 0.55, dampingFraction: 0.8),
+                    reduceMotion || values == settledValues ? nil : .spring(response: 0.35, dampingFraction: 0.8),
                     value: values
                 )
 
@@ -90,7 +90,9 @@ struct ConfluenceView: View {
                     return
                 }
                 particlesSettled = false
-                try? await Task.sleep(for: .milliseconds(650))
+                // The 0.35 spring settles in ~0.32s; hold the specks 150ms longer so they return
+                // once the ribbons have stopped, counted from the change rather than a restart.
+                try? await Task.sleep(for: .milliseconds(470))
                 guard !Task.isCancelled else { return }
                 settledValues = values
                 particlesSettled = true
@@ -257,6 +259,9 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     isDark: isDark,
                     focused: focused
                 )
+                // Switching dimension replaces every label id; a fade keeps SwiftUI from running
+                // an insert/remove transition for each of them inside the switch transaction.
+                .transition(.opacity)
             }
         }
         .accessibilityElement(children: .contain)
@@ -691,6 +696,7 @@ private struct ConfluenceLayout {
         let innerTop: CGFloat
         let innerHeight: CGFloat
         let ribbon: Path
+        /// Filled only for the settled layout; interpolated frames skip the 33-sample curves.
         let particleSpecs: [ConfluenceParticleSpec]
         var labelFrame: CGRect = .zero
         var isCollapsedLabel = false
@@ -719,6 +725,8 @@ private struct ConfluenceLayout {
     private let size: CGSize
     private let sourceDescriptors: [Descriptor]
     private let categoryDescriptors: [Descriptor]
+    /// Reservoir hue for the settled values; reused by every interpolated frame.
+    private let vesselColor: Color
 
     private static let otherID = "__other__"
     private static let pad: CGFloat = 20
@@ -855,7 +863,9 @@ private struct ConfluenceLayout {
             categoryDescriptors: categoryDescriptors,
             totalTokens: max(0, max(summary.total.total, categoryTotals.total)),
             size: size,
-            values: nil
+            values: nil,
+            vesselColor: Self.dominantColor(of: categoryDescriptors),
+            withParticles: true
         )
     }
 
@@ -865,13 +875,16 @@ private struct ConfluenceLayout {
         categoryDescriptors: [Descriptor],
         totalTokens: Int64,
         size: CGSize,
-        values: ConfluenceValues?
+        values: ConfluenceValues?,
+        vesselColor: Color,
+        withParticles: Bool
     ) {
         self.dimension = dimension
         self.sourceDescriptors = sourceDescriptors
         self.categoryDescriptors = categoryDescriptors
         self.totalTokens = totalTokens
         self.size = CGSize(width: max(size.width, 1), height: max(size.height, 1))
+        self.vesselColor = vesselColor
 
         let w = max(size.width, 1), h = max(size.height, 1)
         compact = w < 680 || h < 340
@@ -955,21 +968,9 @@ private struct ConfluenceLayout {
         if isEmpty || fill <= 0 {
             vesselLayers = []
         } else {
-            let dominantColor = categoryDescriptors
-                .enumerated()
-                .compactMap { offset, desc -> (String, Color, Double)? in
-                    let value = Self.animatedValue(for: desc, at: offset, in: values)
-                    guard value > 0 else { return nil }
-                    return (desc.target.id, desc.color, value)
-                }
-                .max { lhs, rhs in
-                    lhs.2 == rhs.2 ? lhs.0 > rhs.0 : lhs.2 < rhs.2
-                }?
-                .1 ?? Palette.color(for: .cacheRead)
-
             vesselLayers = [
                 LiquidGlassVessel.Layer(
-                    color: dominantColor,
+                    color: vesselColor,
                     fraction: fill
                 ),
             ]
@@ -989,7 +990,8 @@ private struct ConfluenceLayout {
             outerX: leftX,
             terminalWidth: terminalWidth,
             labelX: leftLabelX,
-            labelWidth: leftLabelWidth
+            labelWidth: leftLabelWidth,
+            withParticles: withParticles
         )
         categories = Self.makeStreams(
             descriptors: categoryDescriptors,
@@ -1005,10 +1007,13 @@ private struct ConfluenceLayout {
             outerX: rightX,
             terminalWidth: terminalWidth,
             labelX: rightLabelX,
-            labelWidth: rightLabelWidth
+            labelWidth: rightLabelWidth,
+            withParticles: withParticles
         )
     }
 
+    /// Rebuilds only what an animated frame draws: interpolated heights, ribbon paths, label
+    /// positions and vessel geometry. Particle paths and the reservoir hue stay on the settled layout.
     func interpolated(with values: ConfluenceValues) -> ConfluenceLayout {
         ConfluenceLayout(
             dimension: dimension,
@@ -1016,8 +1021,19 @@ private struct ConfluenceLayout {
             categoryDescriptors: categoryDescriptors,
             totalTokens: totalTokens,
             size: size,
-            values: values
+            values: values,
+            vesselColor: vesselColor,
+            withParticles: false
         )
+    }
+
+    /// Largest category by token count; equal counts pick the smaller id, as the animated scan did.
+    private static func dominantColor(of descriptors: [Descriptor]) -> Color {
+        descriptors
+            .max { lhs, rhs in
+                lhs.tokens == rhs.tokens ? lhs.target.id > rhs.target.id : lhs.tokens < rhs.tokens
+            }?
+            .color ?? Palette.color(for: .cacheRead)
     }
 
     func stream(for target: ConfluenceTarget) -> Stream? {
@@ -1181,7 +1197,8 @@ private struct ConfluenceLayout {
         outerX: CGFloat,
         terminalWidth: CGFloat,
         labelX: CGFloat,
-        labelWidth: CGFloat
+        labelWidth: CGFloat,
+        withParticles: Bool
     ) -> [Stream] {
         guard !descriptors.isEmpty else { return [] }
         let innerHeight = heights.reduce(0, +)
@@ -1219,14 +1236,16 @@ private struct ConfluenceLayout {
             )
             let particleStartX = side == .source ? outerFrame.minX + 8 : reservoir.maxX + 6
             let particleEndX = side == .source ? reservoir.minX - 6 : outerFrame.maxX - 8
-            let particleSpecs = makeParticleSpecs(
-                streamID: descriptor.target.id,
-                startX: particleStartX,
-                startTop: startY,
-                endX: particleEndX,
-                endTop: endY,
-                height: height
-            )
+            let particleSpecs = withParticles
+                ? makeParticleSpecs(
+                    streamID: descriptor.target.id,
+                    startX: particleStartX,
+                    startTop: startY,
+                    endX: particleEndX,
+                    endTop: endY,
+                    height: height
+                )
+                : []
             streams.append(Stream(
                 target: descriptor.target,
                 side: side,

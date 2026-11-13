@@ -213,30 +213,29 @@ enum Palette {
 
     // MARK: Data colors
 
+    /// Resolved once. `Color(light:dark:)` installs a dynamic provider that re-reads appearance,
+    /// contrast and theme on every resolution, and building one per call was the cost.
+    private static let categoryColors: [TokenCategory: Color] = [
+        .input: Color(light: "#CF6B85", dark: "#E2829B"),
+        .cacheRead: Color(light: "#6B84D1", dark: "#859DF0"),
+        .cacheWrite: Color(light: "#CC8B4B", dark: "#E0A160"),
+        .output: Color(light: "#4A9D7C", dark: "#62BA96"),
+        .reasoning: Color(light: "#8772C5", dark: "#A18CE0"),
+    ]
+
+    private static let cosmosCategoryColors: [TokenCategory: Color] = [
+        .cacheRead: Color(hex: "#EAF2FF"),
+        .input: Color(hex: "#FFF0D2"),
+        .cacheWrite: Color(hex: "#E8C48E"),
+        .output: Color(hex: "#D99A56"),
+        .reasoning: Color(hex: "#B65A35"),
+    ]
+
     /// Category order matches `TokenCategory.allCases`: input, cacheRead, cacheWrite, output, reasoning.
     static func color(for category: TokenCategory) -> Color {
         if ThemeRuntime.isField { return FieldCrop.color(for: category) }
-        if ThemeRuntime.isCosmos {
-            return switch category {
-            case .cacheRead: Color(hex: "#EAF2FF")
-            case .input: Color(hex: "#FFF0D2")
-            case .cacheWrite: Color(hex: "#E8C48E")
-            case .output: Color(hex: "#D99A56")
-            case .reasoning: Color(hex: "#B65A35")
-            }
-        }
-        return switch category {
-        case .input:
-            Color(light: "#CF6B85", dark: "#E2829B")
-        case .cacheRead:
-            Color(light: "#6B84D1", dark: "#859DF0")
-        case .cacheWrite:
-            Color(light: "#CC8B4B", dark: "#E0A160")
-        case .output:
-            Color(light: "#4A9D7C", dark: "#62BA96")
-        case .reasoning:
-            Color(light: "#8772C5", dark: "#A18CE0")
-        }
+        if ThemeRuntime.isCosmos { return cosmosCategoryColors[category] ?? CosmosPalette.accent }
+        return categoryColors[category] ?? .gray
     }
 
     private static let sourceFallbackColors: [Color] = [
@@ -271,40 +270,37 @@ enum Palette {
     static func color(forSource id: String) -> Color {
         if ThemeRuntime.isCosmos { return CosmosPalette.accent }
         if ThemeRuntime.isField { return FieldCrop.color(forSource: id) }
-        switch id.lowercased() {
-        case "claude", "claude-code":
-            return Color(light: "#D47353", dark: "#E4896A")
-        case "pi":
-            return Color(light: "#C8963E", dark: "#DFB059")
-        case "codex":
-            return Color(light: "#517ED1", dark: "#6D98E8")
-        case "kimi", "kimi-code":
-            return Color(light: "#C26F96", dark: "#D987AD")
-        case "zcode":
-            return Color(light: "#4C9E79", dark: "#68BA93")
-        case "omp", "oh-my-pi":
-            return Color(light: "#7D6EC4", dark: "#9788DE")
-        case "grok":
-            return Color(light: "#5C6C8A", dark: "#7D8EAD")
-        case "opencode":
-            return Color(light: "#6B9969", dark: "#86B584")
-        case "gemini", "gemini-cli":
-            return Color(light: "#3A93AE", dark: "#4FB0CD")
-        case "factory", "droid":
-            return Color(light: "#A87B5A", dark: "#C79875")
-        case "devin", "devin-cli", "devin-desktop":
-            return Color(light: "#2F8F8A", dark: "#4AABA6")
-        case "antigravity", "antigravity-cli", "antigravity-extension":
-            return Color(light: "#A35CC0", dark: "#BD78D9")
-        case "dsh":
-            return Color(light: "#8F9A3A", dark: "#ABB656")
-        case "fx":
-            return Color(light: "#C0505A", dark: "#DB6C75")
-        default:
-            let hash = fnv1a64(id.lowercased())
-            return sourceFallbackColors[Int(hash % UInt64(sourceFallbackColors.count))]
-        }
+        let key = id.lowercased()
+        if let known = liquidSourceColors[key] { return known }
+        let hash = fnv1a64(key)
+        return sourceFallbackColors[Int(hash % UInt64(sourceFallbackColors.count))]
     }
+
+    /// Same hues as the former per-call switch, built once because this runs per row per render.
+    private static let liquidSourceColors: [String: Color] = {
+        let hues: [(ids: [String], light: String, dark: String)] = [
+            (["claude", "claude-code"], "#D47353", "#E4896A"),
+            (["pi"], "#C8963E", "#DFB059"),
+            (["codex"], "#517ED1", "#6D98E8"),
+            (["kimi", "kimi-code"], "#C26F96", "#D987AD"),
+            (["zcode"], "#4C9E79", "#68BA93"),
+            (["omp", "oh-my-pi"], "#7D6EC4", "#9788DE"),
+            (["grok"], "#5C6C8A", "#7D8EAD"),
+            (["opencode"], "#6B9969", "#86B584"),
+            (["gemini", "gemini-cli"], "#3A93AE", "#4FB0CD"),
+            (["factory", "droid"], "#A87B5A", "#C79875"),
+            (["devin", "devin-cli", "devin-desktop"], "#2F8F8A", "#4AABA6"),
+            (["antigravity", "antigravity-cli", "antigravity-extension"], "#A35CC0", "#BD78D9"),
+            (["dsh"], "#8F9A3A", "#ABB656"),
+            (["fx"], "#C0505A", "#DB6C75"),
+        ]
+        var out: [String: Color] = [:]
+        for hue in hues {
+            let color = Color(light: hue.light, dark: hue.dark)
+            for id in hue.ids { out[id] = color }
+        }
+        return out
+    }()
 
     /// Field and Liquid Glass assign distinct stable hues; Cosmos uses the warm accent for every model.
     static func modelColors(for ids: [String]) -> [String: Color] {
@@ -735,6 +731,60 @@ private final class BackdropWindowView: NSView {
                 button.setFrameOrigin(NSPoint(x: targetX, y: targetY))
             }
         }
+    }
+}
+
+// MARK: - Window visibility
+
+/// Reports whether the hosting window is actually on screen, so idle animation can stop when the
+/// window is minimised, hidden or fully covered. Same check the Confluence particles pause on.
+struct WindowVisibilityProbe: NSViewRepresentable {
+    let onChange: @MainActor (Bool) -> Void
+
+    func makeNSView(context: Context) -> WindowVisibilityProbeView {
+        let view = WindowVisibilityProbeView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ view: WindowVisibilityProbeView, context: Context) {
+        view.onChange = onChange
+    }
+}
+
+final class WindowVisibilityProbeView: NSView {
+    var onChange: (@MainActor (Bool) -> Void)?
+    private var reported = true
+
+    /// Sits behind its host's content; it must never take a click meant for the drawing on top of it.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        let center = NotificationCenter.default
+        center.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        if let window {
+            center.addObserver(
+                self,
+                selector: #selector(report),
+                name: NSWindow.didChangeOcclusionStateNotification,
+                object: window
+            )
+        }
+        report()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func report() {
+        let visible = window?.occlusionState.contains(.visible) ?? true
+        guard visible != reported else { return }
+        reported = visible
+        // Hop out of window notifications and layout passes before writing hosting state.
+        let onChange = onChange
+        Task { @MainActor in onChange?(visible) }
     }
 }
 

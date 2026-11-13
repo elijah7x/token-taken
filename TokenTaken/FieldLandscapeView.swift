@@ -10,6 +10,12 @@ enum FieldFont {
         descriptor = descriptor.addingAttributes([.cascadeList: [NSFontDescriptor(name: "Songti SC", size: size)]])
         return Font(NSFont(descriptor: descriptor, size: size) ?? base)
     }
+
+    /// Board signs are rebuilt on every paint, so their fonts are resolved once.
+    static let signName = serif(16)
+    static let signNumber = serif(13.5)
+    static let stake = serif(14.5)
+    static let stakeSmall = serif(12)
 }
 
 /// One plot of the farm: a source or model, its crop, and its place in the plan.
@@ -66,6 +72,22 @@ struct FieldSceneModel: Equatable {
     }
 }
 
+/// Keeps the treemap layout between body passes. Hover updates re-evaluate the whole view body, but the
+/// layout only changes when the breakdown does; mutating this box does not invalidate the view.
+final class FieldSceneModelCache {
+    private var items: [Breakdown] = []
+    private var valid = false
+    private var cached = FieldSceneModel.empty
+
+    func model(for items: [Breakdown]) -> FieldSceneModel {
+        if valid, items == self.items { return cached }
+        self.items = items
+        valid = true
+        cached = FieldSceneModel(items: items)
+        return cached
+    }
+}
+
 struct FieldLandscapeView: View {
     let items: [Breakdown]
     @Binding var highlight: String?
@@ -78,9 +100,11 @@ struct FieldLandscapeView: View {
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverPoint: CGPoint?
+    @State private var windowVisible = true
+    @State private var scene = FieldSceneModelCache()
 
     var body: some View {
-        let model = FieldSceneModel(items: items)
+        let model = scene.model(for: items)
         let chinese = locale.language.languageCode == .chinese
         let season = FieldSeason.of(Date())
         GeometryReader { proxy in
@@ -88,8 +112,12 @@ struct FieldLandscapeView: View {
             // Equatable, so pointer moves that do not change the highlighted plot skip repainting the farm.
             FieldSceneCanvas(model: model, isDark: scheme == .dark, season: season, highlight: highlight, chinese: chinese, compact: compact)
                 .equatable()
+                .background {
+                    // Only the interactive farm needs to know; share cards and the panel render off screen.
+                    if interactive { WindowVisibilityProbe { windowVisible = $0 } }
+                }
                 .overlay {
-                    FieldAmbience(isDark: scheme == .dark, season: season, animate: interactive && !reduceMotion)
+                    FieldAmbience(isDark: scheme == .dark, season: season, animate: interactive && !reduceMotion, windowVisible: windowVisible)
                 }
             .onContinuousHover { phase in
                 guard interactive else { return }
@@ -140,12 +168,22 @@ private struct FieldSceneCanvas: View, Equatable {
 private struct FieldAmbience: View {
     let isDark: Bool
     let season: FieldSeason
+    /// Share cards and Reduce Motion keep the single still frame they always had.
     let animate: Bool
+    let windowVisible: Bool
+
+    @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    /// Same conditions the Confluence particles pause on; the 20 fps redraw is pointless off screen.
+    private var isRunning: Bool { appearsActive && controlActiveState == .key && windowVisible }
 
     var body: some View {
         Group {
             if animate {
-                TimelineView(.animation(minimumInterval: 1.0 / 20)) { timeline in
+                // Pausing the schedule stops the redraw. The phase comes from wall-clock time, so the
+                // frame it stops on is the frame it resumes from.
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !isRunning)) { timeline in
                     canvas(timeline.date.timeIntervalSinceReferenceDate)
                 }
             } else {
@@ -228,13 +266,15 @@ private struct FieldPainter {
     let chinese: Bool
     var compact = false
 
-    private var c: FieldColors { FieldColors(isDark: isDark) }
-    private var pal: SeasonPalette { SeasonPalette(season) }
+    private let c: FieldColors
+    private let pal: SeasonPalette
     private let W = FieldSceneModel.size.width, H = FieldSceneModel.size.height
     private let wind: CGFloat = 1.3
 
     init(ctx: GraphicsContext, model: FieldSceneModel, isDark: Bool, season: FieldSeason, highlight: String?, chinese: Bool, compact: Bool = false) {
         self.ctx = ctx; self.model = model; self.isDark = isDark; self.season = season; self.highlight = highlight; self.chinese = chinese; self.compact = compact
+        c = FieldColors.cached(isDark: isDark)
+        pal = SeasonPalette(season)
     }
 
     private var sun: CGFloat { isDark ? -1 : 1 }
@@ -999,13 +1039,13 @@ private struct FieldPainter {
             var g = ctx
             if let highlight, highlight != plot.id { g.opacity = 0.3 }
             if compact { pennant(plot, g, scale: 2.2); continue }
-            let name = g.resolve(Text(verbatim: plot.name).font(FieldFont.serif(16)).foregroundStyle(c.ink.color))
-            let num = g.resolve(Text(verbatim: "\(TokenFormat.short(plot.value)) · \(FieldFormat.percent(plot.value, of: model.total))").font(FieldFont.serif(13.5)).foregroundStyle(c.ink2.color))
+            let name = g.resolve(Text(verbatim: plot.name).font(FieldFont.signName).foregroundStyle(c.ink.color))
+            let num = g.resolve(Text(verbatim: "\(TokenFormat.short(plot.value)) · \(FieldFormat.percent(plot.value, of: model.total))").font(FieldFont.signNumber).foregroundStyle(c.ink2.color))
             let screenW0 = plot.corners[2].x - plot.corners[3].x
-            var small = g.resolve(Text(verbatim: plot.name).font(FieldFont.serif(14.5)).foregroundStyle(c.ink.color))
+            var small = g.resolve(Text(verbatim: plot.name).font(FieldFont.stake).foregroundStyle(c.ink.color))
             // Narrow plots get a smaller stake rather than none.
             if small.measure(in: CGSize(width: 600, height: 60)).width + 26 > screenW0 {
-                small = g.resolve(Text(verbatim: plot.name).font(FieldFont.serif(12)).foregroundStyle(c.ink.color))
+                small = g.resolve(Text(verbatim: plot.name).font(FieldFont.stakeSmall).foregroundStyle(c.ink.color))
             }
             let nameW = name.measure(in: CGSize(width: 600, height: 60)).width, numW = num.measure(in: CGSize(width: 600, height: 60)).width
             let screenW = plot.corners[2].x - plot.corners[3].x
@@ -1069,7 +1109,7 @@ struct FieldBreakdownList: View {
         let active = items.filter { $0.counts.total > 0 }
         let crops = FieldCrop.assign(active)
         let chinese = locale.language.languageCode == .chinese
-        let colors = FieldColors(isDark: scheme == .dark)
+        let colors = FieldColors.cached(isDark: scheme == .dark)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24), count: 3), alignment: .leading, spacing: 0) {
             ForEach(active) { item in
                 let crop = crops[item.id] ?? .wheat

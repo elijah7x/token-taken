@@ -18,6 +18,43 @@ final class UsageAggregatorTests: XCTestCase {
         groups.reduce(.zero) { $0 + $1.counts }
     }
 
+    func testPreloadedRowsGiveTheSameSummariesAsReadingTheStore() throws {
+        for zone in ["UTC", "Asia/Shanghai", "America/Los_Angeles"] {
+            let plain = aggregator(zone)
+            let rows = try UsageAggregator.preload(store)
+            let preloaded = UsageAggregator(store: store, rows: rows, calendar: calendar(zone),
+                now: SyntheticUsageStore.defaultToday)
+            for period in Period.allCases {
+                assertSame(try preloaded.summary(for: period), try plain.summary(for: period), "\(zone) \(period)")
+            }
+            XCTAssertEqual(try preloaded.dailyTotals(lastDays: 7), try plain.dailyTotals(lastDays: 7), zone)
+        }
+    }
+
+    func testPreloadedRowsAreReadOnceForSeveralSummaries() throws {
+        let counting = CountingUsageStore(devices: store.devices, daily: store.records(), hours: try store.hourly())
+        let aggregator = UsageAggregator(store: counting, rows: try UsageAggregator.preload(counting),
+            calendar: calendar("UTC"), now: SyntheticUsageStore.defaultToday)
+        XCTAssertEqual(try aggregator.summary(for: .month).total.total, try self.aggregator("UTC").summary(for: .month).total.total)
+        _ = try aggregator.summary(for: .day)
+        _ = try aggregator.dailyTotals(lastDays: 7)
+        XCTAssertEqual(counting.recordReads, 1)
+        XCTAssertEqual(counting.hourReads, 1)
+    }
+
+    private func assertSame(_ lhs: UsageSummary, _ rhs: UsageSummary, _ message: String) {
+        XCTAssertEqual(lhs.period, rhs.period, message)
+        XCTAssertEqual(lhs.start, rhs.start, message)
+        XCTAssertEqual(lhs.end, rhs.end, message)
+        XCTAssertEqual(lhs.total, rhs.total, message)
+        XCTAssertEqual(lhs.bySource, rhs.bySource, message)
+        XCTAssertEqual(lhs.byModel, rhs.byModel, message)
+        XCTAssertEqual(lhs.byDevice, rhs.byDevice, message)
+        XCTAssertEqual(lhs.series, rhs.series, message)
+        XCTAssertEqual(lhs.cost, rhs.cost, message)
+        XCTAssertEqual(lhs.devices, rhs.devices, message)
+    }
+
     func testBreakdownsSumToTotalForEveryPeriod() throws {
         for zone in ["UTC", "Asia/Shanghai", "America/Los_Angeles"] {
             for period in Period.allCases {
@@ -244,4 +281,29 @@ private struct GranularityStore: UsageStore {
     var hours: [HourlyUsage] = []
     func records() -> [UsageRecord] { daily }
     func hourly() -> [HourlyUsage] { hours }
+}
+
+/// Counts store reads so a test can prove a preloaded refresh scans the store once.
+private final class CountingUsageStore: UsageStore, @unchecked Sendable {
+    let devices: [Device]
+    private let daily: [UsageRecord]
+    private let hours: [HourlyUsage]
+    private(set) var recordReads = 0
+    private(set) var hourReads = 0
+
+    init(devices: [Device], daily: [UsageRecord], hours: [HourlyUsage]) {
+        self.devices = devices
+        self.daily = daily
+        self.hours = hours
+    }
+
+    func records() -> [UsageRecord] {
+        recordReads += 1
+        return daily
+    }
+
+    func hourly() -> [HourlyUsage] {
+        hourReads += 1
+        return hours
+    }
 }
