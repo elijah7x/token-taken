@@ -235,20 +235,36 @@ public enum ISO8601Text {
 }
 
 extension MobileReport {
-    /// Newest month in the report, which is the month the Mac is currently collecting.
+    /// The calendar month containing `generatedAt` in the generator's zone, matching `totals.thisMonth`;
+    /// nil when that month has no usage, never an older month's breakdown.
     public var currentMonth: Month? {
-        months.max { $0.month < $1.month }
+        let key = String(Self.dayKey(generatedAt, zone: reportTimeZone).prefix(7))
+        return months.first { $0.month == key }
     }
 
     public var last12Months: [Month] {
         Array(months.sorted { $0.month < $1.month }.suffix(12))
     }
 
-    /// First and last `YYYY-MM-DD` covered by `totals.last30Days`.
+    /// First and last `YYYY-MM-DD` covered by `totals.last30Days`: the 30 local days ending on the day of
+    /// `generatedAt`. `days` lists only active days, so it cannot supply the endpoints.
     public var last30DayRange: (start: String, end: String)? {
-        let window = days.suffix(30)
-        guard let first = window.first, let last = window.last else { return nil }
-        return (first.day, last.day)
+        let zone = reportTimeZone
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        guard let start = calendar.date(byAdding: .day, value: -29, to: generatedAt) else { return nil }
+        return (Self.dayKey(start, zone: zone), Self.dayKey(generatedAt, zone: zone))
+    }
+
+    private var reportTimeZone: TimeZone {
+        TimeZone(identifier: timeZoneID) ?? TimeZone(secondsFromGMT: 0)!
+    }
+
+    private static func dayKey(_ date: Date, zone: TimeZone) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
     public func displayName(forSource id: String) -> String {

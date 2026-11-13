@@ -43,6 +43,12 @@ public enum MobileReportPublisher {
     ) async -> MobileReportPublishStatus {
         guard enabled else { return .disabled }
         guard let container = await containerURL(environment: environment) else { return .unavailable }
+        return publish(report, into: container, now: now)
+    }
+
+    /// Synchronous write into an already resolved container, so a caller can recheck its own state
+    /// after the asynchronous container lookup and before anything touches the file.
+    public static func publish(_ report: MobileReport, into container: URL, now: Date = .now) -> MobileReportPublishStatus {
         do {
             try write(report, into: container)
             return .published(now)

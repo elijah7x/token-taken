@@ -454,11 +454,20 @@ private actor SyncWorker {
 
 /// Keeps container resolution and report writes off the main actor.
 private actor MobileReportWorker {
+    /// Bumped by every stop. The actor is reentrant across the container lookup, so a publish that was
+    /// waiting when the setting turned off must not recreate the file the stop just removed.
+    private var generation = 0
+
     func publish(_ report: MobileReport) async -> MobileReportPublishStatus {
-        await MobileReportPublisher.publish(report, enabled: true)
+        let started = generation
+        guard let container = await MobileReportPublisher.containerURL() else { return .unavailable }
+        guard started == generation else { return .disabled }
+        // Synchronous from here: no suspension point between the check and the write.
+        return MobileReportPublisher.publish(report, into: container)
     }
 
     func stop(deviceId: String) async -> MobileReportPublishStatus {
-        await MobileReportPublisher.stop(deviceId: deviceId)
+        generation += 1
+        return await MobileReportPublisher.stop(deviceId: deviceId)
     }
 }
