@@ -104,6 +104,17 @@ struct MainWindowView: View {
         .onChange(of: colorScheme) { FieldAppIconSwitcher.apply(settings.theme) }
     }
 
+    private var dimensionSwitchRow: some View {
+        DimensionSwitchRow(
+            summary: model.summary,
+            dimension: $dimension,
+            isPresentingShare: $isPresentingShare
+        )
+        .padding(.horizontal, 28)
+        .padding(.top, 18)
+        .padding(.bottom, 6)
+    }
+
     private var fieldItems: [Breakdown] {
         dimension == .sources ? model.summary.bySource : model.summary.byModel
     }
@@ -118,16 +129,9 @@ struct MainWindowView: View {
                 .padding(28)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                DimensionSwitchRow(
-                    summary: model.summary,
-                    dimension: $dimension,
-                    isPresentingShare: $isPresentingShare
-                )
-                .padding(.horizontal, 28)
-                .padding(.top, 18)
-                .padding(.bottom, 6)
-
                 if settings.theme == .field {
+                    // On macOS 26 the scroll view's AppKit frame reaches up under the title bar area and swallows
+                    // clicks on anything laid out above it, so the switch row is a safe-area inset of the scroll view.
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
                             FieldLandscapeView(items: fieldItems, highlight: $fieldHighlight)
@@ -136,7 +140,11 @@ struct MainWindowView: View {
                         .padding(.horizontal, 28)
                         .padding(.top, 8)
                     }
+                    .scrollEdgeEffectHidden(true, for: .top)
+                    .safeAreaInset(edge: .top, spacing: 0) { dimensionSwitchRow }
                 } else {
+                    dimensionSwitchRow
+
                     if settings.theme == .cosmos {
                         CosmosSceneView(summary: model.summary, dimension: dimension, highlight: $cosmosHighlight)
                             .frame(maxWidth: .infinity, minHeight: 280, maxHeight: .infinity)
