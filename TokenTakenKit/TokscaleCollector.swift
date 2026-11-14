@@ -320,8 +320,8 @@ public struct TokscaleCollector: UsageCollector {
         TokenCategory.allCases.allSatisfy { counts[$0] >= 0 } && counts.uncategorized >= 0
     }
 
-    // Paths and environment overrides follow tokscale-core/src/clients.rs.
-    private static func sourceAvailable(client: String) -> Bool {
+    // Paths and environment overrides follow tokscale-core/src/clients.rs and scanner.rs.
+    static func sourceAvailable(client: String) -> Bool {
         roots(client: client).contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
@@ -358,28 +358,15 @@ public struct TokscaleCollector: UsageCollector {
 
     /// Secondary inputs tokscale 4.21.0 also reads (scanner.rs); they decide change detection, not availability.
     private static func extraFingerprintRoots(client: String) -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let environment = ProcessInfo.processInfo.environment
         switch client {
-        case "grok":
-            let base = environment["GROK_HOME"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
-                ?? home.appendingPathComponent(".grok")
-            return [base.appendingPathComponent("logs/unified.jsonl")]
-        case "kimi":
-            return [home.appendingPathComponent(
-                "Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/home/sessions")]
         case "devin-desktop":
             // The desktop parser resolves sessions through the CLI database; its own fingerprint is the CLI's.
             return roots(client: "devin-cli")
-        case "codex":
-            if let path = environment["TOKSCALE_HEADLESS_DIR"], !path.isEmpty { return [URL(fileURLWithPath: path)] }
-            return [home.appendingPathComponent(".config/tokscale/headless"),
-                    home.appendingPathComponent("Library/Application Support/tokscale/headless")]
         default: return []
         }
     }
 
-    private static func roots(client: String) -> [URL] {
+    static func roots(client: String) -> [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let environment = ProcessInfo.processInfo.environment
         func root(_ variable: String, _ fallback: String) -> URL {
@@ -390,17 +377,30 @@ public struct TokscaleCollector: UsageCollector {
         case "claude": return [root("CLAUDE_CONFIG_DIR", ".claude").appendingPathComponent("projects")]
         case "codex":
             let base = root("CODEX_HOME", ".codex")
-            return [base.appendingPathComponent("sessions"), base.appendingPathComponent("archived_sessions")]
-        case "grok": return [root("GROK_HOME", ".grok").appendingPathComponent("sessions")]
+            let headlessRoots: [URL]
+            if let path = environment["TOKSCALE_HEADLESS_DIR"], !path.isEmpty {
+                headlessRoots = [URL(fileURLWithPath: path)]
+            } else {
+                headlessRoots = [home.appendingPathComponent(".config/tokscale/headless"),
+                                 home.appendingPathComponent("Library/Application Support/tokscale/headless")]
+            }
+            return [base.appendingPathComponent("sessions"),
+                    base.appendingPathComponent("archived_sessions")]
+                + headlessRoots.map { $0.appendingPathComponent("codex") }
+        case "grok":
+            let base = root("GROK_HOME", ".grok")
+            return [base.appendingPathComponent("sessions"), base.appendingPathComponent("logs/unified.jsonl")]
         case "kimi":
-            // Kimi CLI and Kimi Code (`KIMI_CODE_HOME`, default ~/.kimi-code) share the engine's kimi client.
+            // Kimi CLI, Kimi Code (`KIMI_CODE_HOME`, default ~/.kimi-code), and Kimi Desktop share the kimi client.
             return [home.appendingPathComponent(".kimi/sessions"),
-                    root("KIMI_CODE_HOME", ".kimi-code").appendingPathComponent("sessions")]
+                    root("KIMI_CODE_HOME", ".kimi-code").appendingPathComponent("sessions"),
+                    home.appendingPathComponent(
+                        "Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/home/sessions")]
         case "gemini": return [root("GEMINI_CLI_HOME", ".gemini").appendingPathComponent("tmp")]
         case "droid": return [home.appendingPathComponent(".factory/sessions")]
         case "opencode":
             let base = root("XDG_DATA_HOME", ".local/share").appendingPathComponent("opencode")
-            return [base.appendingPathComponent("storage/message"), base.appendingPathComponent("opencode.db")]
+            return [base.appendingPathComponent("storage/message")] + discoverOpenCodeDBs(in: base)
         // A single SQLite file is fingerprinted by the size and mtime of the file and its -wal/-shm siblings only;
         // Devin's database can exceed 1 GB and is never opened here.
         case "devin-cli": return [root("XDG_DATA_HOME", ".local/share").appendingPathComponent("devin/cli/sessions.db")]
@@ -417,6 +417,40 @@ public struct TokscaleCollector: UsageCollector {
         }
     }
 
+    /// Matches tokscale `discover_opencode_dbs` / `is_opencode_db_filename` (`opencode.db` or `opencode-<channel>.db`).
+    private static func discoverOpenCodeDBs(in dataDir: URL) -> [URL] {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: dataDir,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) else {
+            return []
+        }
+        return entries.filter { url in
+            guard isOpenCodeDBFilename(url.lastPathComponent) else { return false }
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                && !isDirectory.boolValue
+        }.sorted { $0.path < $1.path }
+    }
+
+    static func isOpenCodeDBFilename(_ name: String) -> Bool {
+        guard name.hasSuffix(".db") else { return false }
+        let stem = name.dropLast(3)
+        if stem == "opencode" { return true }
+        guard stem.hasPrefix("opencode-") else { return false }
+        let channel = stem.dropFirst("opencode-".count)
+        guard !channel.isEmpty else { return false }
+        return channel.utf8.allSatisfy { byte in
+            (byte >= 0x30 && byte <= 0x39)
+                || (byte >= 0x41 && byte <= 0x5a)
+                || (byte >= 0x61 && byte <= 0x7a)
+                || byte == 0x2e
+                || byte == 0x5f
+                || byte == 0x2d
+        }
+    }
+
     private func ensureSettings(timeZone: TimeZone) throws {
         let manager = FileManager.default
         do {
@@ -427,6 +461,19 @@ public struct TokscaleCollector: UsageCollector {
         } catch {
             throw CollectorError.open("Could not write tokscale settings")
         }
+    }
+
+    static func childEnvironment(
+        configDirectory: URL,
+        timeZone: TimeZone,
+        processEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [String: String] {
+        var environment = ["TOKSCALE_CONFIG_DIR": configDirectory.path, "TZ": timeZone.identifier]
+        for key in ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "GEMINI_CLI_HOME", "XDG_DATA_HOME",
+                    "KIMI_CODE_HOME", "DSH_HOME", "TOKSCALE_HEADLESS_DIR"] {
+            if let value = processEnvironment[key] { environment[key] = value }
+        }
+        return environment
     }
 
     private func run(arguments: [String], timeZone: TimeZone, graph: Bool = false) async throws -> Data {
@@ -442,12 +489,7 @@ public struct TokscaleCollector: UsageCollector {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments + ["--offline", "--no-spinner"] + (graph ? ["--output", outputURL.path] : [])
-        var environment = ["TOKSCALE_CONFIG_DIR": configDirectory.path, "TZ": timeZone.identifier]
-        for key in ["HOME", "PATH", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "GROK_HOME", "GEMINI_CLI_HOME", "XDG_DATA_HOME",
-                    "KIMI_CODE_HOME", "DSH_HOME"] {
-            if let value = ProcessInfo.processInfo.environment[key] { environment[key] = value }
-        }
-        process.environment = environment
+        process.environment = Self.childEnvironment(configDirectory: configDirectory, timeZone: timeZone)
         guard manager.createFile(atPath: outputURL.path, contents: nil),
               let stdoutHandle = try? FileHandle(forWritingTo: outputURL) else {
             try? manager.removeItem(at: temporaryDirectory)
