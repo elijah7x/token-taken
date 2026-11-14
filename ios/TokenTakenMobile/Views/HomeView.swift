@@ -247,10 +247,11 @@ struct HomeView: View {
 
     private func coverageRows(for report: MobileReport) -> [CoverageRow] {
         let devices = report.coverage.devices
-        let generatorIndex =
-            devices.firstIndex {
-                $0.displayName == report.generator.displayName && $0.lastWriteUTC == report.generatedAt
-            } ?? devices.firstIndex { $0.displayName == report.generator.displayName }
+        // The publisher always writes itself first; coverage carries no device ID, so matching by name
+        // elsewhere could badge another Mac with the same name.
+        let generatorIndex: Int? =
+            devices.first.map { $0.displayName == report.generator.displayName && $0.lastWriteUTC == report.generatedAt } == true
+            ? 0 : nil
 
         var rows: [CoverageRow] = []
         if generatorIndex == nil {
