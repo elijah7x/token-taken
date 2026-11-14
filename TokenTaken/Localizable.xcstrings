@@ -185,6 +185,54 @@
         }
       }
     },
+    "%lld Macs are stale" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Macs are stale"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 台 Mac 数据已过期"
+          }
+        }
+      }
+    },
+    "%lld Macs have partial data" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Macs have partial data"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 台 Mac 部分数据"
+          }
+        }
+      }
+    },
+    "%lld Macs incomplete" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Macs incomplete"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 台 Mac 数据不完整"
+          }
+        }
+      }
+    },
     "%lld Macs synced" : {
       "localizations" : {
         "en" : {
@@ -301,6 +349,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 个来源不可用"
+          }
+        }
+      }
+    },
+    "1 Mac has partial data" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Mac has partial data"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 台 Mac 部分数据"
+          }
+        }
+      }
+    },
+    "1 Mac is stale" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Mac is stale"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 台 Mac 数据已过期"
           }
         }
       }
@@ -1722,6 +1802,22 @@
         }
       }
     },
+    "Missing a Mac? Check that it uses the same Apple ID and has iCloud sync on." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Missing a Mac? Check that it uses the same Apple ID and has iCloud sync on."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "少了某台 Mac？请确认它登录了同一个 Apple ID 并开启了 iCloud 同步。"
+          }
+        }
+      }
+    },
     "Model" : {
       "localizations" : {
         "en" : {
@@ -2280,6 +2376,22 @@
         }
       }
     },
+    "Other Macs appear here once Token Taken runs on them with iCloud sync on and the same Apple ID." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Other Macs appear here once Token Taken runs on them with iCloud sync on and the same Apple ID."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他 Mac 打开 Token Taken、开启 iCloud 同步并登录同一个 Apple ID 后会出现在这里。"
+          }
+        }
+      }
+    },
     "Output" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2410,18 +2522,18 @@
         }
       }
     },
-    "Publishes this Mac's usage report to iCloud so the iPhone app can show it." : {
+    "Publishes the usage this Mac sees, including synced Macs, to iCloud for the iPhone app. Your iPhone must use the same Apple ID." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Publishes this Mac's usage report to iCloud so the iPhone app can show it."
+            "value" : "Publishes the usage this Mac sees, including synced Macs, to iCloud for the iPhone app. Your iPhone must use the same Apple ID."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "把本机用量报告写入 iCloud 云盘，供 iPhone App 展示。"
+            "value" : "把这台 Mac 看到的用量（含已同步的 Mac）发布到 iCloud，供 iPhone App 显示。iPhone 需登录同一个 Apple ID。"
           }
         }
       }
@@ -2790,18 +2902,18 @@
         }
       }
     },
-    "Share totals between your Macs through iCloud Drive." : {
+    "Share totals between your Macs through iCloud Drive. Every Mac must use the same Apple ID." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Share totals between your Macs through iCloud Drive."
+            "value" : "Share totals between your Macs through iCloud Drive. Every Mac must use the same Apple ID."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "通过 iCloud 云盘在你的 Mac 之间共享汇总。"
+            "value" : "通过 iCloud 云盘在你的 Mac 之间共享用量。所有 Mac 需登录同一个 Apple ID。"
           }
         }
       }
@@ -2898,6 +3010,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已显示全部 %lld 个"
+          }
+        }
+      }
+    },
+    "Sign in to iCloud on this Mac to publish" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sign in to iCloud on this Mac to publish"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先在这台 Mac 上登录 iCloud"
           }
         }
       }

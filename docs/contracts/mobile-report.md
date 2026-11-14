@@ -30,9 +30,9 @@ Status: Accepted (2026-11-12)
 - Decode only envelopes with `schemaVersion == 1` and `kind == "token-taken.mobile-report"`. Skip any other file, including unknown versions, rather than interpreting it as v1.
 - If several valid reports exist, display the one with the newest `generatedAt`. Never add report files together: each report already merges every device its writer could read.
 - Show `generatedAt` to the user as the last update time. Never present the data as real time or live.
-- A report whose `generatedAt` is more than 24 hours old is stale and must be labelled as such; its data is still shown. No report at all is an empty state that tells the user to enable "Sync to iPhone" on the Mac, not zero usage.
+- A report whose `generatedAt` is more than 24 hours old is stale and must be labelled as such; its data is still shown. No report at all is an empty state that tells the user to enable "Sync to iPhone" on the Mac and sign in with the same Apple ID on both devices, not zero usage.
 - Ignore unknown fields and unknown enum values. Missing optional fields degrade to an unknown or absent state, never to a zero total.
-- The reader displays coverage exactly as published. It must not infer that a device with no entry has no usage, and must not recompute totals from `days` or `months`.
+- The reader displays coverage as published, showing the generating Mac and each covered Mac with its status. It must not infer that a device with no entry has no usage, and must not recompute totals from `days` or `months`.
 
 ## Schema
 

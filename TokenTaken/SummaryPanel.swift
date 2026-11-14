@@ -77,7 +77,7 @@ struct SummaryRail: View {
                     PartialDeviceBanner(
                         summary: summary,
                         remoteDevices: model.remoteDevices,
-                        deviceIssueCount: model.dataIssues.devices,
+                        dataIssues: model.dataIssues,
                         reduceTransparency: reduceTransparency
                     )
                     .padding(.top, 10)
@@ -163,7 +163,7 @@ struct SummaryRail: View {
                     PartialDeviceBanner(
                         summary: summary,
                         remoteDevices: model.remoteDevices,
-                        deviceIssueCount: model.dataIssues.devices,
+                        dataIssues: model.dataIssues,
                         reduceTransparency: reduceTransparency
                     )
                     .padding(.top, 10)
@@ -268,7 +268,7 @@ struct TrayDevices: View {
                                     .foregroundStyle(Palette.healthWarn)
                                     .lineLimit(1)
                             }
-                            Text(remote.state == .stale ? "Stale" : "Unavailable")
+                            Text(remoteLabelKey(for: remote.state))
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(Palette.healthWarn)
                                 .lineLimit(1)
@@ -426,8 +426,19 @@ struct TrayDevices: View {
             return (Text("Updated \(relativeTime(for: lastWrite, now: now))"), false)
         case .stale:
             return (Text("Stale"), true)
-        case .partial, .unavailable:
+        case .partial:
+            return (Text("Partial"), true)
+        case .unavailable:
             return (Text("Unavailable"), true)
+        }
+    }
+
+    private func remoteLabelKey(for state: RemoteDeviceStatus.State) -> LocalizedStringKey {
+        switch state {
+        case .ok: "Synced"
+        case .stale: "Stale"
+        case .partial: "Partial"
+        case .unavailable: "Unavailable"
         }
     }
 
@@ -476,7 +487,7 @@ struct TrayDevices: View {
 private struct PartialDeviceBanner: View {
     let summary: UsageSummary
     let remoteDevices: [RemoteDeviceStatus]
-    let deviceIssueCount: Int
+    let dataIssues: AppModel.DataIssues
     let reduceTransparency: Bool
 
     var body: some View {
@@ -520,10 +531,17 @@ private struct PartialDeviceBanner: View {
             if !summary.byDevice.contains(where: { $0.id == remote.deviceID }) {
                 return Text("Does not include \(name)")
             }
-            let state = remote.state == .stale ? String(localized: "Stale") : String(localized: "Unavailable")
+            let state: String = switch remote.state {
+            case .stale: String(localized: "Stale")
+            case .partial: String(localized: "Partial")
+            case .unavailable, .ok: String(localized: "Unavailable")
+            }
             return Text("\(name): \(state)")
         }
-        return Text(deviceIssueCount == 1 ? "1 Mac unavailable" : "\(deviceIssueCount) Macs unavailable")
+        if let note = dataIssues.remoteIssueNote {
+            return Text(note)
+        }
+        return Text("data may be incomplete")
     }
 }
 

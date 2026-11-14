@@ -37,6 +37,8 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("About")
+                } footer: {
+                    Text("Reports come from Macs signed in to the same Apple ID.")
                 }
             }
             .navigationTitle("Settings")

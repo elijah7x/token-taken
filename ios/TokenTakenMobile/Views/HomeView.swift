@@ -33,6 +33,7 @@ struct HomeView: View {
                     totalsCard(report)
                     chartCard(report)
                     sourcesCard(report)
+                    coverageCard(report)
                     updatedRow(report)
 
                     Button {
@@ -217,6 +218,69 @@ struct HomeView: View {
             .padding(16)
             .cardSurface()
         }
+    }
+
+    private func coverageCard(_ report: MobileReport) -> some View {
+        let rows = coverageRows(for: report)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Macs in this report")
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(rows) { row in
+                    CoverageDeviceRow(
+                        displayName: row.displayName,
+                        isGenerator: row.isGenerator,
+                        status: row.status
+                    )
+                }
+            }
+
+            Text("Missing a Mac? It needs iCloud sync on and the same Apple ID as this iPhone.")
+                .font(.caption)
+                .foregroundStyle(Palette.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .cardSurface()
+    }
+
+    private func coverageRows(for report: MobileReport) -> [CoverageRow] {
+        let devices = report.coverage.devices
+        let generatorIndex =
+            devices.firstIndex {
+                $0.displayName == report.generator.displayName && $0.lastWriteUTC == report.generatedAt
+            } ?? devices.firstIndex { $0.displayName == report.generator.displayName }
+
+        var rows: [CoverageRow] = []
+        if generatorIndex == nil {
+            rows.append(
+                CoverageRow(
+                    id: -1,
+                    displayName: report.generator.displayName,
+                    isGenerator: true,
+                    status: nil
+                )
+            )
+        }
+        for (index, device) in devices.enumerated() {
+            rows.append(
+                CoverageRow(
+                    id: index,
+                    displayName: device.displayName,
+                    isGenerator: index == generatorIndex,
+                    status: device.status
+                )
+            )
+        }
+        return rows
+    }
+
+    private struct CoverageRow: Identifiable {
+        let id: Int
+        let displayName: String
+        let isGenerator: Bool
+        let status: MobileReport.Coverage.Status?
     }
 
     private func updatedRow(_ report: MobileReport) -> some View {

@@ -35,6 +35,7 @@ final class RefreshCoordinator {
     private(set) var engineStatus: EngineStatus = .missing
     private(set) var remoteSnapshots: [RemoteDeviceSnapshot] = []
     private(set) var iCloudAvailable = ICloudSync.defaultRoot != nil
+    private(set) var iCloudSignedIn = FileManager.default.ubiquityIdentityToken != nil
     /// Read and write failures are tracked separately so a later success of one clears only its own failure.
     private(set) var syncReadFailed = false
     private(set) var syncWriteFailed = false
@@ -51,6 +52,8 @@ final class RefreshCoordinator {
     @ObservationIgnored private var remoteRetryTask: Task<Void, Never>?
     @ObservationIgnored private var remoteRetryAttempt = 0
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private var ubiquityIdentityObserver: NSObjectProtocol?
+    @ObservationIgnored private var lastUbiquityIdentityToken: (any NSCoding & NSCopying & NSObjectProtocol)?
     @ObservationIgnored private var lastAttempt: Date?
     @ObservationIgnored private let syncWorker = SyncWorker()
     @ObservationIgnored private var mobileReportTask: Task<Void, Never>?
@@ -63,6 +66,9 @@ final class RefreshCoordinator {
         self.settings = settings
         store = try SQLiteUsageStore(url: AppPaths.databaseURL)
         device = LocalDevice.current()
+        let token = FileManager.default.ubiquityIdentityToken
+        lastUbiquityIdentityToken = token
+        iCloudSignedIn = token != nil
         health = try store.health().map { $0.markingStale() }
         lastRefresh = health.compactMap(\.lastSuccess).max()
         updateEngineStatus()
@@ -105,6 +111,7 @@ final class RefreshCoordinator {
     func start() {
         guard refreshTask == nil else { return }
         observeWakeIfNeeded()
+        observeUbiquityIdentityIfNeeded()
         let refreshImmediately = needsLaunchRefresh
         scheduleLoop(refreshImmediately: refreshImmediately)
         // A skipped launch refresh still reads the other Macs: their rows are not this Mac's logs, and
@@ -325,9 +332,15 @@ final class RefreshCoordinator {
 
     private func refreshICloudAvailability() {
         let available = ICloudSync.defaultRoot != nil
-        guard available != iCloudAvailable else { return }
-        iCloudAvailable = available
-        markChanged()
+        if available != iCloudAvailable {
+            iCloudAvailable = available
+            markChanged()
+        }
+        let signedIn = FileManager.default.ubiquityIdentityToken != nil
+        if signedIn != iCloudSignedIn {
+            iCloudSignedIn = signedIn
+            markChanged()
+        }
     }
 
     private func setSyncReadFailed(_ value: Bool) {
@@ -453,6 +466,50 @@ final class RefreshCoordinator {
             Task { @MainActor [weak self] in
                 self?.handleWake()
             }
+        }
+    }
+
+    private func observeUbiquityIdentityIfNeeded() {
+        guard ubiquityIdentityObserver == nil else { return }
+        ubiquityIdentityObserver = NotificationCenter.default.addObserver(
+            forName: .NSUbiquityIdentityDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleUbiquityIdentityChange()
+            }
+        }
+    }
+
+    private func handleUbiquityIdentityChange() {
+        refreshICloudAvailability()
+        let currentToken = FileManager.default.ubiquityIdentityToken
+        guard !Self.tokensEqual(currentToken, lastUbiquityIdentityToken) else {
+            notifyIfChanged()
+            return
+        }
+        lastUbiquityIdentityToken = currentToken
+        // Switching Apple ID points iCloud Drive at another account, so cached remote Macs no longer belong to this user.
+        remoteSnapshots = []
+        markChanged()
+        notifyIfChanged()
+        Task { [weak self] in
+            guard let self else { return }
+            // Re-read first so the republished iPhone report includes the new account's Macs.
+            if self.settings.syncEnabled { await self.readRemotes() }
+            if self.settings.mobileReportEnabled { await self.publishMobileReport() }
+        }
+    }
+
+    private static func tokensEqual(
+        _ lhs: (any NSCoding & NSCopying & NSObjectProtocol)?,
+        _ rhs: (any NSCoding & NSCopying & NSObjectProtocol)?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil): true
+        case let (a?, b?): a.isEqual(b)
+        default: false
         }
     }
 

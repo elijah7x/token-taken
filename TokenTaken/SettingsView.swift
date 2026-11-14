@@ -1175,7 +1175,7 @@ private struct SyncSettingsTab: View {
             VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
                     title: "iCloud sync",
-                    description: "Share totals between your Macs through iCloud Drive."
+                    description: "Share totals between your Macs through iCloud Drive. Every Mac must use the same Apple ID."
                 )
 
                 SettingsRowsGroup {
@@ -1222,7 +1222,7 @@ private struct SyncSettingsTab: View {
             VStack(alignment: .leading, spacing: 10) {
                 SettingsGroupCaption(
                     title: "Sync to iPhone",
-                    description: "Publishes this Mac's usage report to iCloud so the iPhone app can show it."
+                    description: "Publishes the usage this Mac sees, including synced Macs, to iCloud for the iPhone app. Your iPhone must use the same Apple ID."
                 )
 
                 SettingsRowsGroup {
@@ -1255,10 +1255,17 @@ private struct SyncSettingsTab: View {
                             .foregroundStyle(Palette.ink3)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if model.remoteDevices.isEmpty {
-                        Text("No other Macs yet")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Palette.ink3)
-                            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("No other Macs yet")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.ink3)
+                            Text("Other Macs appear here once Token Taken runs on them with iCloud sync on and the same Apple ID.")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(Palette.ink3)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else {
                         TimelineView(.everyMinute) { _ in
                             VStack(spacing: 0) {
@@ -1271,6 +1278,13 @@ private struct SyncSettingsTab: View {
                             }
                         }
                     }
+                }
+
+                if settings.syncEnabled, !model.remoteDevices.isEmpty {
+                    Text("Missing a Mac? Check that it uses the same Apple ID and has iCloud sync on.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -1310,8 +1324,12 @@ private struct SyncSettingsTab: View {
     private func mobileReportStatusRow(_ status: MobileReportPublishStatus) -> some View {
         switch status {
         case .unavailable:
-            // Debug builds ship empty entitlements, so no container exists and nothing can be published.
-            statusLine(Text("iCloud container unavailable in this build"), isWarning: true)
+            if refreshCoordinator?.iCloudSignedIn == false {
+                statusLine(Text("Sign in to iCloud on this Mac to publish"), isWarning: true)
+            } else {
+                // Debug builds ship empty entitlements, so no container exists and nothing can be published.
+                statusLine(Text("iCloud container unavailable in this build"), isWarning: true)
+            }
         case .failed:
             statusLine(Text("Publish failed"), isWarning: true)
         case .published(let date):
@@ -1369,7 +1387,8 @@ private struct RemoteStatusLabel: View {
         switch state {
         case .ok: "Synced"
         case .stale: "Stale"
-        case .partial, .unavailable: "Unavailable"
+        case .partial: "Partial"
+        case .unavailable: "Unavailable"
         }
     }
 

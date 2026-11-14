@@ -111,6 +111,26 @@
         }
       }
     },
+    "Macs in this report": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这份报表包含的 Mac"
+          }
+        }
+      }
+    },
+    "Missing a Mac? It needs iCloud sync on and the same Apple ID as this iPhone.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "少了某台 Mac？它需要开启 iCloud 同步，并与这台 iPhone 登录同一个 Apple ID。"
+          }
+        }
+      }
+    },
     "Month": {
       "localizations": {
         "zh-Hans": {
@@ -131,12 +151,22 @@
         }
       }
     },
-    "Open Token Taken on your Mac, go to Settings, and turn on Sync to iPhone.": {
+    "Open Token Taken on your Mac, go to Settings, and turn on Sync to iPhone. Your Mac and this iPhone must use the same Apple ID.": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在 Mac 版 Token Taken 的设置里打开「同步到 iPhone」。"
+            "value": "在 Mac 版 Token Taken 的设置里打开「同步到 iPhone」。Mac 与这台 iPhone 需登录同一个 Apple ID。"
+          }
+        }
+      }
+    },
+    "Partial": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分数据"
           }
         }
       }
@@ -177,6 +207,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "报表版本"
+          }
+        }
+      }
+    },
+    "Reports come from Macs signed in to the same Apple ID.": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "报表来自登录同一个 Apple ID 的 Mac。"
           }
         }
       }
@@ -231,6 +271,26 @@
         }
       }
     },
+    "Stale": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已过期"
+          }
+        }
+      }
+    },
+    "Synced": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已同步"
+          }
+        }
+      }
+    },
     "The report file couldn't be decoded. Try again, or open Token Taken on your Mac.": {
       "localizations": {
         "zh-Hans": {
@@ -247,6 +307,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "本月"
+          }
+        }
+      }
+    },
+    "This report": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "报表来源"
           }
         }
       }
@@ -297,6 +367,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "重试"
+          }
+        }
+      }
+    },
+    "Unavailable": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用"
           }
         }
       }
