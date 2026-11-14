@@ -217,17 +217,7 @@ final class RefreshCoordinator {
             return
         }
         setSyncReadFailed(false)
-        let previous = Dictionary(remoteSnapshots.map { ($0.device.id, $0) }, uniquingKeysWith: { first, _ in first })
-        remoteSnapshots = snapshots.map { snapshot in
-            // A stale snapshot still carries its newest data; fall back to the cache only when this read got none.
-            guard snapshot.status.state == .unavailable || snapshot.status.state == .partial,
-                  let cached = previous[snapshot.device.id],
-                  (cached.status.lastWrite ?? .distantPast) >= (snapshot.status.lastWrite ?? .distantPast) || snapshot.daily.isEmpty
-            else { return snapshot }
-            return RemoteDeviceSnapshot(device: cached.device, daily: cached.daily, hourly: cached.hourly, status: RemoteDeviceStatus(
-                deviceID: cached.device.id, displayName: cached.device.name,
-                lastWrite: snapshot.status.lastWrite ?? cached.status.lastWrite, state: snapshot.status.state), accounts: cached.accounts)
-        }
+        remoteSnapshots = RemoteDeviceSnapshot.mergingCache(snapshots, previous: remoteSnapshots)
         markChanged()
         updateRemoteRetry(isRetry: isRetry)
         notifyIfChanged()
