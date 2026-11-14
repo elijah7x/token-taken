@@ -794,7 +794,7 @@ private struct SourcesSettingsTab: View {
             VStack(alignment: .leading, spacing: 36) {
                 VStack(alignment: .leading, spacing: 10) {
                     SettingsGroupCaption(
-                        title: "Installed sources",
+                        title: "Installed harnesses",
                         description: "Agents on this Mac whose logs are read."
                     ) {
                         SettingsScanActionPill()
@@ -802,7 +802,7 @@ private struct SourcesSettingsTab: View {
 
                     SettingsRowsGroup {
                         if ledger.installed.isEmpty {
-                            Text("No installed sources found")
+                            Text("No installed harnesses found")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Palette.ink3)
                                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -823,7 +823,7 @@ private struct SourcesSettingsTab: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     SettingsGroupCaption(
-                        title: "Account sources",
+                        title: "Account harnesses",
                         description: "Usage that belongs to an account rather than to this Mac."
                     )
 
@@ -832,7 +832,7 @@ private struct SourcesSettingsTab: View {
                     }
                 }
 
-                Text("Sources are identified automatically from local logs; no manual setup is needed.")
+                Text("Harnesses are identified automatically from local logs; no manual setup is needed.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)

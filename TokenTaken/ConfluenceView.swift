@@ -111,7 +111,7 @@ struct ConfluenceView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             dimension == .sources
-                ? Text("Confluence of sources into categories")
+                ? Text("Confluence of harnesses into categories")
                 : Text("Confluence of models into categories")
         )
     }
@@ -267,7 +267,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             side == .source
-                ? (current.dimension == .sources ? Text("Sources") : Text("Models"))
+                ? (current.dimension == .sources ? Text("Harnesses") : Text("Models"))
                 : Text("Categories")
         )
         .accessibilityAddTraits(.isHeader)

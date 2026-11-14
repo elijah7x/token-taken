@@ -40,7 +40,7 @@ enum SettingsSection: CaseIterable, Hashable, Identifiable {
     var title: LocalizedStringKey {
         switch self {
         case .general: "General"
-        case .sources: "Sources"
+        case .sources: "Harnesses"
         case .sync: "Sync"
         case .about: "About"
         }
@@ -187,7 +187,7 @@ private struct DimensionSwitchRow: View {
             Group {
                 if ThemeRuntime.isCosmos {
                     HStack(spacing: 0) {
-                        segment(.sources, label: "Sources · \(summary.bySource.count)")
+                        segment(.sources, label: "Harnesses · \(summary.bySource.count)")
                         segment(.models, label: "Models · \(summary.byModel.count)")
                     }
                     .background(CosmosPalette.background)
@@ -195,7 +195,7 @@ private struct DimensionSwitchRow: View {
                 } else {
                     GlassEffectContainer(spacing: 0) {
                         HStack(spacing: 2) {
-                            segment(.sources, label: "Sources · \(summary.bySource.count)")
+                            segment(.sources, label: "Harnesses · \(summary.bySource.count)")
                             segment(.models, label: "Models · \(summary.byModel.count)")
                         }
                         .padding(2)
@@ -799,10 +799,10 @@ extension AppModel {
             return nil
         }
         if issues.stale > 0, issues.failed == 0, issues.unavailable == 0 {
-            return issues.stale == 1 ? "1 source stale" : "\(issues.stale) sources stale"
+            return issues.stale == 1 ? "1 harness stale" : "\(issues.stale) harnesses stale"
         }
         if issues.count > 0 {
-            return issues.count == 1 ? "1 source unavailable" : "\(issues.count) sources unavailable"
+            return issues.count == 1 ? "1 harness unavailable" : "\(issues.count) harnesses unavailable"
         }
         if let remoteNote = issues.remoteIssueNote {
             return remoteNote

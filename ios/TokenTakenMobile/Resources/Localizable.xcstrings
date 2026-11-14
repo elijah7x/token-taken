@@ -91,6 +91,16 @@
         }
       }
     },
+    "Harnesses this month": {
+      "localizations": {
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本月工具"
+          }
+        }
+      }
+    },
     "Last 12 months": {
       "localizations": {
         "zh-Hans": {
@@ -171,12 +181,12 @@
         }
       }
     },
-    "Rank table version": {
+    "Rank curve version": {
       "localizations": {
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "排名表版本"
+            "value": "排名曲线版本"
           }
         }
       }
@@ -257,16 +267,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "请登录 iCloud 后重试。"
-          }
-        }
-      }
-    },
-    "Sources this month": {
-      "localizations": {
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本月来源"
           }
         }
       }
@@ -446,29 +446,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Estimate based on the Anthropic Claude Code cost documentation, Viberank and Tokscale public leaderboards (2026-11)."
+            "value": "Rank is an estimate derived from public usage sources."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "估算依据：Anthropic Claude Code 成本文档、Viberank 与 Tokscale 公开榜单（2026-11）"
-          }
-        }
-      }
-    },
-    "rank.line.median": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "About median or above · estimate among measured users"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "约高于中位数 · 实测用户估算"
+            "value": "排名为估算，依据公开用量数据推算"
           }
         }
       }
@@ -478,13 +462,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "About top %@ · estimate among measured users"
+            "value": "Last 30 days · about top %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "约前 %@ · 实测用户估算"
+            "value": "近 30 天 · 约前 %@"
           }
         }
       }
