@@ -106,13 +106,30 @@ enum SQLiteSnapshotReader {
         return sqlite3_step(statement) == SQLITE_ROW
     }
 
+    /// The files are copied one by one, so a client that reopens and checkpoints the database mid-copy could leave a
+    /// torn snapshot. Any change to the database or its `-wal` during the copy fails the read; the caller counts it as
+    /// unreadable and the next refresh retries.
     private static func copyWithSidecars(_ url: URL, to destination: URL) throws {
         let manager = FileManager.default
+        let before = stamps(url)
         try manager.copyItem(at: url, to: destination)
         for suffix in ["-wal", "-shm"] {
             let sidecar = URL(fileURLWithPath: url.path + suffix)
             guard manager.fileExists(atPath: sidecar.path) else { continue }
             try manager.copyItem(at: sidecar, to: URL(fileURLWithPath: destination.path + suffix))
+        }
+        guard stamps(url) == before else {
+            throw CollectorError.open("SQLite database changed while it was being copied")
+        }
+    }
+
+    /// Size and modification time of the database and its `-wal`; a missing file stamps as nil.
+    private static func stamps(_ url: URL) -> [String?] {
+        ["", "-wal"].map { suffix in
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path + suffix),
+                  let size = attributes[.size] as? NSNumber,
+                  let modified = attributes[.modificationDate] as? Date else { return nil }
+            return "\(size.int64Value)@\(modified.timeIntervalSince1970)"
         }
     }
 
