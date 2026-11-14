@@ -405,11 +405,15 @@ final class AppUpdater {
         func detachMount() async {
             guard !detached else { return }
             detached = true
-            _ = try? await runTool(
-                URL(filePath: "/usr/bin/hdiutil"),
-                arguments: ["detach", mountPoint.path, "-force"],
-                timeout: 60
-            )
+            // Unstructured so a cancelled preparation still unmounts the image.
+            let path = mountPoint.path
+            _ = try? await Task.detached {
+                try await runTool(
+                    URL(filePath: "/usr/bin/hdiutil"),
+                    arguments: ["detach", path, "-force"],
+                    timeout: 60
+                )
+            }.value
         }
 
         do {
@@ -719,11 +723,18 @@ final class AppUpdater {
       exit 1
     fi
 
-    BACKUP="$(dirname "$DEST")/.$(basename "$DEST").previous"
-    rm -rf "$BACKUP"
+    BACKUP_DIR=$(mktemp -d "$(dirname "$DEST")/.TokenTaken-previous.XXXXXX") || {
+      echo "Could not create backup directory"
+      rm -rf "$NEW"
+      reopen
+      mark_complete
+      exit 1
+    }
+    BACKUP="$BACKUP_DIR/$(basename "$DEST")"
     if [ -e "$DEST" ]; then
       mv "$DEST" "$BACKUP" || {
         echo "Could not move current bundle aside"
+        rmdir "$BACKUP_DIR" 2>/dev/null
         rm -rf "$NEW"
         reopen
         mark_complete
@@ -732,11 +743,11 @@ final class AppUpdater {
     fi
 
     if mv "$NEW" "$DEST"; then
-      rm -rf "$BACKUP"
+      rm -rf "$BACKUP_DIR"
     else
       echo "Could not move staged bundle into place"
       if [ -e "$BACKUP" ]; then
-        mv "$BACKUP" "$DEST"
+        mv "$BACKUP" "$DEST" && rmdir "$BACKUP_DIR" 2>/dev/null
       fi
       rm -rf "$NEW"
       reopen
