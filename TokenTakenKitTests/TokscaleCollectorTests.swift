@@ -533,6 +533,127 @@ final class TokscaleCollectorTests: XCTestCase {
             XCTAssertEqual(after.totalSize, 80)
         }
     }
+
+    func testOpenCodeChannelDBAvailabilityAndFingerprint() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func withEnvironment(_ name: String, _ value: String, _ body: () throws -> Void) rethrows {
+            let previous = ProcessInfo.processInfo.environment[name]
+            setenv(name, value, 1)
+            defer { if let previous { setenv(name, previous, 1) } else { unsetenv(name) } }
+            try body()
+        }
+
+        let data = dir.appendingPathComponent("xdg-data", isDirectory: true)
+        let opencode = data.appendingPathComponent("opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: opencode, withIntermediateDirectories: true)
+        let channelWAL = opencode.appendingPathComponent("opencode-stable.db-wal")
+        // Sidecars and invalid channel names alone do not match discover_opencode_dbs.
+        try Data(count: 8).write(to: channelWAL)
+        try Data(count: 8).write(to: opencode.appendingPathComponent("opencode-.db"))
+        try Data(count: 8).write(to: opencode.appendingPathComponent("opencode-bad name.db"))
+        try Data(count: 8).write(to: opencode.appendingPathComponent("other.db"))
+
+        try withEnvironment("XDG_DATA_HOME", data.path) {
+            XCTAssertFalse(TokscaleCollector.sourceAvailable(client: "opencode"))
+            try FileManager.default.removeItem(at: channelWAL)
+
+            let channelDB = opencode.appendingPathComponent("opencode-stable.db")
+            try Data(count: 32).write(to: channelDB)
+            XCTAssertTrue(TokscaleCollector.sourceAvailable(client: "opencode"))
+
+            let before = TokscaleCollector.fingerprint(client: "opencode")
+            XCTAssertEqual(before.fileCount, 1)
+            XCTAssertEqual(before.totalSize, 32)
+
+            try Data(count: 48).write(to: channelDB)
+            let afterDB = TokscaleCollector.fingerprint(client: "opencode")
+            XCTAssertNotEqual(before, afterDB)
+            XCTAssertEqual(afterDB.totalSize, 48)
+
+            // Existing -wal/-shm rule applies identically to channel DBs.
+            try Data(count: 16).write(to: channelWAL)
+            let afterWAL = TokscaleCollector.fingerprint(client: "opencode")
+            XCTAssertNotEqual(afterDB, afterWAL)
+            XCTAssertEqual(afterWAL.fileCount, 2)
+            XCTAssertEqual(afterWAL.totalSize, 64)
+        }
+    }
+
+    func testSecondaryEngineRootsCountTowardAvailability() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        func withEnvironment(_ values: [String: String], _ body: () throws -> Void) rethrows {
+            let previous = values.keys.map { ($0, ProcessInfo.processInfo.environment[$0]) }
+            for (name, value) in values { setenv(name, value, 1) }
+            defer {
+                for (name, old) in previous {
+                    if let old { setenv(name, old, 1) } else { unsetenv(name) }
+                }
+            }
+            try body()
+        }
+
+        let grokHome = dir.appendingPathComponent("grok-home", isDirectory: true)
+        let grokLogs = grokHome.appendingPathComponent("logs", isDirectory: true)
+        try FileManager.default.createDirectory(at: grokLogs, withIntermediateDirectories: true)
+        try Data("{}\n".utf8).write(to: grokLogs.appendingPathComponent("unified.jsonl"))
+        try withEnvironment(["GROK_HOME": grokHome.path]) {
+            XCTAssertTrue(TokscaleCollector.sourceAvailable(client: "grok"))
+        }
+
+        let emptyCodexHome = dir.appendingPathComponent("empty-codex", isDirectory: true)
+        let headlessDir = dir.appendingPathComponent("headless", isDirectory: true)
+        let mcodeHeadless = headlessDir.appendingPathComponent("mcode", isDirectory: true)
+        try FileManager.default.createDirectory(at: mcodeHeadless, withIntermediateDirectories: true)
+        try withEnvironment(["CODEX_HOME": emptyCodexHome.path, "TOKSCALE_HEADLESS_DIR": headlessDir.path]) {
+            XCTAssertFalse(TokscaleCollector.sourceAvailable(client: "codex"))
+            try FileManager.default.createDirectory(
+                at: headlessDir.appendingPathComponent("codex", isDirectory: true),
+                withIntermediateDirectories: true
+            )
+            XCTAssertTrue(TokscaleCollector.sourceAvailable(client: "codex"))
+        }
+
+        XCTAssertTrue(TokscaleCollector.roots(client: "kimi").contains {
+            $0.path.hasSuffix("Library/Application Support/kimi-desktop/daimon-share/daimon/runtime/kimi-code/home/sessions")
+        })
+    }
+
+    func testChildEnvironmentIncludesHeadlessDirAndOmitsUnrelatedEnv() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let headless = dir.appendingPathComponent("headless", isDirectory: true).path
+        let zone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let config = dir.appendingPathComponent("config", isDirectory: true)
+
+        let envVars: [String: String] = [
+            "TOKSCALE_HEADLESS_DIR": headless,
+            "CODEX_HOME": "/tmp/codex-home",
+            "GROK_HOME": "/tmp/grok-home",
+            "XDG_DATA_HOME": "/tmp/xdg-data",
+            "OPENCODE_DB": "/tmp/custom/opencode.db",
+            "UNRELATED_SECRET": "do-not-leak",
+        ]
+        let previous = envVars.keys.map { ($0, ProcessInfo.processInfo.environment[$0]) }
+        for (name, value) in envVars { setenv(name, value, 1) }
+        defer {
+            for (name, old) in previous {
+                if let old { setenv(name, old, 1) } else { unsetenv(name) }
+            }
+        }
+
+        let childEnv = TokscaleCollector.childEnvironment(configDirectory: config, timeZone: zone)
+        XCTAssertEqual(childEnv["TOKSCALE_CONFIG_DIR"], config.path)
+        XCTAssertEqual(childEnv["TZ"], "Asia/Shanghai")
+        XCTAssertEqual(childEnv["TOKSCALE_HEADLESS_DIR"], headless)
+        XCTAssertEqual(childEnv["CODEX_HOME"], "/tmp/codex-home")
+        XCTAssertEqual(childEnv["GROK_HOME"], "/tmp/grok-home")
+        XCTAssertEqual(childEnv["XDG_DATA_HOME"], "/tmp/xdg-data")
+        XCTAssertNil(childEnv["OPENCODE_DB"])
+        XCTAssertNil(childEnv["UNRELATED_SECRET"])
+    }
 }
 
 private final class AvailabilityProbe: @unchecked Sendable {
