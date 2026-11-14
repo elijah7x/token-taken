@@ -86,3 +86,63 @@ struct SectionHeader: View {
             .foregroundStyle(Palette.ink1)
     }
 }
+
+struct CoverageDeviceRow: View {
+    let displayName: String
+    let isGenerator: Bool
+    let status: MobileReport.Coverage.Status?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(statusDotColor)
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+
+            Text(verbatim: displayName)
+                .font(.footnote)
+                .foregroundStyle(Palette.ink1)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            if isGenerator {
+                Text("This report")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Palette.accent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background { Capsule().fill(Palette.accent.opacity(0.14)) }
+                    .layoutPriority(1)
+            }
+
+            Spacer(minLength: 8)
+
+            if let status {
+                Text(status.labelKey)
+                    .font(.footnote)
+                    .foregroundStyle(status == .ok ? Palette.ink2 : Palette.warn)
+                    .layoutPriority(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var statusDotColor: Color {
+        switch status {
+        case .ok: Palette.ok
+        case .stale, .partial, .unavailable: Palette.warn
+        case nil: Palette.ink3
+        }
+    }
+}
+
+private extension MobileReport.Coverage.Status {
+    var labelKey: LocalizedStringKey {
+        switch self {
+        case .ok: "Synced"
+        case .partial: "Partial"
+        case .unavailable: "Unavailable"
+        case .stale: "Stale"
+        }
+    }
+}

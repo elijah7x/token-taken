@@ -446,7 +446,7 @@ private struct TrayFooter: View {
                 .buttonStyle(.plain)
                 .help(syncWarningTooltip)
                 .accessibilityLabel(Text("iCloud sync"))
-                .accessibilityValue(Text("Unavailable"))
+                .accessibilityValue(Text(syncWarningAccessibilityValue))
                 .accessibilityHint(Text("Opens Settings"))
             } else {
                 HStack(spacing: 6) {
@@ -487,6 +487,19 @@ private struct TrayFooter: View {
             return String(localized: "iCloud Drive is not available on this Mac.")
         }
         return model.statusTooltip(refreshCoordinator: refreshCoordinator)
+    }
+
+    private var syncWarningAccessibilityValue: LocalizedStringKey {
+        if refreshCoordinator?.iCloudAvailable == false
+            || ICloudSync.defaultRoot == nil
+            || refreshCoordinator?.syncFailed == true
+            || model.remoteDevices.contains(where: { $0.state == .unavailable }) {
+            return "Unavailable"
+        }
+        if model.remoteDevices.contains(where: { $0.state == .partial }) {
+            return "Partial"
+        }
+        return "Stale"
     }
 }
 
@@ -791,8 +804,8 @@ extension AppModel {
         if issues.count > 0 {
             return issues.count == 1 ? "1 source unavailable" : "\(issues.count) sources unavailable"
         }
-        if issues.devices > 0 {
-            return issues.devices == 1 ? "1 Mac unavailable" : "\(issues.devices) Macs unavailable"
+        if let remoteNote = issues.remoteIssueNote {
+            return remoteNote
         }
         return "data may be incomplete"
     }

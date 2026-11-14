@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added report coverage on iPhone showing which Macs the published report includes and noting that the iPhone and Macs must share the same Apple ID.
 - Added opt-in Cursor account collection: a native collector reads Cursor's own sign-in on this Mac, downloads the account's usage export once per refresh, and writes it to an `account` device so several signed-in Macs count the account once (ADR-0010). Device kinds (`mac`, `account`) follow into the store, the synced-device views, the summary breakdowns, and `token-taken devices` (`kind`, with `local` never true for an account).
 
 - Initialized the project specification, architecture, decision records, and contracts.
@@ -32,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Remote Macs with partial data now show "Partial" instead of "Unavailable", and issue counts in the status note and sidebar banner are split by state (`unavailable`, `partial`, `stale`), falling back to an `incomplete` count when states are mixed.
+- Sync settings now explain that all Macs and the iPhone must share the same Apple ID, and switching Apple ID clears cached remote Mac data and re-reads from the new account.
 - Token Taken now runs on Apple silicon Macs only: the app, `TokenTakenKit`, `token-taken`, and the bundled `tokscale` engine are built and checked as arm64 alone (ADR-0012), which makes the download smaller.
 - Date Devin turns by the request stamp (`metadata.started_generation_at`) instead of the row write time, and count Antigravity input as new input only: 302M Devin tokens move to the local day they were requested on, and Antigravity no longer bills its fixed per-model preamble (3.18M tokens). Both history epochs are now `2`, so recent days rebaseline (ADR-0009).
 - Devin is no longer requested from the pinned `tokscale` engine (`devin-cli` and `devin-desktop` leave its client list); Antigravity also leaves it now that its native collector counts it.
@@ -48,4 +51,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Fresh installs now recover synced Macs within seconds instead of after a relaunch.
 - A refresh can no longer hang forever when the `tokscale` engine stops responding.

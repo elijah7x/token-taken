@@ -27,9 +27,29 @@ final class AppModel {
         let stale: Int
         let skippedRecords: Int
         /// Other Macs whose synced data is stale, partial or unavailable; not counted as sources.
-        let devices: Int
+        let unavailableDevices: Int
+        let partialDevices: Int
+        let staleDevices: Int
+        var devices: Int { unavailableDevices + partialDevices + staleDevices }
         let isPartial: Bool
         var count: Int { failed + unavailable + stale }
+
+        var remoteIssueNote: LocalizedStringKey? {
+            let nonZeroKinds = (unavailableDevices > 0 ? 1 : 0)
+                + (partialDevices > 0 ? 1 : 0)
+                + (staleDevices > 0 ? 1 : 0)
+            guard nonZeroKinds > 0 else { return nil }
+            if nonZeroKinds > 1 {
+                return "\(devices) Macs incomplete"
+            }
+            if unavailableDevices > 0 {
+                return unavailableDevices == 1 ? "1 Mac unavailable" : "\(unavailableDevices) Macs unavailable"
+            }
+            if partialDevices > 0 {
+                return partialDevices == 1 ? "1 Mac has partial data" : "\(partialDevices) Macs have partial data"
+            }
+            return staleDevices == 1 ? "1 Mac is stale" : "\(staleDevices) Macs are stale"
+        }
     }
 
     var remoteDevices: [RemoteDeviceStatus] {
@@ -61,11 +81,30 @@ final class AppModel {
             case .ok, .notInstalled: break
             }
         }
-        let devices = remoteDevices.filter { $0.state != .ok && deviceKind(for: $0.deviceID) == .mac }.count
+        var unavailableDevices = 0
+        var partialDevices = 0
+        var staleDevices = 0
+        for remote in remoteDevices where remote.state != .ok && deviceKind(for: remote.deviceID) == .mac {
+            switch remote.state {
+            case .unavailable: unavailableDevices += 1
+            case .partial: partialDevices += 1
+            case .stale: staleDevices += 1
+            case .ok: break
+            }
+        }
+        let devices = unavailableDevices + partialDevices + staleDevices
         let skipped = health.reduce(0) { $0 + $1.skippedRecords }
-        return DataIssues(failed: failed, unavailable: unavailable, stale: stale, skippedRecords: skipped, devices: devices,
+        return DataIssues(
+            failed: failed,
+            unavailable: unavailable,
+            stale: stale,
+            skippedRecords: skipped,
+            unavailableDevices: unavailableDevices,
+            partialDevices: partialDevices,
+            staleDevices: staleDevices,
             isPartial: failed + unavailable + stale + devices > 0 || skipped > 0 || storageError != nil || readError != nil
-                || (settings?.syncEnabled == true && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false)))
+                || (settings?.syncEnabled == true && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false))
+        )
     }
 
     /// Computed when data loads, never from a view body: checking the store reads every record.

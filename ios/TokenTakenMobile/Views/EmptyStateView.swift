@@ -20,7 +20,7 @@ struct EmptyStateView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if model.state != .decodeFailed {
-                Text("Open Token Taken on your Mac, go to Settings, and turn on Sync to iPhone.")
+                Text("Open Token Taken on your Mac, go to Settings, and turn on Sync to iPhone. Your Mac and this iPhone must use the same Apple ID.")
                     .font(.callout)
                     .foregroundStyle(Palette.ink2)
                     .fixedSize(horizontal: false, vertical: true)
