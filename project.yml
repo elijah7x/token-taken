@@ -9,7 +9,7 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "28"
+    CURRENT_PROJECT_VERSION: "30"
     ENABLE_HARDENED_RUNTIME: "YES"
     # Apple silicon only: no Intel slice is built in any configuration.
     ARCHS: arm64
