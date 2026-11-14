@@ -101,7 +101,7 @@ struct MainWindowView: View {
         }
         .fontDesign(settings.theme == .field ? .serif : nil)
         .onAppear { settings.applyAppearance() }
-        .onChange(of: colorScheme) { FieldAppIconSwitcher.apply(settings.theme) }
+        .onChange(of: colorScheme) { ThemeAppIcon.apply(settings.theme) }
     }
 
     private var dimensionSwitchRow: some View {

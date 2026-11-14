@@ -46,7 +46,7 @@ Status: Draft v0 (2026-11-09)
 - The water wheel, chimney smoke, and night fireflies move in the main window. They hold still under Reduce Motion, in the menu bar extra, and on share cards.
 - The menu bar extra shows today's field with crop flags instead of signs.
 - The Field share card can carry an inscription (up to 40 characters) and a signature (up to 24). Both are written on the card only and are never saved or synced.
-- Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), and swaps the Dock icon at runtime. The Finder icon stays the bundle icon.
+- Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), and swaps the Dock and Finder icon at runtime to the bundled `FieldAppIcon.icns` (a hand-drawn coin whose T is a tree).
 
 ## Cosmos (`cosmos`)
 
@@ -57,7 +57,7 @@ Status: Draft v0 (2026-11-09)
 - The menu bar extra shows today's compact Cosmos scene when today has usage. The share card offers the same scope (overall, one source, one model), aspect (2:3, 1:1, 3:2), cost and composition options as the other themes. Wide cards put the scene left of the info panel; square and tall cards put it above. A scoped card renders the scope's breakdown along the other dimension (a source shows its models, a model its sources). The card shows period totals, estimated cost with the existing disclaimer when enabled, the top three items, and the five-category composition when enabled; an unavailable snapshot falls back to a plain dark panel.
 - Cosmos uses system sans type, monospaced tabular figures for numeric readouts, and opaque dark panels. It does not use Liquid Glass, serif type, or Field's custom period picker; its period picker, segmented controls, toggles and buttons are square, bordered Cosmos controls, and breakdown rows carry no per-item color dots.
 - Adaptive render scale limits GPU cost. Reduce Motion renders a still frame without removing data or interactions. Metal failure leaves the surrounding usage data and ranked list available.
-- Cosmos is dark only: it disables the Light/Dark/Follow System control, shows an explanation, and forces dark appearance without changing the saved preference. It keeps the default Dock icon until a Cosmos variant is accepted.
+- Cosmos is dark only: it disables the Light/Dark/Follow System control, shows an explanation, and forces dark appearance without changing the saved preference. It keeps the default icon (the Liquid Glass coin) until a Cosmos variant is accepted.
 
 ## Open questions
 

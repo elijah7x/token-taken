@@ -230,7 +230,6 @@ struct FieldShareCard: View {
     var inscription = ""
     var signature = ""
 
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.locale) private var locale
 
     private var quote: String { inscription.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -301,9 +300,9 @@ struct FieldShareCard: View {
 
     private var header: some View {
         HStack(spacing: 22) {
-            FieldAppIcon(isDark: scheme == .dark)
-                .scaleEffect(84 / 512)
-                .frame(width: 84, height: 84)
+            if let icon = ThemeAppIcon.image(for: .field) {
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 84, height: 84)
+            }
             Text(verbatim: "Token Taken").font(FieldFont.serif(36)).foregroundStyle(FieldPalette.ink)
             Spacer()
             Text(verbatim: dateRange).font(FieldFont.serif(28)).foregroundStyle(FieldPalette.muted)
