@@ -15,8 +15,9 @@ public enum HistoryEpochs {
     /// preamble as input, which lowers already-counted tokens (ADR-0009). Cursor is listed at its first revision
     /// so the account-scoped collector's epoch is visible here rather than implied. Devin and Antigravity move to 3
     /// because a store upgraded to schema 3 recorded revision 2 without rebaselining, so those corrections never
-    /// replaced the older, larger days; revision 3 applies them once.
-    private static let revisions: [String: Int] = ["devin": 3, "antigravity": 3, "cursor": 1]
+    /// replaced the older, larger days; revision 3 applies them once. Devin moves to 4 because build 28 re-stored its
+    /// unchanged cached rows under revision 3 without rebaselining; collection stamps now carry the epoch.
+    private static let revisions: [String: Int] = ["devin": 4, "antigravity": 3, "cursor": 1]
 
     public static func epoch(for sourceID: String) -> String {
         let revision = revisions[sourceID] ?? 1

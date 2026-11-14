@@ -78,7 +78,7 @@ public struct AntigravityCollector: UsageCollector {
         }
         guard available else { throw CollectorError.sourceUnavailable }
 
-        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone, sourceIDs: sourceIDs)
         // Fingerprint before the read: a write that lands while reading must trigger a re-collect next time.
         let fingerprints = Self.fingerprints(files)
         if let stateFile, !fingerprints.isEmpty, let saved = stateFile.load(),

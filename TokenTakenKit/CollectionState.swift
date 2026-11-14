@@ -33,11 +33,15 @@ public struct CollectionStamp: Codable, Hashable, Sendable {
     public var timeZoneID: String
     public var formatVersion: Int
     public var engineVersion: String?
+    /// History epochs of the collector's sources. A bumped epoch changes the stamp, so unchanged inputs are re-read
+    /// once and the correction rebaselines instead of the cached rows being re-stored under the new epoch.
+    public var historyEpochs: [String]?
 
-    public init(formatVersion: Int, engineVersion: String? = nil, timeZone: TimeZone = .current) {
+    public init(formatVersion: Int, engineVersion: String? = nil, timeZone: TimeZone = .current, sourceIDs: [String] = []) {
         self.timeZoneID = timeZone.identifier
         self.formatVersion = formatVersion
         self.engineVersion = engineVersion
+        self.historyEpochs = sourceIDs.isEmpty ? nil : sourceIDs.map { "\($0)=\(HistoryEpochs.epoch(for: $0))" }
     }
 }
 

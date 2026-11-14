@@ -154,7 +154,7 @@ struct PiFormatScan: Sendable {
         }
 
         let stateFile = CollectorStateFile<PiFormatScanState>(directory: stateDirectory, name: sourceID)
-        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone, sourceIDs: [sourceID])
         // A missing, unreadable or stamp-mismatched state means a full scan that replaces it.
         let previous: PiFormatScanState? =
             if let loaded = stateFile.load(), loaded.stamp == stamp { loaded } else { nil }

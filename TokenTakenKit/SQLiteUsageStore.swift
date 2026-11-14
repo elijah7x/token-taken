@@ -195,12 +195,17 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     /// reports centrally: every day it reports is adopted exactly, smaller corrections included, from its earliest
     /// day on, and stored days at or after that date which the batch omits are deleted. Days before the batch's
     /// earliest day keep the floor rule, because the batch is no evidence for them. An empty batch stores nothing.
-    public func replace(batch: CollectionBatch, sourceID: String, deviceID: String, authoritative: Bool = false) throws {
+    ///
+    /// `appliesEpoch` is false when the runner re-stores cached rows for unchanged inputs: those rows were produced under
+    /// the stored epoch, so they neither rebaseline nor record the current one.
+    public func replace(
+        batch: CollectionBatch, sourceID: String, deviceID: String, authoritative: Bool = false, appliesEpoch: Bool = true
+    ) throws {
         guard batch.daily.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID && $0.dayInterval != nil }),
               batch.hourly.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID }) else {
             throw StoreError.sql("Collection batch does not match its source/device or contains an invalid day")
         }
-        let epoch = HistoryEpochs.epoch(for: sourceID)
+        let epoch = appliesEpoch ? HistoryEpochs.epoch(for: sourceID) : nil
         try queue.sync {
             try execute("BEGIN IMMEDIATE;")
             do {
@@ -285,7 +290,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     /// when the batch total is not smaller, and a stored day the batch no longer reports is kept, so an agent
     /// pruning its own logs cannot shrink history. A day never mixes stored and batch rows, so a model rename
     /// cannot leave a stale row behind (ADR-0008).
-    private func mergeDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String) throws {
+    private func mergeDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String?) throws {
         let stored = try storedDaily(sourceID: sourceID, deviceID: deviceID)
         let batchDays = Dictionary(grouping: records, by: \.day)
         let batchTotals = batchDays.mapValues { rows in rows.reduce(Int64(0)) { $0 + $1.counts.total } }
@@ -294,7 +299,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         let zoneChanged = !stored.zones.isEmpty && !batchZones.isEmpty && stored.zones != batchZones
         // A missing epoch row is the first run after the schema 3 upgrade: record the current epoch and use the
         // normal merge, so existing rows are protected immediately instead of being rebaselined unseen.
-        let rebaseline = previousEpoch.map { $0 != epoch || zoneChanged } ?? false
+        let rebaseline = epoch.flatMap { epoch in previousEpoch.map { $0 != epoch || zoneChanged } } ?? false
         // A rebaseline adopts every day after the earliest day the batch reports, which is how an intentional
         // correction or a collection time-zone change lowers or moves recent usage. Days up to and including that
         // date keep the floor rule, because the batch has no evidence for lowering them.
@@ -318,13 +323,13 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             for day in stored.days where day > earliest && batchDays[day] == nil { try remove(day) }
         }
         try insertDaily(records.filter { adopted.contains($0.day) }, sourceID: sourceID, deviceID: deviceID)
-        try record(epoch: epoch, sourceID: sourceID, deviceID: deviceID)
+        if let epoch { try record(epoch: epoch, sourceID: sourceID, deviceID: deviceID) }
     }
 
     /// Adopts a complete account-scoped snapshot: stored days at or after the batch's earliest day are replaced by
     /// the batch exactly, so a day Cursor lowers shrinks and a day it no longer reports disappears. Earlier days
     /// keep their stored rows. An empty batch adopts nothing rather than erasing history.
-    private func adoptDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String) throws {
+    private func adoptDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String?) throws {
         if let earliest = records.map(\.day).min() {
             let clear = try prepare("DELETE FROM daily_usage WHERE device_id = ? AND source_id = ? AND day >= ?;")
             defer { sqlite3_finalize(clear) }
@@ -334,7 +339,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             try step(clear)
             try insertDaily(records, sourceID: sourceID, deviceID: deviceID)
         }
-        try record(epoch: epoch, sourceID: sourceID, deviceID: deviceID)
+        if let epoch { try record(epoch: epoch, sourceID: sourceID, deviceID: deviceID) }
     }
 
     private func insertDaily(_ records: [UsageRecord], sourceID: String, deviceID: String) throws {

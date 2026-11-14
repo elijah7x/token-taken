@@ -67,7 +67,7 @@ public struct DevinCollector: UsageCollector {
         let hasEvents = manager.fileExists(atPath: eventsDirectory.path)
         guard hasDatabase || hasEvents else { throw CollectorError.sourceUnavailable }
 
-        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone, sourceIDs: sourceIDs)
         // Fingerprint before reading: a write that lands during the scan must trigger a full scan next time.
         let eventsSnapshot = Self.eventsFingerprint(eventsDirectory)
         let fingerprints = Fingerprints(databaseURL: databaseURL, events: eventsSnapshot.fingerprint)
