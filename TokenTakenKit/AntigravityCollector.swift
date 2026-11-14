@@ -92,6 +92,7 @@ public struct AntigravityCollector: UsageCollector {
         defer { try? manager.removeItem(at: temporaryDirectory) }
 
         var aggregator = Aggregator(deviceID: deviceID, timeZone: timeZone, now: now)
+        var unreadableDatabases = 0
         for file in files {
             let conversation: Conversation?
             do {
@@ -99,6 +100,7 @@ public struct AntigravityCollector: UsageCollector {
             } catch {
                 // A database that cannot be read is a partial read; count it so hourly coverage stays unknown.
                 aggregator.skipUnreadableDatabase()
+                unreadableDatabases += 1
                 Self.logger.error("source=antigravity unreadable_database")
                 continue
             }
@@ -111,8 +113,9 @@ public struct AntigravityCollector: UsageCollector {
         }
 
         var batch = aggregator.batch()
-        // Save the fingerprint only when the files did not change during the read, so the next run re-collects.
-        if let stateFile, Self.fingerprints(files) == fingerprints {
+        // Save the fingerprint only when every database was read and none changed during the read; otherwise an
+        // unchanged fingerprint would stop the next run from retrying the databases this one could not read.
+        if let stateFile, unreadableDatabases == 0, Self.fingerprints(files) == fingerprints {
             let saved = SavedState(stamp: stamp, files: fingerprints)
             batch.stateCommits = [{ try stateFile.save(saved) }]
         }

@@ -591,11 +591,14 @@ final class AntigravityCollectorTests: XCTestCase {
         try makeDirectory(cliRoot(home))
         let corruptURL = cliRoot(home).appendingPathComponent("corrupt.db")
         try Data("not a sqlite database".utf8).write(to: corruptURL)
+        let stateDirectory = directory.appendingPathComponent("state", isDirectory: true)
 
-        let batch = try await collector(home: home).collect()
+        let batch = try await collector(home: home, stateDirectory: stateDirectory).collect()
 
         XCTAssertTrue(batch.daily.isEmpty)
         XCTAssertEqual(batch.skippedRecords, 1)
+        // No fingerprint is saved, so the next refresh retries the unreadable database.
+        XCTAssertTrue(batch.stateCommits.isEmpty)
     }
 
     func testStateFromBeforeFixIsIgnored() async throws {
