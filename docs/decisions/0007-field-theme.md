@@ -17,5 +17,5 @@ v1 planned to ship `liquid-glass` only and reserve `sketchbook` for later. Desig
 ## Consequences
 
 - Shared palette tokens and glass helpers branch on the active theme, so new UI must use `Palette` tokens and `themedGlass` / `themedGlassButton` rather than calling `glassEffect` directly.
-- The Dock icon follows the theme at runtime; the Finder icon remains the bundle icon.
+- The Dock and Finder icon follow the theme at runtime, using the bundled `FieldAppIcon.icns`.
 - Crop assignment is stable per source; when two items prefer the same crop in one view, the smaller takes the next free crop, so a crop can change between periods in that case.

@@ -202,42 +202,17 @@ enum FieldTreemap {
 
 // MARK: - App icon
 
-/// The 田 icon: four unequal plots split by a cross of paths, like the main window.
-struct FieldAppIcon: View {
-    let isDark: Bool
-
-    var body: some View {
-        Canvas { ctx, size in
-            let s = size.width / 100
-            let c = FieldColors.cached(isDark: isDark)
-            let bg = Path(roundedRect: CGRect(x: 8 * s, y: 8 * s, width: 84 * s, height: 84 * s), cornerRadius: 19 * s, style: .continuous)
-            ctx.fill(bg, with: .color((isDark ? FieldRGB("#23271F") : FieldRGB("#F3EEDF")).color))
-            ctx.stroke(bg, with: .color(c.rule.color), lineWidth: 1.2 * s)
-            let plots: [(CGRect, Int)] = [
-                (CGRect(x: 20, y: 20, width: 34, height: 32), 0), (CGRect(x: 58, y: 20, width: 22, height: 32), 1),
-                (CGRect(x: 20, y: 56, width: 34, height: 24), 4), (CGRect(x: 58, y: 56, width: 22, height: 24), 2)
-            ]
-            for (rect, crop) in plots {
-                let r = CGRect(x: rect.minX * s, y: rect.minY * s, width: rect.width * s, height: rect.height * s)
-                ctx.fill(Path(roundedRect: r, cornerRadius: 4 * s), with: .color(c.crops[crop].mix(c.paper, 0.85).color))
-                var rows = Path()
-                var y = r.minY + 4 * s
-                while y < r.maxY - 2 * s { rows.move(to: CGPoint(x: r.minX + 3 * s, y: y)); rows.addLine(to: CGPoint(x: r.maxX - 3 * s, y: y)); y += 5 * s }
-                ctx.stroke(rows, with: .color(c.crops[crop].mix(.white, 0.55).color), style: StrokeStyle(lineWidth: 1.4 * s, lineCap: .round))
-            }
-            var sprout = Path()
-            sprout.move(to: CGPoint(x: 37 * s, y: 46 * s)); sprout.addLine(to: CGPoint(x: 37 * s, y: 34 * s))
-            ctx.stroke(sprout, with: .color(c.stem.color), style: StrokeStyle(lineWidth: 2 * s, lineCap: .round))
-            ctx.fill(Path(ellipseIn: CGRect(x: 37 * s, y: 29 * s, width: 9 * s, height: 5 * s)), with: .color(c.stem.color))
-            ctx.fill(Path(ellipseIn: CGRect(x: 29 * s, y: 31 * s, width: 8 * s, height: 4.5 * s)), with: .color(c.stem.color))
-            ctx.fill(Path(ellipseIn: CGRect(x: 66 * s, y: 26 * s, width: 7 * s, height: 7 * s)), with: .color(c.sun.color))
-        }
-        .frame(width: 512, height: 512)
-    }
-}
-
+/// Themes with their own artwork ship it as a bundled icns, so every size, including the simplified 16 and 32 pt
+/// cuts, reaches the Dock and Finder. Liquid Glass and Cosmos use the bundle's AppIcon.
 @MainActor
-enum FieldAppIconSwitcher {
+enum ThemeAppIcon {
+    private static let fieldImage: NSImage? = Bundle.main.url(forResource: "FieldAppIcon", withExtension: "icns")
+        .flatMap(NSImage.init(contentsOf:))
+
+    static func image(for theme: AppTheme) -> NSImage? {
+        theme == .field ? fieldImage : nil
+    }
+
     /// Last icon written to the bundle: nil means not yet written this launch.
     private static var bundleIconKey: String?
 
@@ -245,18 +220,9 @@ enum FieldAppIconSwitcher {
     /// `applicationIconImage`, so the same image is also set as the bundle's custom icon and cleared for other themes.
     static func apply(_ theme: AppTheme) {
         guard let app = NSApp else { return }
-        switch theme {
-        case .liquidGlass, .cosmos:
-            app.applicationIconImage = nil
-            setBundleIcon(nil, key: "default")
-        case .field:
-            let isDark = app.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let renderer = ImageRenderer(content: FieldAppIcon(isDark: isDark))
-            renderer.scale = 2
-            guard let image = renderer.nsImage else { return }
-            app.applicationIconImage = image
-            setBundleIcon(image, key: isDark ? "field-dark" : "field-light")
-        }
+        let image = image(for: theme)
+        app.applicationIconImage = image
+        setBundleIcon(image, key: image == nil ? "default" : theme.rawValue)
     }
 
     /// A custom icon is Finder metadata on the bundle; it fails `codesign --strict` but not Gatekeeper or launch checks.

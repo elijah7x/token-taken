@@ -116,7 +116,7 @@ final class AppSettings {
     /// Cosmos forces dark without changing the preference that other themes use.
     func applyAppearance() {
         NSApp?.appearance = theme == .cosmos ? NSAppearance(named: .darkAqua) : appearance.nsAppearance
-        FieldAppIconSwitcher.apply(theme)
+        ThemeAppIcon.apply(theme)
     }
 
     var language: AppLanguage {
