@@ -353,13 +353,19 @@ public enum ICloudSync {
 
     private static func requestFolderDownloads(_ folder: URL) {
         let manager = FileManager.default
-        guard let entries = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: []) else { return }
+        let keys: [URLResourceKey] = [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
+        guard let entries = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys, options: []) else { return }
         for entry in entries {
             let name = entry.lastPathComponent
-            guard name.hasPrefix("."), name.hasSuffix(".icloud") else { continue }
-            let realName = String(name.dropFirst().dropLast(".icloud".count))
-            guard !realName.isEmpty else { continue }
-            try? manager.startDownloadingUbiquitousItem(at: folder.appendingPathComponent(realName))
+            if name.hasPrefix("."), name.hasSuffix(".icloud") {
+                let realName = String(name.dropFirst().dropLast(".icloud".count))
+                guard !realName.isEmpty else { continue }
+                try? manager.startDownloadingUbiquitousItem(at: folder.appendingPathComponent(realName))
+            } else if let values = try? entry.resourceValues(forKeys: Set(keys)),
+                      values.isUbiquitousItem == true, values.ubiquitousItemDownloadingStatus != .current {
+                // Evicted files on current macOS keep their name (dataless) instead of a `.icloud` placeholder.
+                try? manager.startDownloadingUbiquitousItem(at: entry)
+            }
         }
     }
 

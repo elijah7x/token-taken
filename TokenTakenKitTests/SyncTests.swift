@@ -42,6 +42,47 @@ final class SyncTests: XCTestCase {
         ICloudSync.readRemote(root: directory, excludingDeviceID: local.id, now: now)
     }
 
+    private func snapshot(_ device: Device, state: RemoteDeviceStatus.State, lastWrite: Date?, rows: Bool) -> RemoteDeviceSnapshot {
+        RemoteDeviceSnapshot(device: device, daily: rows ? [record(device: device)] : [], hourly: rows ? [hour(device: device)] : [],
+            status: RemoteDeviceStatus(deviceID: device.id, displayName: device.name, lastWrite: lastWrite, state: state))
+    }
+
+    func testCacheNeverKeepsAFirstLaunchPlaceholderForAPartialMac() {
+        let placeholder = snapshot(Device(id: other.id, name: other.id), state: .unavailable, lastWrite: nil, rows: false)
+        // Manifest read, payloads still downloading: no rows, so the placeholder must not be relabelled and kept.
+        let downloading = snapshot(other, state: .unavailable, lastWrite: now, rows: false)
+        let first = RemoteDeviceSnapshot.mergingCache([downloading], previous: [placeholder])
+        XCTAssertEqual(first[0].device.name, other.name)
+        let partial = snapshot(other, state: .partial, lastWrite: now, rows: true)
+        let second = RemoteDeviceSnapshot.mergingCache([partial], previous: first)
+        XCTAssertEqual(second[0].device.name, other.name)
+        XCTAssertEqual(second[0].daily.count, 1)
+        XCTAssertEqual(second[0].status.state, .partial)
+    }
+
+    func testCacheKeepsRowsWithTheirOwnPublicationTimeUntilANewerReadHasRows() {
+        let older = now.addingTimeInterval(-3_600)
+        let cached = snapshot(other, state: .ok, lastWrite: older, rows: true)
+        let empty = snapshot(other, state: .unavailable, lastWrite: now, rows: false)
+        let kept = RemoteDeviceSnapshot.mergingCache([empty], previous: [cached])
+        XCTAssertEqual(kept[0].daily.count, 1)
+        XCTAssertEqual(kept[0].status.state, .unavailable)
+        XCTAssertEqual(kept[0].status.lastWrite, older)
+        let fresh = RemoteDeviceSnapshot(device: other, daily: [record(device: other, input: 999)], hourly: [],
+            status: RemoteDeviceStatus(deviceID: other.id, displayName: other.name, lastWrite: now, state: .partial))
+        let replaced = RemoteDeviceSnapshot.mergingCache([fresh], previous: kept)
+        XCTAssertEqual(replaced[0].daily.first?.counts.input, 999)
+        XCTAssertEqual(replaced[0].status.lastWrite, now)
+    }
+
+    func testOkReadAlwaysReplacesTheCache() {
+        let cached = snapshot(other, state: .ok, lastWrite: now, rows: true)
+        let ok = snapshot(other, state: .ok, lastWrite: now.addingTimeInterval(-60), rows: false)
+        let merged = RemoteDeviceSnapshot.mergingCache([ok], previous: [cached])
+        XCTAssertTrue(merged[0].daily.isEmpty)
+        XCTAssertEqual(merged[0].status.state, .ok)
+    }
+
     func testRoundTripPreservesBothRecordKindsAndMetadata() throws {
         try publish(other)
         let remote = try XCTUnwrap(read().first)

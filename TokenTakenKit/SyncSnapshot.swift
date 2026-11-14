@@ -196,4 +196,24 @@ public struct RemoteDeviceSnapshot: Sendable {
         self.status = status
         self.accounts = accounts
     }
+
+    /// Merges a fresh read with the previous in-memory snapshots.
+    public static func mergingCache(_ snapshots: [RemoteDeviceSnapshot], previous: [RemoteDeviceSnapshot]) -> [RemoteDeviceSnapshot] {
+        let previous = Dictionary(previous.map { ($0.device.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return snapshots.map { snapshot in
+            // A stale snapshot still carries its newest data; fall back to the cache only when this read got none.
+            // A cached snapshot with no rows (a first-launch placeholder) is never kept, or a permanently
+            // partial Mac would stay unknown until relaunch.
+            guard snapshot.status.state == .unavailable || snapshot.status.state == .partial,
+                  let cached = previous[snapshot.device.id],
+                  !cached.daily.isEmpty || !cached.hourly.isEmpty,
+                  (cached.status.lastWrite ?? .distantPast) >= (snapshot.status.lastWrite ?? .distantPast) || snapshot.daily.isEmpty
+            else { return snapshot }
+            // Keep the last write of the publication the cached rows came from, so a later read of that
+            // publication is compared against the data's real origin.
+            return RemoteDeviceSnapshot(device: cached.device, daily: cached.daily, hourly: cached.hourly, status: RemoteDeviceStatus(
+                deviceID: cached.device.id, displayName: cached.device.name,
+                lastWrite: cached.status.lastWrite, state: snapshot.status.state), accounts: cached.accounts)
+        }
+    }
 }
