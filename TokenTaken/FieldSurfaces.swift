@@ -226,10 +226,12 @@ struct FieldShareCard: View {
     let aspect: ShareAspect
     let showCost: Bool
     let showComposition: Bool
+    var rank: Double? = nil
     var inscription = ""
     var signature = ""
 
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.locale) private var locale
 
     private var quote: String { inscription.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var signer: String { signature.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -247,30 +249,32 @@ struct FieldShareCard: View {
     }
 
     var body: some View {
-        let size = aspect.canvasSize, portrait = aspect == .portrait, margin: CGFloat = portrait ? 80 : 90
+        let size = aspect.canvasSize, portrait = aspect == .portrait, margin: CGFloat = 80
         ZStack(alignment: .topLeading) {
             FieldPalette.paper
             if portrait {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    headline(numberSize: 168).padding(.top, 70)
-                    facts(vertical: false).padding(.top, 40)
-                    if !quote.isEmpty { inscriptionLine.padding(.top, 36) }
-                    Spacer(minLength: 30)
+                    headline(numberSize: 168, portrait: true).padding(.top, 48)
+                    facts(vertical: false).padding(.top, 30)
+                    if let rank { rankLine(rank).padding(.top, 24) }
+                    if !quote.isEmpty { inscriptionLine.padding(.top, 24) }
+                    Spacer(minLength: 16)
                     field.frame(width: size.width - margin * 2)
-                    if showComposition { composition.padding(.top, 34) }
-                    Spacer(minLength: 30)
+                    if showComposition { composition.padding(.top, 24) }
+                    Spacer(minLength: 16)
                     footer
                 }
                 .padding(margin)
             } else {
                 VStack(alignment: .leading, spacing: 0) {
                     header
-                    HStack(alignment: .top, spacing: 56) {
+                    HStack(alignment: .top, spacing: 52) {
                         VStack(alignment: .leading, spacing: 0) {
-                            headline(numberSize: 150)
-                            facts(vertical: true).padding(.top, 40)
-                            if !quote.isEmpty { inscriptionLine.padding(.top, 36) }
+                            headline(numberSize: 150, portrait: false)
+                            facts(vertical: true).padding(.top, 28)
+                            if let rank { rankLine(rank).padding(.top, 22) }
+                            if !quote.isEmpty { inscriptionLine.padding(.top, 24) }
                         }
                         .frame(width: 560, alignment: .leading)
                         VStack(alignment: .leading, spacing: 26) {
@@ -278,8 +282,8 @@ struct FieldShareCard: View {
                             if showComposition { composition }
                         }
                     }
-                    .padding(.top, 60)
-                    Spacer(minLength: 20)
+                    .padding(.top, 40)
+                    Spacer(minLength: 16)
                     footer
                 }
                 .padding(margin)
@@ -307,44 +311,85 @@ struct FieldShareCard: View {
     }
 
     @ViewBuilder
-    private func headline(numberSize: CGFloat) -> some View {
+    private func headline(numberSize: CGFloat, portrait: Bool) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Group {
-                switch data.kind {
-                case .overall: Text("All sources")
-                case .source(_, let name), .model(_, let name): Text(verbatim: name)
-                }
-            }
-            .font(FieldFont.serif(54))
-            .foregroundStyle(FieldPalette.ink)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            Text(verbatim: TokenFormat.short(data.counts.total))
-                .font(FieldFont.serif(numberSize))
+            data.headlineText(locale: locale)
+                .font(FieldFont.serif(portrait ? 50 : 46))
                 .foregroundStyle(FieldPalette.ink)
-                .minimumScaleFactor(0.5)
-                .lineLimit(1)
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(verbatim: "Token").font(FieldFont.serif(32)).foregroundStyle(FieldPalette.muted)
-                if showCost {
-                    Text(verbatim: "· " + TokenFormat.usd(data.estimatedUSD)).font(FieldFont.serif(32)).foregroundStyle(FieldPalette.accent)
+                .lineLimit(portrait ? 1 : 2)
+                .minimumScaleFactor(0.7)
+                .truncationMode(.middle)
+            HStack(alignment: .firstTextBaseline, spacing: 18) {
+                Text(verbatim: TokenFormat.short(data.counts.total))
+                    .font(FieldFont.serif(numberSize))
+                    .foregroundStyle(FieldPalette.ink)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                Text(verbatim: "Token")
+                    .font(FieldFont.serif(portrait ? 38 : 34))
+                    .foregroundStyle(FieldPalette.muted)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            if showCost {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(verbatim: TokenFormat.usd(data.estimatedUSD)).font(FieldFont.serif(32)).foregroundStyle(FieldPalette.accent)
                     Text("estimate, not a bill").font(FieldFont.serif(28)).foregroundStyle(FieldPalette.accent)
                 }
             }
         }
     }
 
+    private func factItem(_ fact: ShareCardData.SupportingFact) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(fact.label)
+                .font(FieldFont.serif(26))
+                .foregroundStyle(FieldPalette.muted)
+                .lineLimit(1)
+            Text(verbatim: fact.value)
+                .font(FieldFont.serif(34))
+                .foregroundStyle(FieldPalette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .truncationMode(.middle)
+        }
+    }
+
     @ViewBuilder
     private func facts(vertical: Bool) -> some View {
-        let layout = vertical ? AnyLayout(VStackLayout(alignment: .leading, spacing: 26)) : AnyLayout(HStackLayout(alignment: .top, spacing: 48))
-        layout {
-            ForEach(data.supportingFacts) { fact in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(fact.label).font(FieldFont.serif(26)).foregroundStyle(FieldPalette.muted)
-                    Text(verbatim: fact.value).font(FieldFont.serif(34)).foregroundStyle(FieldPalette.ink).lineLimit(1)
+        let items = data.supportingFacts
+        if vertical {
+            if items.count == 3 {
+                VStack(alignment: .leading, spacing: 22) {
+                    HStack(alignment: .top, spacing: 48) {
+                        factItem(items[0])
+                        factItem(items[1])
+                    }
+                    factItem(items[2])
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 22) {
+                    ForEach(items) { fact in
+                        factItem(fact)
+                    }
+                }
+            }
+        } else {
+            HStack(alignment: .top, spacing: 48) {
+                ForEach(items) { fact in
+                    factItem(fact)
+                        .layoutPriority(fact.isMonospacedValue ? 0 : 1)
                 }
             }
         }
+    }
+
+    private func rankLine(_ rank: Double) -> some View {
+        Text("Last 30 days · about top \(UsageRank.formatted(rank))")
+            .font(FieldFont.serif(28))
+            .foregroundStyle(FieldPalette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
     }
 
     private var field: some View {
@@ -394,19 +439,24 @@ struct FieldShareCard: View {
     private var footer: some View {
         VStack(alignment: .leading, spacing: 14) {
             Rectangle().fill(FieldPalette.rule).frame(height: 2)
-            HStack(alignment: .firstTextBaseline, spacing: 24) {
-                Text("Plot area and plant count follow tokens · read from local logs only")
-                    .font(FieldFont.serif(24))
-                    .foregroundStyle(FieldPalette.muted)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                Spacer(minLength: 0)
-                if !signer.isEmpty {
-                    Text(verbatim: "— " + signer)
-                        .font(FieldFont.serif(28))
-                        .foregroundStyle(FieldPalette.ink)
-                        .lineLimit(1)
-                        .layoutPriority(1)
+            if rank != nil || !signer.isEmpty {
+                HStack(alignment: .firstTextBaseline, spacing: 24) {
+                    if rank != nil {
+                        Text("Rank is an estimate derived from public usage sources.")
+                            .font(FieldFont.serif(24))
+                            .foregroundStyle(FieldPalette.muted)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    Spacer(minLength: 0)
+                    if !signer.isEmpty {
+                        Text(verbatim: "— " + signer)
+                            .font(FieldFont.serif(28))
+                            .foregroundStyle(FieldPalette.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .layoutPriority(1)
+                    }
                 }
             }
         }

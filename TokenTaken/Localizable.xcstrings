@@ -277,7 +277,39 @@
         }
       }
     },
-    "%lld installed sources" : {
+    "%lld harnesses stale" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld harnesses stale"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个工具已过期"
+          }
+        }
+      }
+    },
+    "%lld harnesses unavailable" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld harnesses unavailable"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个工具不可用"
+          }
+        }
+      }
+    },
+    "%lld installed harnesses" : {
       "localizations" : {
         "en" : {
           "variations" : {
@@ -285,13 +317,13 @@
               "one" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld installed source"
+                  "value" : "%lld installed harness"
                 }
               },
               "other" : {
                 "stringUnit" : {
                   "state" : "translated",
-                  "value" : "%lld installed sources"
+                  "value" : "%lld installed harnesses"
                 }
               }
             }
@@ -300,7 +332,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%lld 个已安装来源"
+            "value" : "%lld 个已安装工具"
           }
         }
       }
@@ -317,38 +349,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其余 %lld 个 · %@ Token"
-          }
-        }
-      }
-    },
-    "%lld sources stale" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld sources stale"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 个来源已过期"
-          }
-        }
-      }
-    },
-    "%lld sources unavailable" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld sources unavailable"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld 个来源不可用"
           }
         }
       }
@@ -401,34 +401,34 @@
         }
       }
     },
-    "1 source stale" : {
+    "1 harness stale" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "1 source stale"
+            "value" : "1 harness stale"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "1 个来源已过期"
+            "value" : "1 个工具已过期"
           }
         }
       }
     },
-    "1 source unavailable" : {
+    "1 harness unavailable" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "1 source unavailable"
+            "value" : "1 harness unavailable"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "1 个来源不可用"
+            "value" : "1 个工具不可用"
           }
         }
       }
@@ -501,18 +501,18 @@
         }
       }
     },
-    "Account sources" : {
+    "Account harnesses" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Account sources"
+            "value" : "Account harnesses"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "账号来源"
+            "value" : "账号工具"
           }
         }
       }
@@ -553,6 +553,38 @@
         }
       }
     },
+    "All harnesses" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All harnesses"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部工具"
+          }
+        }
+      }
+    },
+    "All models" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All models"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部模型"
+          }
+        }
+      }
+    },
     "All of this month %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -589,16 +621,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "今天全部 %@"
-          }
-        }
-      }
-    },
-    "All sources" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部来源"
           }
         }
       }
@@ -987,6 +1009,22 @@
         }
       }
     },
+    "Confluence of harnesses into categories" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confluence of harnesses into categories"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具汇入类别"
+          }
+        }
+      }
+    },
     "Confluence of models into categories" : {
       "localizations" : {
         "en" : {
@@ -999,16 +1037,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型汇入类别"
-          }
-        }
-      }
-    },
-    "Confluence of sources into categories" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源汇入类别"
           }
         }
       }
@@ -1392,6 +1420,70 @@
         }
       }
     },
+    "Harness scope" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Harness scope"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具范围"
+          }
+        }
+      }
+    },
+    "Harnesses" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Harnesses"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具"
+          }
+        }
+      }
+    },
+    "Harnesses are identified automatically from local logs; no manual setup is needed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Harnesses are identified automatically from local logs; no manual setup is needed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据本机日志自动识别，无需手动启用。"
+          }
+        }
+      }
+    },
+    "Harnesses · %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Harnesses · %lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工具 · %lld"
+          }
+        }
+      }
+    },
     "Health · Last collected" : {
       "localizations" : {
         "en" : {
@@ -1442,20 +1534,16 @@
     },
     "Inscription" : {
       "localizations" : {
-        "zh-Hans" : {
+        "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "题词"
+            "value" : "Inscription"
           }
-        }
-      }
-    },
-    "Inscription and signature" : {
-      "localizations" : {
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "题词与署名"
+            "value" : "提词"
           }
         }
       }
@@ -1490,18 +1578,18 @@
         }
       }
     },
-    "Installed sources" : {
+    "Installed harnesses" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Installed sources"
+            "value" : "Installed harnesses"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已安装来源"
+            "value" : "已安装工具"
           }
         }
       }
@@ -1570,6 +1658,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语言"
+          }
+        }
+      }
+    },
+    "Last 30 days · about top %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last 30 days · about top %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "近 30 天 · 约前 %@"
           }
         }
       }
@@ -1818,38 +1922,12 @@
         }
       }
     },
-    "Model" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Model"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型"
-          }
-        }
-      }
-    },
     "Model scope" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "模型范围"
-          }
-        }
-      }
-    },
-    "Model · %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "模型 · %@"
           }
         }
       }
@@ -1906,18 +1984,18 @@
         }
       }
     },
-    "No installed sources found" : {
+    "No installed harnesses found" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No installed sources found"
+            "value" : "No installed harnesses found"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未发现已安装来源"
+            "value" : "未发现已安装工具"
           }
         }
       }
@@ -2059,7 +2137,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未安装来源（%lld）"
+            "value" : "未安装工具（%lld）"
           }
         }
       }
@@ -2112,56 +2190,6 @@
         }
       }
     },
-    "Of all time" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "占全部"
-          }
-        }
-      }
-    },
-    "Of this month" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "占本月"
-          }
-        }
-      }
-    },
-    "Of this week" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "占本周"
-          }
-        }
-      }
-    },
-    "Of this year" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "占今年"
-          }
-        }
-      }
-    },
-    "Of today" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "占今天"
-          }
-        }
-      }
-    },
     "Off" : {
       "localizations" : {
         "en" : {
@@ -2174,16 +2202,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已关闭"
-          }
-        }
-      }
-    },
-    "On the card only, never saved" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "只写在卡片上，不保存"
           }
         }
       }
@@ -2304,6 +2322,34 @@
         }
       }
     },
+    "Other %lld harnesses (%@) total %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Other %1$lld harness (%2$@) totals %3$@ (%4$@)"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "Other %1$lld harnesses (%2$@) total %3$@ (%4$@)"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其余 %1$lld 个工具（%2$@）合计 %3$@ (%4$@)"
+          }
+        }
+      }
+    },
     "Other %lld models (%@) total %@ (%@)" : {
       "localizations" : {
         "en" : {
@@ -2328,34 +2374,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "其余 %1$lld 个模型（%2$@）合计 %3$@ (%4$@)"
-          }
-        }
-      }
-    },
-    "Other %lld sources (%@) total %@ (%@)" : {
-      "localizations" : {
-        "en" : {
-          "variations" : {
-            "plural" : {
-              "one" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Other %1$lld source (%2$@) totals %3$@ (%4$@)"
-                }
-              },
-              "other" : {
-                "stringUnit" : {
-                  "state" : "translated",
-                  "value" : "Other %1$lld sources (%2$@) total %3$@ (%4$@)"
-                }
-              }
-            }
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "其余 %1$lld 个来源（%2$@）合计 %3$@ (%4$@)"
           }
         }
       }
@@ -2434,38 +2452,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "部分数据"
-          }
-        }
-      }
-    },
-    "Period tokens" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Period tokens"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "本期 Token"
-          }
-        }
-      }
-    },
-    "Plot area and plant count follow tokens · read from local logs only" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Plot area and plant count follow tokens · read from local logs only"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "面积与株数按 Token 计 · 只读本机日志"
           }
         }
       }
@@ -2550,6 +2536,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "退出"
+          }
+        }
+      }
+    },
+    "Rank is an estimate derived from public usage sources." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rank is an estimate derived from public usage sources."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "排名为估算，依据公开用量数据推算"
           }
         }
       }
@@ -2982,6 +2984,22 @@
         }
       }
     },
+    "Show rank" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show rank"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示排名"
+          }
+        }
+      }
+    },
     "Show top 4" : {
       "localizations" : {
         "en" : {
@@ -3068,100 +3086,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "部分文字需重新启动后切换。"
-          }
-        }
-      }
-    },
-    "Source" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Source"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源"
-          }
-        }
-      }
-    },
-    "Source scope" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源范围"
-          }
-        }
-      }
-    },
-    "Source · %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源 · %@"
-          }
-        }
-      }
-    },
-    "Sources" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sources"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源"
-          }
-        }
-      }
-    },
-    "Sources are identified automatically from local logs; no manual setup is needed." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sources are identified automatically from local logs; no manual setup is needed."
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "根据本机日志自动识别，无需手动启用。"
-          }
-        }
-      }
-    },
-    "Sources · %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sources · %lld"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源 · %lld"
-          }
-        }
-      }
-    },
-    "Sources · models" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来源 · 模型"
           }
         }
       }
@@ -3456,16 +3380,6 @@
         }
       }
     },
-    "This period overall" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "当前周期总览"
-          }
-        }
-      }
-    },
     "This week" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3568,6 +3482,22 @@
         }
       }
     },
+    "Top 3 harnesses" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top 3 harnesses"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主要工具（前 3）"
+          }
+        }
+      }
+    },
     "Top 3 models" : {
       "localizations" : {
         "en" : {
@@ -3584,18 +3514,34 @@
         }
       }
     },
-    "Top 3 sources" : {
+    "Top harness" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Top 3 sources"
+            "value" : "Top harness"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "主要来源（前 3）"
+            "value" : "最常用工具"
+          }
+        }
+      }
+    },
+    "Top harnesses" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top harnesses"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活跃工具"
           }
         }
       }
@@ -3606,32 +3552,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最常用模型"
-          }
-        }
-      }
-    },
-    "Top source" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "最常用来源"
-          }
-        }
-      }
-    },
-    "Top sources" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Top sources"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "活跃来源"
           }
         }
       }
@@ -3902,6 +3822,86 @@
         }
       }
     },
+    "Used in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used in %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@用了"
+          }
+        }
+      }
+    },
+    "Used in %@ so far" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used in %@ so far"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 年至今用了"
+          }
+        }
+      }
+    },
+    "Used in total" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used in total"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "累计用了"
+          }
+        }
+      }
+    },
+    "Used this week" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used this week"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周用了"
+          }
+        }
+      }
+    },
+    "Used today" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used today"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天用了"
+          }
+        }
+      }
+    },
     "Version" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3928,6 +3928,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "年"
+          }
+        }
+      }
+    },
+    "Your name" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your name"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的名字"
           }
         }
       }
@@ -4008,6 +4024,134 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "iCloud 同步"
+          }
+        }
+      }
+    },
+    "share.inscription.field.1" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Watered the field with prompts; let's see what sprouted."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用提示词浇了遍地，看看长出了什么。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.2" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Every token here was grown from scratch, no shortcuts."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这片 Token 田是一行行亲手种出来的。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.3" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Good harvest this season. Still plenty of soil left."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这季收成不错，地里还有不少空位。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.4" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The agent plowed the rows; I mostly brought the seeds."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent 负责翻土，我主要负责撒种子。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.5" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turned late-night bugs into bumper crops."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "把深夜改过的 Bug，都攒成了这季收成。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.6" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache warmed the soil; output did the blooming."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存把地温热了，输出负责开花结果。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.7" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sowed half-baked ideas, reaped a tidy little farm."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撒下去的是半成品点子，收回来的是一整片庄稼。"
+          }
+        }
+      }
+    },
+    "share.inscription.field.8" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No rain check needed—tokens grow fine indoors."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不用看天吃饭，屏幕前也能长出一片好庄稼。"
           }
         }
       }

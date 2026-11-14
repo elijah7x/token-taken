@@ -33,6 +33,7 @@ Status: Accepted (2026-11-12)
 - A report whose `generatedAt` is more than 24 hours old is stale and must be labelled as such; its data is still shown. No report at all is an empty state that tells the user to enable "Sync to iPhone" on the Mac and sign in with the same Apple ID on both devices, not zero usage.
 - Ignore unknown fields and unknown enum values. Missing optional fields degrade to an unknown or absent state, never to a zero total.
 - The reader displays coverage as published, showing the generating Mac and each covered Mac with its status. The generating Mac is always the first `coverage.devices` entry, with `lastWriteUTC` equal to `generatedAt`; readers identify it by that position, not by name. It must not infer that a device with no entry has no usage, and must not recompute totals from `days` or `months`.
+- The reader computes any displayed usage rank from `totals.last30Days.total` (all harnesses combined) using `UsageRank` as defined in [statistics.md](statistics.md). UI labels present `sources` as `Harness` / `Harnesses` (`工具` in Simplified Chinese) while the report schema retains `sources`.
 
 ## Schema
 

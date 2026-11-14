@@ -17,12 +17,12 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Text(verbatim: RankTable.methodology(locale: locale))
+                    Text(verbatim: Ranking.methodology(locale: locale))
                         .font(.footnote)
                         .foregroundStyle(Palette.ink2)
                         .fixedSize(horizontal: false, vertical: true)
-                    LabeledContent("Rank table version") {
-                        Text(verbatim: RankTable.version)
+                    LabeledContent("Rank curve version") {
+                        Text(verbatim: UsageRank.version)
                     }
                 } header: {
                     Text("Ranking")

@@ -17,6 +17,7 @@ Status: Implemented v1 (2026-11-11)
 
 ## Source identity and deduplication
 
+- UI surfaces label an AI coding tool as `Harness` / `Harnesses` (`工具` in Simplified Chinese) where the data model, CLI, and report schemas keep `source` / `sourceID` / `sources`.
 - Source IDs are stable lowercase kebab-case. Factory Droid is `factory`; its tokscale client selector is `droid`. Devin is `devin` (native Swift: the CLI database and Desktop ACP events), Antigravity is `antigravity` (native Swift: the CLI and extension conversation databases), MiniMax Code is `mcode`, and DeepSeek CLI is `deepseek-cli`.
 - Every tokscale client of one source is requested in the same engine run, in both graph and hourly output, and a change in any of them re-collects them all. The native Antigravity collector deduplicates provider response IDs once per collection across both of its databases.
 - A source is available when the root of any of its clients exists. Change detection reads file metadata (path, size, modification time) only, including a single SQLite database with its `-wal`/`-shm` siblings. The native Devin collector opens that database read-only and streams its rows, because it can exceed 1 GB.
@@ -107,6 +108,15 @@ An account-level source's whole-history export is authoritative, not prunable, s
 - History epochs are a Token Taken constant, not engine state: every source starts at revision `1`, and tokscale-collected sources append the pinned engine version (`1+tokscale-4.21.0`). A release raises a source's revision only when it intentionally lowers or moves already-counted usage, such as a deduplication or date-attribution fix.
 - The last applied epoch is stored per `(deviceID, sourceID)` in `history_epochs` (schema version 3). A missing row is the first run after the upgrade: record the current epoch and use the normal merge, so existing rows are protected immediately and are never rebaselined unseen.
 - Daily merge and hourly replacement happen in one transaction. Reading, sync publication and aggregation need no change because `daily_usage` remains the resolved view.
+
+## Estimated usage rank
+
+- `UsageRank` (`Shared/UsageRank.swift`, curve version `rank-curve-2026-11`) estimates the top percentile of users from the combined **last-30-day token total across all harnesses**. Non-positive totals (`<= 0`) produce `nil` (no rank displayed).
+- Interpolation is piecewise linear in `log10(tokens)` vs `log10(topPercent)` between sorted anchor points, making the curve strictly monotonic (more tokens yield a smaller top percentage) within the anchor range and clamped to `0.01...99` outside it (`<= 100k` returns `99`, `>= 100B` returns `0.01`):
+  - Anchors derived from public usage sources (`>= 350M`): `100B -> 0.01%`, `50B -> 0.05%`, `25B -> 0.1%`, `13B -> 0.5%`, `8B -> 1%`, `5.6B -> 2%`, `2.2B -> 5%`, `900M -> 10%`, `350M -> 50%`.
+  - Lower anchors (`< 350M`, **extrapolated, not measured**): `100M -> 70%`, `20M -> 85%`, `5M -> 93%`, `1M -> 97%`, `100k -> 99%`.
+- `UsageRank.formatted(_:)` emits locale-independent ASCII digits and `.` (`en_US_POSIX`), using one decimal place for values `>= 1` without dropping `.0` (e.g. `"57.3%"`, `"1.0%"`), two decimal places for values `< 1` (e.g. `"0.42%"`), and never below `"0.01%"`.
+- Rank UI MUST disclose that the rank is an estimate derived from public usage sources.
 
 ## Open questions
 

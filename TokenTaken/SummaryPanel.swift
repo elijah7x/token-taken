@@ -1027,7 +1027,7 @@ struct BreakdownCard: View {
         case .models:
             String(localized: "Other \(remaining.count) models (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
         case .sources:
-            String(localized: "Other \(remaining.count) sources (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
+            String(localized: "Other \(remaining.count) harnesses (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
         }
     }
 }

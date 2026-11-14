@@ -26,7 +26,7 @@ container, so use **View sample data** there, or the bundled demo report.
 project.yml                              XcodeGen spec
 TokenTakenMobile/
   App/        TokenTakenMobileApp.swift  @main, AppModel (@Observable state, demo toggle)
-  Model/      Ranking.swift              rank table (thresholds, wording, version)
+  Model/      Ranking.swift              rank wording (curve lives in Shared/UsageRank.swift)
               Comparisons.swift          comparisons.json loader and picker
               TokenFormat.swift          K/M/B and 万/亿 formatting (ported from macOS)
               ReportText.swift           month/day/relative-date/percent text
@@ -72,9 +72,9 @@ implemented here:
   `NSUbiquityIdentityDidChange` clears the cache and reloads, because the cached copy may
   belong to a previous iCloud account.
 
-Ranking lives in `Model/Ranking.swift` only: table version `rank-table-2026-11`, first match
-wins on `totals.last30Days.total`, and every line is phrased as an estimate. Below the lowest
-threshold there is no rank line at all.
+Ranking uses the shared `UsageRank` curve in `Shared/UsageRank.swift` (version
+`rank-curve-2026-11`) on `totals.last30Days.total`; `Model/Ranking.swift` holds only the wording,
+and every line is phrased as an estimate. With no tokens in the last 30 days there is no rank line.
 
 ## Share card
 

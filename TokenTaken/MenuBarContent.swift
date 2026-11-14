@@ -161,7 +161,7 @@ struct MenuBarContent: View {
 
     private var topSourcesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Top sources")
+            Text("Top harnesses")
                 .font(.system(size: settings.theme == .cosmos ? 11 : 12, weight: .semibold))
                 .foregroundStyle(settings.theme == .cosmos ? CosmosPalette.ink3 : Palette.ink2)
                 .accessibilityAddTraits(.isHeader)

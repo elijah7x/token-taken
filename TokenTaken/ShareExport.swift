@@ -71,18 +71,24 @@ struct ShareExportSheet: View {
     @State private var aspect: ShareAspect = .portrait
     @State private var showCost = false
     @State private var showComposition = true
+    @State private var showRank = true
+    @State private var showInscription = true
+    @State private var showSignature = true
     // Field share cards only; kept for this sheet, never saved or synced.
-    @State private var inscription = ""
+    @State private var inscription: String?
     @State private var signature = ""
     @State private var scopedSummary: UsageSummary?
     @State private var loadedScopeKey: ScopeQueryKey?
+    @State private var rankTopPercent: Double?
     @State private var cosmosSnapshot: NSImage?
     @State private var renderedCosmosSnapshotKey: CosmosShareSnapshotKey?
     @State private var didCopy = false
     @State private var copyResetTask: Task<Void, Never>?
     @State private var shareAnchor = SharePickerAnchor()
 
+    @Namespace private var periodNamespace
     @Namespace private var aspectNamespace
+    @FocusState private var focusedPeriod: Period?
     @FocusState private var focusedAspect: ShareAspect?
 
     private struct ScopeQueryKey: Equatable {
@@ -169,6 +175,21 @@ struct ShareExportSheet: View {
         return cosmosSnapshot
     }
 
+    private var activeInscription: String {
+        guard settings.theme == .field, showInscription else { return "" }
+        return inscription ?? ""
+    }
+
+    private var activeSignature: String {
+        guard settings.theme == .field, showSignature else { return "" }
+        return signature
+    }
+
+    private var displayedRank: Double? {
+        guard showRank, loadedScopeKey == scopeQueryKey else { return nil }
+        return rankTopPercent
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             previewPane
@@ -181,11 +202,11 @@ struct ShareExportSheet: View {
                 .padding(.vertical, 20)
 
             controlColumn
-                .frame(width: isCosmos ? 292 : 268)
+                .frame(width: isCosmos ? 324 : 308)
                 .padding(24)
                 .background(isCosmos ? CosmosPalette.background : Color.clear)
         }
-        .frame(width: isCosmos ? 860 : 720, height: isCosmos ? 620 : 560)
+        .frame(width: isCosmos ? 892 : 760, height: isCosmos ? 640 : 620)
         .background {
             ShareSheetBackdrop(
                 theme: settings.theme,
@@ -193,9 +214,15 @@ struct ShareExportSheet: View {
             )
         }
         .environment(\.colorScheme, isCosmos ? .dark : scheme)
+        .onAppear {
+            if inscription == nil {
+                inscription = ShareInscriptions.random(for: settings.theme, locale: locale)
+            }
+        }
         .onChange(of: scopeQueryKey, initial: true) { _, key in
             scopedSummary = resolveScopedSummary(for: key.scope)
             loadedScopeKey = key
+            rankTopPercent = resolveLast30DaysRank()
         }
         .onChange(of: currentCosmosSnapshotKey, initial: true) { _, key in
             renderCosmosSnapshot(for: key)
@@ -242,8 +269,9 @@ struct ShareExportSheet: View {
                 showComposition: showComposition,
                 dimension: dimension,
                 cosmosSnapshot: currentCosmosSnapshot,
-                inscription: inscription,
-                signature: signature
+                rank: displayedRank,
+                inscription: activeInscription,
+                signature: activeSignature
             )
             .frame(width: canvasSize.width, height: canvasSize.height)
             .scaleEffect(scale, anchor: .center)
@@ -264,19 +292,14 @@ struct ShareExportSheet: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Share card preview"))
-        .accessibilityValue(Text("\(cardData.scopeDisplayTitle), \(TokenFormat.spoken(cardData.counts.total)) tokens"))
+        .accessibilityValue(Text("\(cardData.headlineAccessibilityText(locale: locale)), \(TokenFormat.spoken(cardData.counts.total)) tokens"))
     }
 
     // MARK: - Right control column
 
     private var controlColumn: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .center) {
-                Text("Share")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(Palette.ink1)
-                    .accessibilityAddTraits(.isHeader)
-
                 Spacer()
 
                 Button {
@@ -321,21 +344,13 @@ struct ShareExportSheet: View {
             VStack(spacing: 8) {
                 shareToggleRow(title: "Show cost estimate", isOn: $showCost)
                 shareToggleRow(title: "Show composition", isOn: $showComposition)
+                shareToggleRow(title: "Show rank", isOn: $showRank)
                 if settings.theme == .field {
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .firstTextBaseline) {
-                            Text("Inscription and signature")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Palette.ink2)
-                            Spacer(minLength: 6)
-                            Text("On the card only, never saved")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Palette.ink3)
-                        }
-                        fieldTextRow("Inscription", text: $inscription, limit: 40)
-                        fieldTextRow("Signature", text: $signature, limit: 24)
+                    shareToggleRow(title: "Inscription", isOn: $showInscription)
+                    shareToggleRow(title: "Signature", isOn: $showSignature)
+                    if showSignature {
+                        fieldTextRow("Your name", text: $signature, limit: 24)
                     }
-                    .padding(.top, 6)
                 }
             }
 
@@ -408,50 +423,21 @@ struct ShareExportSheet: View {
         .frame(height: 30)
     }
 
-    // MARK: - Scope picker (Overall + Sources menu + Models menu)
+    // MARK: - Scope picker (Period + Harness menu + Model menu)
+
+    private func periodTitle(_ period: Period) -> LocalizedStringKey {
+        switch period {
+        case .day: "Today"
+        case .week: "This week"
+        case .month: "This month"
+        case .year: "This year"
+        case .all: "All time"
+        }
+    }
 
     private var scopePicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
-                scope = .overall
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: isCosmos
-                        ? (effectiveScope == .overall ? "checkmark.square.fill" : "square")
-                        : (effectiveScope == .overall ? "checkmark.circle.fill" : "circle"))
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(effectiveScope == .overall
-                            ? (isCosmos ? CosmosPalette.accent : Palette.roleAccent)
-                            : tertiaryInk)
-                        .accessibilityHidden(true)
-
-                    Text("This period overall")
-                        .font(.system(size: 12.5, weight: effectiveScope == .overall ? .semibold : .medium))
-                        .foregroundStyle(primaryInk)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 6)
-
-                    Text(TokenFormat.short(summary.total.total))
-                        .font(.system(size: 11.5, design: isCosmos ? .monospaced : .default))
-                        .foregroundStyle(secondaryInk)
-                        .monospacedDigit()
-                }
-                .padding(.horizontal, 11)
-                .frame(height: 30)
-                .frame(maxWidth: .infinity)
-                .modifier(SharePillSurface(
-                    isSelected: effectiveScope == .overall,
-                    reduceTransparency: reduceTransparency,
-                    isCosmos: isCosmos
-                ))
-                .contentShape(isCosmos
-                    ? AnyShape(Rectangle())
-                    : AnyShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("This period overall"))
-            .accessibilityAddTraits(effectiveScope == .overall ? .isSelected : [])
+            periodSegmentedControl
 
             HStack(spacing: 8) {
                 sourceScopeMenu
@@ -460,6 +446,63 @@ struct ShareExportSheet: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Scope"))
+    }
+
+    private var periodSegmentedControl: some View {
+        segmentedContainer {
+            HStack(spacing: isCosmos ? 0 : 2) {
+                ForEach(Period.allCases) { option in
+                    periodSegment(option)
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("Usage period"))
+    }
+
+    private func periodSegment(_ option: Period) -> some View {
+        let isSelected = model.period == option
+        return Button {
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
+                model.period = option
+            }
+        } label: {
+            Text(periodTitle(option))
+                .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                .foregroundStyle(isSelected ? primaryInk : secondaryInk)
+                .lineLimit(1)
+                .minimumScaleFactor(0.68)
+                .padding(.horizontal, 3)
+                .frame(maxWidth: .infinity, minHeight: 28)
+                .contentShape(isCosmos ? AnyShape(Rectangle()) : AnyShape(Capsule()))
+                .modifier(ShareSegmentSurface(
+                    isSelected: isSelected,
+                    reduceTransparency: reduceTransparency,
+                    namespace: periodNamespace,
+                    effectID: "sharePeriod",
+                    isCosmos: isCosmos
+                ))
+        }
+        .buttonStyle(.plain)
+        .focused($focusedPeriod, equals: option)
+        .onKeyPress(.leftArrow) {
+            movePeriod(by: -1)
+            return .handled
+        }
+        .onKeyPress(.rightArrow) {
+            movePeriod(by: 1)
+            return .handled
+        }
+        .accessibilityLabel(Text(periodTitle(option)))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func movePeriod(by offset: Int) {
+        let options = Period.allCases
+        guard let index = options.firstIndex(of: model.period) else { return }
+        let nextIndex = min(max(index + offset, 0), options.count - 1)
+        model.period = options[nextIndex]
+        focusedPeriod = options[nextIndex]
     }
 
     private var selectedSourceBreakdown: Breakdown? {
@@ -475,6 +518,18 @@ struct ShareExportSheet: View {
     private var sourceScopeMenu: some View {
         let isSelected = selectedSourceBreakdown != nil
         return Menu {
+            Button {
+                scope = .overall
+            } label: {
+                if effectiveScope == .overall {
+                    Label("All harnesses", systemImage: "checkmark")
+                } else {
+                    Text("All harnesses")
+                }
+            }
+            if !summary.bySource.isEmpty {
+                Divider()
+            }
             ForEach(summary.bySource) { source in
                 Button {
                     scope = .source(source.id)
@@ -497,7 +552,7 @@ struct ShareExportSheet: View {
                         .foregroundStyle(primaryInk)
                         .lineLimit(1)
                 } else {
-                    Text("Source")
+                    Text("All harnesses")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(secondaryInk)
                         .lineLimit(1)
@@ -526,13 +581,25 @@ struct ShareExportSheet: View {
         .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .disabled(summary.bySource.isEmpty)
         .opacity(summary.bySource.isEmpty ? 0.45 : 1)
-        .accessibilityLabel(Text("Source scope"))
-        .accessibilityValue(Text(verbatim: selectedSourceBreakdown?.name ?? ""))
+        .accessibilityLabel(Text("Harness scope"))
+        .accessibilityValue(selectedSourceBreakdown.map { Text(verbatim: $0.name) } ?? Text("All harnesses"))
     }
 
     private var modelScopeMenu: some View {
         let isSelected = selectedModelBreakdown != nil
         return Menu {
+            Button {
+                scope = .overall
+            } label: {
+                if effectiveScope == .overall {
+                    Label("All models", systemImage: "checkmark")
+                } else {
+                    Text("All models")
+                }
+            }
+            if !summary.byModel.isEmpty {
+                Divider()
+            }
             ForEach(summary.byModel) { item in
                 Button {
                     scope = .model(item.id)
@@ -556,7 +623,7 @@ struct ShareExportSheet: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 } else {
-                    Text("Model")
+                    Text("All models")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(secondaryInk)
                         .lineLimit(1)
@@ -586,35 +653,36 @@ struct ShareExportSheet: View {
         .disabled(summary.byModel.isEmpty)
         .opacity(summary.byModel.isEmpty ? 0.45 : 1)
         .accessibilityLabel(Text("Model scope"))
-        .accessibilityValue(Text(verbatim: selectedModelBreakdown?.name ?? ""))
+        .accessibilityValue(selectedModelBreakdown.map { Text(verbatim: $0.name) } ?? Text("All models"))
     }
 
     // MARK: - Aspect segmented control
 
-    @ViewBuilder private var aspectSegmentedControl: some View {
-        let options = ShareAspect.allCases.filter { isCosmos || $0 != .square }
-        Group {
-            if isCosmos {
-                HStack(spacing: 0) {
-                    ForEach(options) { option in
-                        aspectSegment(option)
-                    }
-                }
+    @ViewBuilder
+    private func segmentedContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if isCosmos {
+            content()
                 .frame(maxWidth: .infinity)
                 .background(CosmosPalette.background)
                 .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-            } else {
-                GlassEffectContainer(spacing: 0) {
-                    HStack(spacing: 2) {
-                        ForEach(options) { option in
-                            aspectSegment(option)
-                        }
-                    }
+        } else {
+            GlassEffectContainer(spacing: 0) {
+                content()
                     .padding(2)
+            }
+            .frame(maxWidth: .infinity)
+            .background(Capsule().fill(Palette.barTrack))
+            .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
+        }
+    }
+
+    @ViewBuilder private var aspectSegmentedControl: some View {
+        let options = ShareAspect.allCases.filter { isCosmos || $0 != .square }
+        segmentedContainer {
+            HStack(spacing: isCosmos ? 0 : 2) {
+                ForEach(options) { option in
+                    aspectSegment(option)
                 }
-                .frame(maxWidth: .infinity)
-                .background(Capsule().fill(Palette.barTrack))
-                .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
             }
         }
         .accessibilityElement(children: .contain)
@@ -639,6 +707,7 @@ struct ShareExportSheet: View {
                     isSelected: isSelected,
                     reduceTransparency: reduceTransparency,
                     namespace: aspectNamespace,
+                    effectID: "shareAspect",
                     isCosmos: isCosmos
                 ))
         }
@@ -748,6 +817,20 @@ struct ShareExportSheet: View {
 
     // MARK: - Scoped summary & export
 
+    private func resolveBaseStore() -> (store: any UsageStore, now: Date, priceTable: PriceTable)? {
+        let isSynthetic = summary.cost.priceTableVersion == PriceTable.synthetic.version
+        if let refreshCoordinator {
+            let store: any UsageStore = settings.syncEnabled
+                ? MergedUsageStore(local: refreshCoordinator.store, remote: refreshCoordinator.remoteSnapshots)
+                : refreshCoordinator.store
+            return (store, .now, isSynthetic ? .synthetic : .bundled)
+        } else if isSynthetic {
+            return (SyntheticUsageStore(), SyntheticUsageStore.defaultToday, .synthetic)
+        } else {
+            return nil
+        }
+    }
+
     /// Resolves per-source models or per-model sources outside `body` so rendering never queries SQLite per frame.
     private func resolveScopedSummary(for targetScope: ShareScope) -> UsageSummary? {
         let filter: UsageFilter
@@ -760,27 +843,24 @@ struct ShareExportSheet: View {
             filter = UsageFilter(models: [id])
         }
 
-        let isSynthetic = summary.cost.priceTableVersion == PriceTable.synthetic.version
-        let baseStore: (any UsageStore)?
-        let now: Date
-        if let refreshCoordinator {
-            baseStore = settings.syncEnabled
-                ? MergedUsageStore(local: refreshCoordinator.store, remote: refreshCoordinator.remoteSnapshots)
-                : refreshCoordinator.store
-            now = .now
-        } else if isSynthetic {
-            baseStore = SyntheticUsageStore()
-            now = SyntheticUsageStore.defaultToday
-        } else {
-            baseStore = nil
-            now = .now
-        }
-
-        guard let baseStore else { return nil }
-        let filtered = FilteredUsageStore(store: baseStore, filter: filter)
-        let priceTable = isSynthetic ? PriceTable.synthetic : PriceTable.bundled
-        return try? UsageAggregator(store: filtered, now: now, priceTable: priceTable)
+        guard let context = resolveBaseStore() else { return nil }
+        let filtered = FilteredUsageStore(store: context.store, filter: filter)
+        return try? UsageAggregator(store: filtered, now: context.now, priceTable: context.priceTable)
             .summary(for: summary.period)
+    }
+
+    /// Overall last-30-day rank computed outside `body` regardless of chosen period or scope.
+    private func resolveLast30DaysRank() -> Double? {
+        guard let context = resolveBaseStore(),
+              let points = try? UsageAggregator(
+                  store: context.store,
+                  now: context.now,
+                  priceTable: context.priceTable
+              ).dailyTotals(lastDays: 30) else {
+            return nil
+        }
+        let total = points.reduce(Int64(0)) { $0 + $1.total }
+        return UsageRank.topPercent(last30DaysTokens: total)
     }
 
     private var defaultFileName: String {
@@ -809,6 +889,9 @@ struct ShareExportSheet: View {
         let resolvedScoped = loadedScopeKey == scopeQueryKey
             ? scopedSummary
             : resolveScopedSummary(for: effectiveScope)
+        let resolvedRank = showRank
+            ? (loadedScopeKey == scopeQueryKey ? rankTopPercent : resolveLast30DaysRank())
+            : nil
         let exportData = ShareCardData(
             summary: summary,
             scope: effectiveScope,
@@ -841,8 +924,9 @@ struct ShareExportSheet: View {
             showComposition: showComposition,
             dimension: dimension,
             cosmosSnapshot: exportCosmosSnapshot,
-            inscription: inscription,
-            signature: signature
+            rank: resolvedRank,
+            inscription: activeInscription,
+            signature: activeSignature
         )
         .frame(width: canvasSize.width, height: canvasSize.height)
         .environment(\.colorScheme, settings.theme == .cosmos ? .dark : scheme)
@@ -997,11 +1081,62 @@ struct ShareCardData {
     var scopeDisplayTitle: String {
         switch kind {
         case .overall:
-            String(localized: "This period overall")
+            String(localized: "Overall")
         case .source(_, let name):
             name
         case .model(_, let name):
             name
+        }
+    }
+
+    func periodHeadlineText(locale: Locale) -> String {
+        switch summary.period {
+        case .day:
+            return String(localized: "Used today", locale: locale)
+        case .week:
+            return String(localized: "Used this week", locale: locale)
+        case .month:
+            // Chinese reads "11 月", not the wide form "十一月".
+            let month = locale.language.languageCode == .chinese
+                ? "\(Calendar.current.component(.month, from: summary.start)) 月"
+                : summary.start.formatted(.dateTime.locale(locale).month(.wide))
+            return String(localized: "Used in \(month)", locale: locale)
+        case .year:
+            let year = String(Calendar.current.component(.year, from: summary.start))
+            return String(localized: "Used in \(year) so far", locale: locale)
+        case .all:
+            return String(localized: "Used in total", locale: locale)
+        }
+    }
+
+    func headlineAccessibilityText(locale: Locale) -> String {
+        let periodPart = periodHeadlineText(locale: locale)
+        switch kind {
+        case .overall:
+            return periodPart
+        case .source(_, let name):
+            return "\(name) · \(periodPart)"
+        case .model(let id, let name):
+            let modelDisplay = name.isEmpty ? id : name
+            return "\(modelDisplay) · \(periodPart)"
+        }
+    }
+
+    func headlineText(locale: Locale, modelFont: Font? = nil) -> Text {
+        let periodText = Text(verbatim: periodHeadlineText(locale: locale))
+        switch kind {
+        case .overall:
+            return periodText
+        case .source(_, let name):
+            return Text(verbatim: "\(name) · ") + periodText
+        case .model(let id, let name):
+            let modelDisplay = name.isEmpty ? id : name
+            let modelText = if let modelFont {
+                Text(verbatim: modelDisplay).font(modelFont)
+            } else {
+                Text(verbatim: modelDisplay)
+            }
+            return modelText + Text(verbatim: " · ") + periodText
         }
     }
 
@@ -1085,107 +1220,64 @@ struct ShareCardData {
         return Self.mergeTail(unmergedStrata, limit: limit)
     }
 
-    /// Exactly 3 supporting facts matching the Tide Line mockup for each scope.
+    /// Supporting facts for the selected scope (3 for overall, 2 for a single harness or model).
     var supportingFacts: [SupportingFact] {
         switch kind {
         case .overall:
-            let sourceCount = activeSources.count
-            let modelCount = activeModels.count
-            let topSourceName = activeSources.first?.name ?? "—"
             return [
                 SupportingFact(
-                    id: "sourcesModels",
-                    label: "Sources · models",
-                    value: "\(sourceCount) · \(modelCount)",
+                    id: "harnesses",
+                    label: "Harnesses",
+                    value: "\(activeSources.count)",
                     isMonospacedValue: false
                 ),
                 SupportingFact(
-                    id: "cacheRead",
-                    label: "Cache read",
-                    value: Share.percent(counts.cacheRead, of: counts.total),
+                    id: "models",
+                    label: "Models",
+                    value: "\(activeModels.count)",
                     isMonospacedValue: false
                 ),
                 SupportingFact(
-                    id: "topSource",
-                    label: "Top source",
-                    value: topSourceName,
-                    isMonospacedValue: false
+                    id: "topModel",
+                    label: "Top model",
+                    value: activeModels.first?.name ?? "—",
+                    isMonospacedValue: true
                 ),
             ]
 
         case .source:
-            let middleFact: SupportingFact = if let topModel = resolvedModelsForSource.first {
+            let models = resolvedModelsForSource
+            return [
+                SupportingFact(
+                    id: "models",
+                    label: "Models",
+                    value: "\(models.count)",
+                    isMonospacedValue: false
+                ),
                 SupportingFact(
                     id: "topModel",
                     label: "Top model",
-                    value: topModel.name,
+                    value: models.first?.name ?? "—",
                     isMonospacedValue: true
-                )
-            } else {
-                SupportingFact(
-                    id: "output",
-                    label: "Output",
-                    value: TokenFormat.short(counts.output),
-                    isMonospacedValue: false
-                )
-            }
-            return [
-                SupportingFact(
-                    id: "periodShare",
-                    label: periodShareFactLabel,
-                    value: Share.percent(counts.total, of: summary.total.total),
-                    isMonospacedValue: false
-                ),
-                middleFact,
-                SupportingFact(
-                    id: "cacheRead",
-                    label: "Cache read",
-                    value: Share.percent(counts.cacheRead, of: counts.total),
-                    isMonospacedValue: false
                 ),
             ]
 
         case .model:
-            let middleFact: SupportingFact = if let topSource = resolvedSourcesForModel.first {
-                SupportingFact(
-                    id: "topSource",
-                    label: "Top source",
-                    value: topSource.name,
-                    isMonospacedValue: false
-                )
-            } else {
-                SupportingFact(
-                    id: "output",
-                    label: "Output",
-                    value: TokenFormat.short(counts.output),
-                    isMonospacedValue: false
-                )
-            }
+            let harnesses = resolvedSourcesForModel
             return [
                 SupportingFact(
-                    id: "periodShare",
-                    label: periodShareFactLabel,
-                    value: Share.percent(counts.total, of: summary.total.total),
+                    id: "harnesses",
+                    label: "Harnesses",
+                    value: "\(harnesses.count)",
                     isMonospacedValue: false
                 ),
-                middleFact,
                 SupportingFact(
-                    id: "cacheRead",
-                    label: "Cache read",
-                    value: Share.percent(counts.cacheRead, of: counts.total),
+                    id: "topHarness",
+                    label: "Top harness",
+                    value: harnesses.first?.name ?? "—",
                     isMonospacedValue: false
                 ),
             ]
-        }
-    }
-
-    private var periodShareFactLabel: LocalizedStringKey {
-        switch summary.period {
-        case .day: "Of today"
-        case .week: "Of this week"
-        case .month: "Of this month"
-        case .year: "Of this year"
-        case .all: "Of all time"
         }
     }
 
@@ -1304,7 +1396,7 @@ private struct TideGeometry {
         switch aspect {
         case .portrait, .square:
             let contentWidth = size.width - hMargin * 2
-            let topY: CGFloat = 636
+            let topY: CGFloat = 660
             let bottomY: CGFloat = size.height - 76
             cornerRadius = 44
             resolvedVesselRect = CGRect(
@@ -1491,6 +1583,7 @@ struct CosmosShareCard: View {
     let showComposition: Bool
     let dimension: BreakdownDimension
     let snapshot: NSImage?
+    var rank: Double? = nil
 
     @Environment(\.locale) private var locale
 
@@ -1555,11 +1648,21 @@ struct CosmosShareCard: View {
     }
 
     private var details: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
             if isWide {
                 wideDetails
             } else {
                 stackedDetails
+            }
+
+            if rank != nil {
+                Text("Rank is an estimate derived from public usage sources.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .padding(.horizontal, isWide ? 40 : 36)
+                    .padding(.bottom, isWide ? 24 : 20)
             }
         }
         .frame(width: detailSize.width, height: detailSize.height, alignment: .topLeading)
@@ -1574,28 +1677,38 @@ struct CosmosShareCard: View {
     private var wideDetails: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            hero.padding(.top, 24)
+            hero.padding(.top, 22)
             if showCost {
-                cost.padding(.top, 18)
+                cost.padding(.top, 16)
             }
-            hairline.padding(.top, 24)
-            ranking.padding(.top, 22)
+            factsRow.padding(.top, 20)
+            if let rank {
+                rankLine(rank).padding(.top, 14)
+            }
+            hairline.padding(.top, 20)
+            ranking.padding(.top, 20)
             if showComposition {
-                hairline.padding(.top, 22)
+                hairline.padding(.top, 20)
                 composition.padding(.top, 18)
             }
             Spacer(minLength: 0)
         }
-        .padding(40)
+        .padding(.top, 36)
+        .padding(.horizontal, 40)
+        .padding(.bottom, rank != nil ? 16 : 36)
     }
 
     private var stackedDetails: some View {
         HStack(alignment: .top, spacing: 44) {
             VStack(alignment: .leading, spacing: 0) {
                 header
-                hero.padding(.top, 24)
+                hero.padding(.top, 20)
                 if showCost {
-                    cost.padding(.top, 18)
+                    cost.padding(.top, 14)
+                }
+                factsRow.padding(.top, 20)
+                if let rank {
+                    rankLine(rank).padding(.top, 14)
                 }
                 Spacer(minLength: 0)
             }
@@ -1611,49 +1724,84 @@ struct CosmosShareCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(36)
+        .padding(.top, 36)
+        .padding(.horizontal, 36)
+        .padding(.bottom, rank != nil ? 16 : 36)
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: data.isPartialScope ? data.scopeDisplayTitle : "Token Taken")
+            Text(verbatim: "Token Taken")
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(CosmosPalette.ink)
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .truncationMode(.middle)
 
             Text(periodDescription)
                 .font(.system(size: 20))
                 .foregroundStyle(CosmosPalette.ink3)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
-                .padding(.top, 10)
+                .padding(.top, 8)
         }
     }
 
     private var hero: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Period tokens")
-                .font(.system(size: 16))
-                .foregroundStyle(CosmosPalette.ink3)
+            data.headlineText(
+                locale: locale,
+                modelFont: .system(size: 17, weight: .medium, design: .monospaced)
+            )
+            .font(.system(size: 17, weight: .medium))
+            .foregroundStyle(CosmosPalette.ink2)
+            .lineLimit(1)
+            .truncationMode(.middle)
 
-            Text(verbatim: TokenFormat.short(data.counts.total))
-                .font(.system(size: 58, weight: .light, design: .monospaced))
-                .foregroundStyle(CosmosPalette.ink)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .padding(.top, 8)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(verbatim: TokenFormat.short(data.counts.total))
+                    .font(.system(size: 58, weight: .light, design: .monospaced))
+                    .foregroundStyle(CosmosPalette.ink)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
 
-            Text(verbatim: "\(data.counts.total.formatted(.number.locale(locale))) Token")
-                .font(.system(size: 18, design: .monospaced))
-                .foregroundStyle(CosmosPalette.ink2)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .padding(.top, 4)
+                Text(verbatim: "Token")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(CosmosPalette.ink3)
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            .padding(.top, 8)
         }
+    }
+
+    private var factsRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(data.supportingFacts) { fact in
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(fact.label)
+                        .font(.system(size: 16))
+                        .foregroundStyle(CosmosPalette.ink3)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(verbatim: fact.value)
+                        .font(.system(size: 17, weight: .medium, design: fact.isMonospacedValue ? .monospaced : .default))
+                        .foregroundStyle(CosmosPalette.ink)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+
+    private func rankLine(_ rank: Double) -> some View {
+        Text("Last 30 days · about top \(UsageRank.formatted(rank))")
+            .font(.system(size: 16, weight: .medium, design: .monospaced))
+            .foregroundStyle(CosmosPalette.ink2)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
     }
 
     private var cost: some View {
@@ -1679,7 +1827,7 @@ struct CosmosShareCard: View {
 
     private var ranking: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(sceneDimension == .sources ? LocalizedStringKey("Top 3 sources") : LocalizedStringKey("Top 3 models"))
+            Text(sceneDimension == .sources ? LocalizedStringKey("Top 3 harnesses") : LocalizedStringKey("Top 3 models"))
                 .font(.system(size: 18))
                 .foregroundStyle(CosmosPalette.ink2)
 
@@ -1787,6 +1935,7 @@ struct ShareCardView: View {
     let showComposition: Bool
     var dimension: BreakdownDimension = .sources
     var cosmosSnapshot: NSImage?
+    var rank: Double? = nil
     var inscription = ""
     var signature = ""
 
@@ -1804,10 +1953,19 @@ struct ShareCardView: View {
                 showCost: showCost,
                 showComposition: showComposition,
                 dimension: dimension,
-                snapshot: cosmosSnapshot
+                snapshot: cosmosSnapshot,
+                rank: rank
             )
         } else if ThemeRuntime.isField {
-            FieldShareCard(data: data, aspect: aspect, showCost: showCost, showComposition: showComposition, inscription: inscription, signature: signature)
+            FieldShareCard(
+                data: data,
+                aspect: aspect,
+                showCost: showCost,
+                showComposition: showComposition,
+                rank: rank,
+                inscription: inscription,
+                signature: signature
+            )
         } else {
             tideCard
         }
@@ -1851,19 +2009,24 @@ struct ShareCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             cardHeader
 
-            scopeRow
-                .padding(.top, 44)
+            headlineRow
+                .padding(.top, 32)
 
-            heroBlock(numberSize: 172, unitSize: 86, tokenLabelSize: 40)
-                .padding(.top, 16)
+            heroBlock(numberSize: 164, unitSize: 82, tokenLabelSize: 38)
+                .padding(.top, 12)
 
             if showCost {
                 costRow(amountSize: 38, noteSize: 32)
-                    .padding(.top, 12)
+                    .padding(.top, 10)
             }
 
             portraitSupportingFacts
-                .padding(.top, 30)
+                .padding(.top, 24)
+
+            if let rank {
+                rankRow(rank)
+                    .padding(.top, 18)
+            }
         }
         .padding(.horizontal, geometry.horizontalMargin)
         .padding(.top, geometry.verticalMargin)
@@ -1874,25 +2037,30 @@ struct ShareCardView: View {
         VStack(alignment: .leading, spacing: 0) {
             landscapeHeader
 
-            scopeRow
-                .padding(.top, 46)
+            headlineRow
+                .padding(.top, 38)
 
             heroBlock(numberSize: 144, unitSize: 72, tokenLabelSize: 36)
-                .padding(.top, 18)
+                .padding(.top, 16)
 
             if showCost {
                 costRow(amountSize: 36, noteSize: 30)
-                    .padding(.top, 14)
+                    .padding(.top, 12)
             }
 
-            Spacer(minLength: 24)
+            Spacer(minLength: 20)
 
             Rectangle()
                 .fill(Palette.hairline)
                 .frame(height: 2)
 
             landscapeSupportingFacts
-                .padding(.top, 24)
+                .padding(.top, 22)
+
+            if let rank {
+                rankRow(rank)
+                    .padding(.top, 18)
+            }
         }
         .frame(
             width: geometry.leftColumnWidth,
@@ -1944,29 +2112,21 @@ struct ShareCardView: View {
         }
     }
 
-    private var scopeRow: some View {
+    private var headlineRow: some View {
         HStack(alignment: .center, spacing: 18) {
             Circle()
                 .fill(data.accentColor)
                 .frame(width: 20, height: 20)
                 .accessibilityHidden(true)
 
-            Group {
-                switch data.kind {
-                case .overall:
-                    Text("All sources")
-                case .source(_, let name):
-                    Text("Source · \(name)")
-                case .model(let id, let name):
-                    let modelDisplay = name.isEmpty ? id : name
-                    let monoModel = Text(verbatim: modelDisplay)
-                        .font(.system(size: 34, weight: .semibold, design: .monospaced))
-                    Text("Model · \(monoModel)")
-                }
-            }
+            data.headlineText(
+                locale: locale,
+                modelFont: .system(size: 34, weight: .semibold, design: .monospaced)
+            )
             .font(.system(size: 35, weight: .semibold))
             .foregroundStyle(Palette.ink2)
             .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .truncationMode(.middle)
         }
     }
@@ -2016,7 +2176,7 @@ struct ShareCardView: View {
     }
 
     private var portraitSupportingFacts: some View {
-        HStack(alignment: .top, spacing: 32) {
+        HStack(alignment: .top, spacing: 56) {
             ForEach(data.supportingFacts) { fact in
                 VStack(alignment: .leading, spacing: 8) {
                     Text(fact.label)
@@ -2034,9 +2194,18 @@ struct ShareCardView: View {
                         .minimumScaleFactor(0.70)
                         .truncationMode(.middle)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(fact.isMonospacedValue ? 0 : 1)
             }
         }
+    }
+
+    private func rankRow(_ rank: Double) -> some View {
+        Text("Last 30 days · about top \(UsageRank.formatted(rank))")
+            .font(.system(size: 28, weight: .medium))
+            .foregroundStyle(Palette.ink2)
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
     }
 
     private var landscapeSupportingFacts: some View {
@@ -2153,12 +2322,20 @@ struct ShareCardView: View {
 
         return VStack {
             Spacer(minLength: 0)
-            HStack {
+            HStack(alignment: .firstTextBaseline, spacing: 20) {
+                if rank != nil {
+                    Text("Rank is an estimate derived from public usage sources.")
+                        .font(.system(size: 22, weight: .regular))
+                        .foregroundStyle(Palette.ink3)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
                 Spacer(minLength: 0)
                 Text(verbatim: dateText)
                     .font(.system(size: 25, weight: .medium))
                     .foregroundStyle(Palette.ink3)
                     .monospacedDigit()
+                    .layoutPriority(1)
             }
             .padding(.horizontal, geometry.horizontalMargin)
             .padding(.bottom, geometry.footerBottomPadding)
@@ -2513,6 +2690,7 @@ private struct ShareSegmentSurface: ViewModifier {
     let isSelected: Bool
     let reduceTransparency: Bool
     let namespace: Namespace.ID
+    let effectID: String
     let isCosmos: Bool
 
     func body(content: Content) -> some View {
@@ -2533,7 +2711,7 @@ private struct ShareSegmentSurface: ViewModifier {
         } else {
             content
                 .themedGlass(.regular.interactive(), in: .capsule)
-                .glassEffectID("shareAspect", in: namespace)
+                .glassEffectID(effectID, in: namespace)
         }
     }
 }

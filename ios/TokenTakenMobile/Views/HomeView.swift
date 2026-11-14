@@ -108,18 +108,18 @@ struct HomeView: View {
 
     @ViewBuilder
     private func rankBlock(_ report: MobileReport) -> some View {
-        if let tier = RankTable.tier(forLast30Days: report.totals.last30Days.total) {
+        if let line = Ranking.line(forLast30Days: report.totals.last30Days.total, locale: locale) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: "chart.line.uptrend.xyaxis")
                         .font(.footnote)
                         .foregroundStyle(Palette.accent)
                         .accessibilityHidden(true)
-                    Text(verbatim: RankTable.line(for: tier, locale: locale))
+                    Text(verbatim: line)
                         .font(.callout.weight(.semibold))
                         .foregroundStyle(Palette.ink1)
                 }
-                Text(verbatim: RankTable.footnote(locale: locale))
+                Text(verbatim: Ranking.footnote(locale: locale))
                     .font(.caption2)
                     .foregroundStyle(Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -184,7 +184,7 @@ struct HomeView: View {
             let slices = month.sources.sorted { $0.total > $1.total }
 
             VStack(alignment: .leading, spacing: 12) {
-                SectionHeader(title: "Sources this month")
+                SectionHeader(title: "Harnesses this month")
 
                 ForEach(slices, id: \.id) { slice in
                     HStack(spacing: 10) {
@@ -308,7 +308,6 @@ struct HomeView: View {
 
     private var shareCard: ShareCardView? {
         guard let report = model.report else { return nil }
-        let tier = RankTable.tier(forLast30Days: report.totals.last30Days.total)
         let period: String
         if let range = report.last30DayRange {
             period = String(localized: "Last 30 days", locale: locale)
@@ -320,10 +319,10 @@ struct HomeView: View {
         return ShareCardView(
             last30Days: report.totals.last30Days.total,
             allTime: report.totals.allTime.total,
-            rankLine: tier.map { RankTable.line(for: $0, locale: locale) },
+            rankLine: Ranking.line(forLast30Days: report.totals.last30Days.total, locale: locale),
             comparison: model.comparison?.text,
             period: period,
-            footnote: RankTable.footnote(locale: locale),
+            footnote: Ranking.footnote(locale: locale),
             chineseUnits: TokenFormat.usesChineseUnits(locale),
             isSample: model.demoMode
         )

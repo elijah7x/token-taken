@@ -33,6 +33,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Replaced the iOS discrete rank-band table with the shared `UsageRank` log-log interpolation curve (`rank-curve-2026-11`) over last-30-day tokens across all harnesses, adding extrapolated anchors below 350M down to 100k (top 99%), unified `top X%` formatting, and updated estimate footnote wording.
+- Renamed user-facing "Source" / "Sources" (`来源`) UI labels to "Harness" / "Harnesses" (`工具`) while preserving `source` identifiers in the data model, CLI, and report schemas.
 - Remote Macs with partial data now show "Partial" instead of "Unavailable", and issue counts in the status note and sidebar banner are split by state (`unavailable`, `partial`, `stale`), falling back to an `incomplete` count when states are mixed.
 - Sync settings now explain that all Macs and the iPhone must share the same Apple ID, and switching Apple ID clears cached remote Mac data and re-reads from the new account.
 - Token Taken now runs on Apple silicon Macs only: the app, `TokenTakenKit`, `token-taken`, and the bundled `tokscale` engine are built and checked as arm64 alone (ADR-0012), which makes the download smaller.
