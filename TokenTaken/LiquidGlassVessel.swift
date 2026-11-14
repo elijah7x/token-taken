@@ -3,6 +3,11 @@ import SwiftUI
 /// Pure-Canvas liquid-glass vessel renderer shared by the Confluence reservoir and Tide Line share card.
 /// Uses no `glassEffect` internally so `ImageRenderer` exports the full material faithfully.
 struct LiquidGlassVessel: Sendable {
+    enum BodyStyle: Sendable {
+        case solid
+        case prismatic
+    }
+
     struct Layer: Sendable {
         var color: Color
         var fraction: Double
@@ -116,7 +121,8 @@ struct LiquidGlassVessel: Sendable {
         fillLevel: Double,
         isDark: Bool,
         reduceTransparency: Bool,
-        inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)] = []
+        inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)] = [],
+        bodyStyle: BodyStyle = .solid
     ) {
         draw(
             in: &context,
@@ -127,7 +133,8 @@ struct LiquidGlassVessel: Sendable {
             isDark: isDark,
             reduceTransparency: reduceTransparency,
             inflows: inflows,
-            wobblePhase: nil
+            wobblePhase: nil,
+            bodyStyle: bodyStyle
         )
     }
 
@@ -140,9 +147,11 @@ struct LiquidGlassVessel: Sendable {
         isDark: Bool,
         reduceTransparency: Bool,
         inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)],
-        wobblePhase: Double?
+        wobblePhase: Double?,
+        bodyStyle: BodyStyle = .solid
     ) {
         guard rect.width > 4, rect.height > 4 else { return }
+        let isPrismatic = bodyStyle == .prismatic && !reduceTransparency
 
         let wobbleOffset: CGFloat
         let wobbleTilt: CGFloat
@@ -176,9 +185,14 @@ struct LiquidGlassVessel: Sendable {
             let shadowRadiusX = rect.width * 0.44
             let shadowRadiusY = max(4.5, min(16, rect.width * 0.065))
             let shadowCenter = CGPoint(x: rect.midX, y: rect.maxY + shadowRadiusY * 0.22)
-            let peakShadow = isDark ? 0.30 : 0.10
+            let peakShadow = isPrismatic ? (isDark ? 0.14 : 0.04) : (isDark ? 0.30 : 0.10)
+            var shadowContext = context
+            // Keep the contact shadow outside the transparent prismatic chamber so it cannot gray the bottom.
+            if isPrismatic {
+                shadowContext.clip(to: outerPath, options: .inverse)
+            }
             fillEllipticalGradient(
-                in: &context,
+                in: &shadowContext,
                 center: shadowCenter,
                 radiusX: shadowRadiusX,
                 radiusY: shadowRadiusY,
@@ -244,8 +258,18 @@ struct LiquidGlassVessel: Sendable {
         var chamberContext = context
         chamberContext.clip(to: innerPath)
 
-        let hasLiquid = fillLevel > 0.0005 && layers.contains(where: { $0.fraction > 0 })
-        if hasLiquid {
+        let hasLiquid = fillLevel > 0.0005 && (isPrismatic || layers.contains(where: { $0.fraction > 0 }))
+        if hasLiquid, isPrismatic {
+            drawPrismaticChamber(
+                in: &chamberContext,
+                innerRect: innerRect,
+                metrics: m,
+                unitScale: unitScale,
+                wobbleTilt: wobbleTilt,
+                isDark: isDark,
+                inflows: inflows
+            )
+        } else if hasLiquid {
             let meniscusCurves = makeMeniscusPaths(
                 innerRect: innerRect,
                 centerY: m.meniscusCenterY,
@@ -469,14 +493,16 @@ struct LiquidGlassVessel: Sendable {
                 x: innerRect.midX - innerRect.width * 0.04,
                 y: innerRect.maxY - causticRadiusY * 0.95 - 2 * unitScale
             )
+            let causticPeak = isPrismatic ? (isDark ? 0.08 : 0.09) : 0.18
+            let causticMid = isPrismatic ? (isDark ? 0.03 : 0.035) : 0.07
             fillEllipticalGradient(
                 in: &chamberContext,
                 center: causticCenter,
                 radiusX: causticRadiusX,
                 radiusY: causticRadiusY,
                 gradient: Gradient(stops: [
-                    .init(color: .white.opacity(0.18), location: 0),
-                    .init(color: .white.opacity(0.07), location: 0.55),
+                    .init(color: .white.opacity(causticPeak), location: 0),
+                    .init(color: .white.opacity(causticMid), location: 0.55),
                     .init(color: .clear, location: 1),
                 ])
             )
@@ -506,12 +532,14 @@ struct LiquidGlassVessel: Sendable {
             )
 
             chamberSpecular.drawLayer { layer in
+                let broadPeak = isPrismatic ? (isDark ? 0.16 : 0.20) : (isDark ? 0.28 : 0.32)
+                let broadMid = isPrismatic ? (isDark ? 0.06 : 0.08) : (isDark ? 0.10 : 0.13)
                 layer.fill(
                     Path(broadRect),
                     with: .linearGradient(
                         Gradient(stops: [
-                            .init(color: .white.opacity(isDark ? 0.28 : 0.32), location: 0),
-                            .init(color: .white.opacity(isDark ? 0.10 : 0.13), location: 0.46),
+                            .init(color: .white.opacity(broadPeak), location: 0),
+                            .init(color: .white.opacity(broadMid), location: 0.46),
                             .init(color: .clear, location: 1),
                         ]),
                         startPoint: CGPoint(x: broadRect.minX, y: broadRect.midY),
@@ -520,9 +548,10 @@ struct LiquidGlassVessel: Sendable {
                 )
 
                 let streakPath = Capsule().path(in: streakRect)
+                let streakAlpha = isPrismatic ? (isDark ? 0.42 : 0.50) : (isDark ? 0.58 : 0.66)
                 layer.fill(
                     streakPath,
-                    with: .color(.white.opacity(isDark ? 0.58 : 0.66))
+                    with: .color(.white.opacity(streakAlpha))
                 )
 
                 layer.fill(
@@ -592,9 +621,29 @@ struct LiquidGlassVessel: Sendable {
             )
         }
 
-        // 6. Crisp 1pt outer rim only (inner hairline reserved for Reduce Transparency).
+        // 6. Crisp 1pt outer rim, plus inner refractive rim in prismatic mode (or hairline under Reduce Transparency).
         if reduceTransparency {
             context.stroke(innerPath, with: .color(Palette.hairline), lineWidth: 1.0 * unitScale)
+        } else if isPrismatic {
+            let innerStrokeWidth = 0.85 * unitScale
+            let innerRimRect = innerRect.insetBy(dx: innerStrokeWidth * 0.5, dy: innerStrokeWidth * 0.5)
+            let innerRimPath = RoundedRectangle(
+                cornerRadius: max(1, m.innerCornerRadius - innerStrokeWidth * 0.5),
+                style: .continuous
+            ).path(in: innerRimRect)
+            context.stroke(
+                innerRimPath,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .white.opacity(isDark ? 0.24 : 0.34), location: 0),
+                        .init(color: .white.opacity(isDark ? 0.12 : 0.18), location: 0.50),
+                        .init(color: .white.opacity(isDark ? 0.18 : 0.26), location: 1),
+                    ]),
+                    startPoint: CGPoint(x: innerRect.minX, y: innerRect.minY),
+                    endPoint: CGPoint(x: innerRect.maxX, y: innerRect.maxY)
+                ),
+                lineWidth: innerStrokeWidth
+            )
         }
 
         let outerStrokeWidth = 1.0 * unitScale
@@ -608,6 +657,294 @@ struct LiquidGlassVessel: Sendable {
     }
 
     // MARK: - Private geometry & shading helpers
+
+    private struct PrismaticSurfacePaths {
+        let arc: Path
+        let liquidBody: Path
+        let airHeadspace: Path
+    }
+
+    private static func drawPrismaticChamber(
+        in chamberContext: inout GraphicsContext,
+        innerRect: CGRect,
+        metrics m: LayoutMetrics,
+        unitScale: CGFloat,
+        wobbleTilt: CGFloat,
+        isDark: Bool,
+        inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)]
+    ) {
+        let surface = makePrismaticSurfacePaths(
+            innerRect: innerRect,
+            centerY: m.meniscusCenterY,
+            lipClimb: m.lipClimb,
+            tilt: wobbleTilt
+        )
+
+        if m.meniscusCenterY > innerRect.minY + 1 {
+            chamberContext.fill(
+                surface.airHeadspace,
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .white.opacity(isDark ? 0.03 : 0.045), location: 0),
+                        .init(color: .white.opacity(isDark ? 0.01 : 0.015), location: 1),
+                    ]),
+                    startPoint: CGPoint(x: innerRect.midX, y: innerRect.minY),
+                    endPoint: CGPoint(x: innerRect.midX, y: m.meniscusCenterY)
+                )
+            )
+        }
+
+        var liquidContext = chamberContext
+        liquidContext.clip(to: surface.liquidBody)
+
+        let glassTint = isDark
+            ? Color(.sRGB, red: 228.0 / 255.0, green: 236.0 / 255.0, blue: 248.0 / 255.0, opacity: 1)
+            : Color(.sRGB, red: 196.0 / 255.0, green: 208.0 / 255.0, blue: 226.0 / 255.0, opacity: 1)
+        let topAlpha = isDark ? 0.045 : 0.05
+        let midAlpha = isDark ? 0.038 : 0.042
+        let bottomAlpha = isDark ? 0.032 : 0.035
+        liquidContext.fill(
+            Path(innerRect),
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: glassTint.opacity(topAlpha), location: 0),
+                    .init(color: glassTint.opacity(midAlpha), location: 0.55),
+                    .init(color: glassTint.opacity(bottomAlpha), location: 1),
+                ]),
+                startPoint: CGPoint(x: innerRect.midX, y: m.meniscusCenterY),
+                endPoint: CGPoint(x: innerRect.midX, y: innerRect.maxY)
+            )
+        )
+
+        let leftInflows = inflows.filter { $0.fromLeft && $0.height > 0 }
+        let rightInflows = inflows.filter { !$0.fromLeft && $0.height > 0 }
+        let leftTotal = leftInflows.reduce(CGFloat(0)) { $0 + $1.height }
+        let rightTotal = rightInflows.reduce(CGFloat(0)) { $0 + $1.height }
+        let fallbackSpan = max(1, innerRect.maxY - m.meniscusCenterY)
+        let leftSpan = max(1, leftTotal > 0 ? leftTotal : fallbackSpan)
+        let rightSpan = max(1, rightTotal > 0 ? rightTotal : fallbackSpan)
+
+        let leftMaxPeak = isDark ? 0.40 : 0.48
+        let rightSingleCap = isDark ? 0.22 : 0.26
+        let rightTotalCap = isDark ? 0.42 : 0.50
+        let rightRawPeaks = rightInflows.map { inflow -> Double in
+            let share = min(max(inflow.height / rightSpan, 0), 1)
+            let shareFactor = Double(share.squareRoot())
+            return min(rightSingleCap, rightSingleCap * (0.42 + 0.58 * shareFactor))
+        }
+        let rightRawSum = rightRawPeaks.reduce(0, +)
+        let rightPeakScale = rightRawSum > rightTotalCap ? (rightTotalCap / rightRawSum) : 1.0
+
+        var glowContext = liquidContext
+        glowContext.blendMode = isDark ? .plusLighter : .normal
+
+        // Draw right category glows first so incoming left source plumes stay vivid past the midline.
+        for (index, inflow) in rightInflows.enumerated() {
+            let share = min(max(inflow.height / rightSpan, 0), 1)
+            let shareFactor = share.squareRoot()
+            let radiusX = innerRect.width * (0.55 + 0.15 * shareFactor)
+            let radiusY = max(6.0 * unitScale, inflow.height * 0.95)
+            let glowCenter = CGPoint(
+                x: innerRect.maxX - radiusX * 0.06,
+                y: inflow.y + inflow.height * 0.5
+            )
+            let peak = rightRawPeaks[index] * rightPeakScale
+            fillEllipticalGradient(
+                in: &glowContext,
+                center: glowCenter,
+                radiusX: radiusX,
+                radiusY: radiusY,
+                gradient: Gradient(stops: [
+                    .init(color: inflow.color.opacity(peak), location: 0),
+                    .init(color: inflow.color.opacity(peak * 0.45), location: 0.45),
+                    .init(color: inflow.color.opacity(peak * 0.14), location: 0.76),
+                    .init(color: .clear, location: 1),
+                ])
+            )
+        }
+
+        for inflow in leftInflows {
+            let share = min(max(inflow.height / leftSpan, 0), 1)
+            let shareFactor = share.squareRoot()
+            let radiusX = innerRect.width * (0.95 + 0.15 * shareFactor)
+            let radiusY = max(5.5 * unitScale, inflow.height * 0.90)
+            let glowCenter = CGPoint(
+                x: innerRect.minX + radiusX * 0.06,
+                y: inflow.y + inflow.height * 0.5
+            )
+            let peak = leftMaxPeak * (0.56 + 0.44 * Double(shareFactor))
+            fillEllipticalGradient(
+                in: &glowContext,
+                center: glowCenter,
+                radiusX: radiusX,
+                radiusY: radiusY,
+                gradient: Gradient(stops: [
+                    .init(color: inflow.color.opacity(peak), location: 0),
+                    .init(color: inflow.color.opacity(peak * 0.52), location: 0.48),
+                    .init(color: inflow.color.opacity(peak * 0.18), location: 0.78),
+                    .init(color: .clear, location: 1),
+                ])
+            )
+        }
+
+        let liquidTopY = m.meniscusCenterY - m.lipClimb
+        let spanY = max(1, innerRect.maxY - liquidTopY)
+        let driftX = min(innerRect.width * 0.68, spanY * 0.44)
+        liquidContext.drawLayer { layer in
+            let primaryStart = CGPoint(x: innerRect.minX + innerRect.width * 0.14, y: liquidTopY - 4)
+            let primaryEnd = CGPoint(x: primaryStart.x + driftX, y: innerRect.maxY + 4)
+            fillDiagonalBand(
+                in: layer,
+                from: primaryStart,
+                to: primaryEnd,
+                width: max(2.8 * unitScale, innerRect.width * 0.052),
+                peakOpacity: isDark ? 0.08 : 0.10
+            )
+
+            let secondaryStart = CGPoint(x: innerRect.minX + innerRect.width * 0.34, y: liquidTopY - 4)
+            let secondaryEnd = CGPoint(x: secondaryStart.x + driftX, y: innerRect.maxY + 4)
+            fillDiagonalBand(
+                in: layer,
+                from: secondaryStart,
+                to: secondaryEnd,
+                width: max(1.4 * unitScale, innerRect.width * 0.024),
+                peakOpacity: isDark ? 0.05 : 0.07
+            )
+
+            var fadeMask = layer
+            fadeMask.blendMode = .destinationIn
+            fadeMask.fill(
+                Path(innerRect),
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: .white, location: 0.10),
+                        .init(color: .white, location: 0.88),
+                        .init(color: .clear, location: 1),
+                    ]),
+                    startPoint: CGPoint(x: innerRect.midX, y: liquidTopY),
+                    endPoint: CGPoint(x: innerRect.midX, y: innerRect.maxY)
+                )
+            )
+        }
+
+        let sheenBottomY = min(innerRect.maxY, m.meniscusCenterY + 3.5 * unitScale)
+        if sheenBottomY > liquidTopY {
+            liquidContext.fill(
+                Path(CGRect(
+                    x: innerRect.minX,
+                    y: liquidTopY - 2,
+                    width: innerRect.width,
+                    height: sheenBottomY - liquidTopY + 2
+                )),
+                with: .linearGradient(
+                    Gradient(stops: [
+                        .init(color: .white.opacity(isDark ? 0.08 : 0.12), location: 0),
+                        .init(color: .clear, location: 1),
+                    ]),
+                    startPoint: CGPoint(x: innerRect.midX, y: liquidTopY),
+                    endPoint: CGPoint(x: innerRect.midX, y: sheenBottomY)
+                )
+            )
+        }
+
+        chamberContext.stroke(
+            surface.arc,
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: .white.opacity(isDark ? 0.56 : 0.72), location: 0),
+                    .init(color: .white.opacity(isDark ? 0.68 : 0.84), location: 0.32),
+                    .init(color: .white.opacity(isDark ? 0.46 : 0.64), location: 0.72),
+                    .init(color: .white.opacity(isDark ? 0.54 : 0.70), location: 1),
+                ]),
+                startPoint: CGPoint(x: innerRect.minX, y: m.meniscusCenterY),
+                endPoint: CGPoint(x: innerRect.maxX, y: m.meniscusCenterY)
+            ),
+            style: StrokeStyle(lineWidth: 1.15 * unitScale, lineCap: .round)
+        )
+    }
+
+    private static func makePrismaticSurfacePaths(
+        innerRect: CGRect,
+        centerY: CGFloat,
+        lipClimb: CGFloat,
+        tilt: CGFloat
+    ) -> PrismaticSurfacePaths {
+        let minX = innerRect.minX
+        let maxX = innerRect.maxX
+        let width = innerRect.width
+
+        let leftY = centerY - lipClimb + tilt
+        let rightY = centerY - lipClimb - tilt
+        let midLipY = (leftY + rightY) * 0.5
+        let apexY = centerY + min(2.0, lipClimb * 0.55)
+        let controlY = (apexY - 0.25 * midLipY) / 0.75
+
+        let c1 = CGPoint(x: minX + width * 0.16, y: controlY + tilt * 0.35)
+        let c2 = CGPoint(x: maxX - width * 0.16, y: controlY - tilt * 0.35)
+
+        var arc = Path()
+        arc.move(to: CGPoint(x: minX, y: leftY))
+        arc.addCurve(to: CGPoint(x: maxX, y: rightY), control1: c1, control2: c2)
+
+        var liquidBody = Path()
+        liquidBody.move(to: CGPoint(x: minX, y: leftY))
+        liquidBody.addCurve(to: CGPoint(x: maxX, y: rightY), control1: c1, control2: c2)
+        liquidBody.addLine(to: CGPoint(x: maxX, y: innerRect.maxY + 2))
+        liquidBody.addLine(to: CGPoint(x: minX, y: innerRect.maxY + 2))
+        liquidBody.closeSubpath()
+
+        var airHeadspace = Path()
+        airHeadspace.move(to: CGPoint(x: minX, y: innerRect.minY - 2))
+        airHeadspace.addLine(to: CGPoint(x: maxX, y: innerRect.minY - 2))
+        airHeadspace.addLine(to: CGPoint(x: maxX, y: rightY))
+        airHeadspace.addCurve(to: CGPoint(x: minX, y: leftY), control1: c2, control2: c1)
+        airHeadspace.closeSubpath()
+
+        return PrismaticSurfacePaths(
+            arc: arc,
+            liquidBody: liquidBody,
+            airHeadspace: airHeadspace
+        )
+    }
+
+    private static func fillDiagonalBand(
+        in context: GraphicsContext,
+        from start: CGPoint,
+        to end: CGPoint,
+        width: CGFloat,
+        peakOpacity: Double
+    ) {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = (dx * dx + dy * dy).squareRoot()
+        guard length > 1, width > 0.5 else { return }
+        let halfW = width * 0.5
+        let ox = (dy / length) * halfW
+        let oy = (-dx / length) * halfW
+
+        var band = Path()
+        band.move(to: CGPoint(x: start.x - ox, y: start.y - oy))
+        band.addLine(to: CGPoint(x: start.x + ox, y: start.y + oy))
+        band.addLine(to: CGPoint(x: end.x + ox, y: end.y + oy))
+        band.addLine(to: CGPoint(x: end.x - ox, y: end.y - oy))
+        band.closeSubpath()
+
+        let mid = CGPoint(x: (start.x + end.x) * 0.5, y: (start.y + end.y) * 0.5)
+        context.fill(
+            band,
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .white.opacity(peakOpacity), location: 0.42),
+                    .init(color: .white.opacity(peakOpacity * 0.72), location: 0.62),
+                    .init(color: .clear, location: 1),
+                ]),
+                startPoint: CGPoint(x: mid.x - ox, y: mid.y - oy),
+                endPoint: CGPoint(x: mid.x + ox, y: mid.y + oy)
+            )
+        )
+    }
 
     private struct MeniscusPaths {
         let backArc: Path
