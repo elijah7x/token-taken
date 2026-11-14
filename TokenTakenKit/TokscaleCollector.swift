@@ -140,7 +140,7 @@ public struct TokscaleCollector: UsageCollector {
         }
         let started = ContinuousClock.now
         // Fingerprints are taken before tokscale starts, so logs written during collection trigger a re-run next time.
-        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, engineVersion: Self.engineVersion, timeZone: zone)
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, engineVersion: Self.engineVersion, timeZone: zone, sourceIDs: sourceIDs)
         let fingerprints = stateFile == nil ? [:] : Dictionary(uniqueKeysWithValues: availableClients.map { ($0, fingerprint($0)) })
         let previous = stateFile?.load().flatMap { $0.stamp == stamp ? $0.clients : nil } ?? [:]
         // A change in any client re-collects every client of its source, so engine-side dedup stays intact.

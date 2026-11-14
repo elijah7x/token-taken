@@ -60,7 +60,7 @@ public struct MiniMaxCodeCollector: UsageCollector {
             throw CollectorError.sourceUnavailable
         }
 
-        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone, sourceIDs: sourceIDs)
         let files = try sessionFiles()
         let fingerprints = Fingerprints(files: files, root: root)
         if let stateFile, let saved = stateFile.load(), saved.stamp == stamp, saved.fingerprints == fingerprints {

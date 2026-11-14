@@ -73,7 +73,8 @@ public actor CollectionRunner {
                         )
                         do {
                             let scoped = sourceBatch(cachedBatch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
-                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID)
+                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
+                                appliesEpoch: false)
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
                                 recordCount: scoped.daily.count, skippedRecords: skipped)
                         } catch {

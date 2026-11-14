@@ -218,6 +218,32 @@ final class HistoryRetentionTests: XCTestCase {
         XCTAssertEqual(records.count, 2)
     }
 
+    func testCachedRestoreDoesNotApplyEpoch() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-05", input: 200),
+            record(day: "2026-11-06", input: 100),
+        ]), sourceID: "claude", deviceID: "device-a")
+        setEpoch("0+tokscale-4.21.0")
+        // Unchanged inputs: the runner re-stores the cached rows, which were produced under the old epoch.
+        try store.replace(batch: CollectionBatch(daily: try store.records()),
+            sourceID: "claude", deviceID: "device-a", appliesEpoch: false)
+        // The epoch is still pending, so the next real collection rebaselines the corrected 11-06.
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-05", input: 200),
+            record(day: "2026-11-06", input: 40),
+        ]), sourceID: "claude", deviceID: "device-a")
+        XCTAssertEqual(totals(try store.records()), ["2026-11-05": 200, "2026-11-06": 40])
+    }
+
+    func testStampChangesWhenHistoryEpochChanges() {
+        let zone = TimeZone(identifier: "UTC")!
+        let withEpoch = CollectionStamp(formatVersion: 1, timeZone: zone, sourceIDs: ["devin"])
+        let legacy = CollectionStamp(formatVersion: 1, timeZone: zone)
+        XCTAssertNotEqual(withEpoch, legacy)
+        XCTAssertEqual(withEpoch.historyEpochs, ["devin=\(HistoryEpochs.epoch(for: "devin"))"])
+    }
+
     func testTimeZoneChangeTriggersRebaseline() throws {
         let store = try SQLiteUsageStore(url: databaseURL)
         try store.replace(batch: CollectionBatch(daily: [

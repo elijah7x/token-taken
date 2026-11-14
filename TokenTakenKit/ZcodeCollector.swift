@@ -34,7 +34,7 @@ public struct ZcodeCollector: UsageCollector {
         let manager = FileManager.default
         guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
 
-        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
+        let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone, sourceIDs: sourceIDs)
         // Fingerprint before the snapshot: a write that lands during the backup must trigger a re-collect next time.
         let fingerprints = Fingerprints(databaseURL: databaseURL)
         if let stateFile, fingerprints.database != nil, let saved = stateFile.load(),
