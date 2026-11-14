@@ -69,8 +69,9 @@ public struct DevinCollector: UsageCollector {
 
         let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone)
         // Fingerprint before reading: a write that lands during the scan must trigger a full scan next time.
-        let fingerprints = Fingerprints(databaseURL: databaseURL, eventsDirectory: eventsDirectory)
-        if let stateFile, fingerprints.hasInput, let saved = stateFile.load(),
+        let eventsSnapshot = Self.eventsFingerprint(eventsDirectory)
+        let fingerprints = Fingerprints(databaseURL: databaseURL, events: eventsSnapshot.fingerprint)
+        if let stateFile, !eventsSnapshot.hadError, fingerprints.hasInput, let saved = stateFile.load(),
            saved.stamp == stamp, saved.fingerprints == fingerprints {
             log(mode: "unchanged", since: started)
             return CollectionBatch(unchangedSourceIDs: Set(sourceIDs))
@@ -87,16 +88,25 @@ public struct DevinCollector: UsageCollector {
         var seen: Set<String> = []
         var cliSessions: Set<String> = []
         var titles: [String: TitleMatch] = [:]
+        var hasReadFailure = eventsSnapshot.hadError
 
         if hasDatabase {
             try collectCLI(into: &aggregator, seen: &seen, sessions: &cliSessions, titles: &titles)
         }
         if hasEvents {
-            collectDesktop(titles: titles, cliSessions: cliSessions, into: &aggregator)
+            let desktopFailed = collectDesktop(
+                titles: titles,
+                cliSessions: cliSessions,
+                into: &aggregator,
+                fingerprintFailed: eventsSnapshot.hadError
+            )
+            if desktopFailed { hasReadFailure = true }
+        } else if eventsSnapshot.hadError {
+            aggregator.skipped += 1
         }
 
         var batch = aggregator.batch()
-        if let stateFile {
+        if let stateFile, !hasReadFailure {
             let saved = SavedState(stamp: stamp, fingerprints: fingerprints)
             batch.stateCommits = [{ try stateFile.save(saved) }]
         }
@@ -119,12 +129,12 @@ public struct DevinCollector: UsageCollector {
         var wal: FileFingerprint?
         var events: EventsFingerprint
 
-        init(databaseURL: URL, eventsDirectory: URL) {
+        init(databaseURL: URL, events: EventsFingerprint) {
             database = FileFingerprint(url: databaseURL)
             wal = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-wal"))
             // `-shm` is the shared-memory index over the WAL, not content: any process opening the database
             // rewrites it, so watching it would rescan the whole 1 GB database without a real change.
-            events = DevinCollector.eventsFingerprint(eventsDirectory)
+            self.events = events
         }
 
         /// Without an input file an "unchanged" answer would hide a source that disappeared.
@@ -143,15 +153,32 @@ public struct DevinCollector: UsageCollector {
         )
     }
 
-    private static func eventsFingerprint(_ directory: URL) -> EventsFingerprint {
+    private static func eventsFingerprint(_ directory: URL) -> (fingerprint: EventsFingerprint, hadError: Bool) {
         var result = EventsFingerprint.empty
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: directory.path) else { return (result, false) }
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
-        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys)
-        else { return result }
+        var hadError = false
+        guard let enumerator = manager.enumerator(
+            at: directory,
+            includingPropertiesForKeys: keys,
+            errorHandler: { _, _ in
+                hadError = true
+                return true
+            }
+        ) else {
+            return (result, true)
+        }
         for case let url as URL in enumerator {
-            guard url.pathExtension == "ndjson",
-                  let values = try? url.resourceValues(forKeys: Set(keys)),
-                  values.isRegularFile == true else { continue }
+            guard url.pathExtension == "ndjson" else { continue }
+            let values: URLResourceValues
+            do {
+                values = try url.resourceValues(forKeys: Set(keys))
+            } catch {
+                hadError = true
+                continue
+            }
+            guard values.isRegularFile == true else { continue }
             let size = UInt64(values.fileSize ?? 0)
             let modified = values.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0
             result.fileCount += 1
@@ -163,7 +190,7 @@ public struct DevinCollector: UsageCollector {
             hash = (hash ^ modified.bitPattern) &* 0x100_0000_01b3
             result.filesHash &+= hash
         }
-        return result
+        return (result, hadError)
     }
 
     // MARK: - Devin CLI
@@ -174,50 +201,44 @@ public struct DevinCollector: UsageCollector {
         sessions: inout Set<String>,
         titles: inout [String: TitleMatch]
     ) throws {
-        var handle: OpaquePointer?
-        let result = sqlite3_open_v2(databaseURL.path, &handle, SQLITE_OPEN_READONLY, nil)
-        guard result == SQLITE_OK, let db = handle else {
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not open the Devin database"
-            if let handle { sqlite3_close(handle) }
-            throw CollectorError.open(message)
-        }
-        defer { sqlite3_close(db) }
-        // `mode=ro` reads the write-ahead log, which carries real rows; `immutable=1` could skip it.
-        sqlite3_busy_timeout(db, 5_000)
+        try SQLiteSnapshotReader.withReadableDatabase(
+            at: databaseURL,
+            temporaryDirectory: FileManager.default.temporaryDirectory
+        ) { db in
+            guard try SQLiteSnapshotReader.tableExists(db, "sessions") else {
+                // A database without its sessions table cannot be read, and must not look like an empty source.
+                throw CollectorError.sql("Devin database has no sessions table")
+            }
+            titles = try titleLookup(db)
+            guard try SQLiteSnapshotReader.tableExists(db, "message_nodes") else { return }
 
-        guard try hasTable(db, "sessions") else {
-            // A database without its sessions table cannot be read, and must not look like an empty source.
-            throw CollectorError.sql("Devin database has no sessions table")
-        }
-        titles = try titleLookup(db)
-        guard try hasTable(db, "message_nodes") else { return }
-
-        let statement = try prepare(db, """
-            SELECT m.row_id, m.session_id, m.chat_message, m.created_at, s.model
-            FROM message_nodes m JOIN sessions s ON m.session_id = s.id
-            ORDER BY m.row_id;
-            """)
-        defer { sqlite3_finalize(statement) }
-        while true {
-            let step = sqlite3_step(statement)
-            guard step != SQLITE_DONE else { break }
-            guard step == SQLITE_ROW else { throw lastError(db) }
-            switch Self.parseCLI(
-                rowID: sqlite3_column_int64(statement, 0),
-                sessionID: text(statement, 1),
-                chatMessage: text(statement, 2),
-                rowCreatedAt: sqlite3_column_int64(statement, 3),
-                sessionModel: text(statement, 4)
-            ) {
-            case .counted(let row):
-                // Lowest row_id wins, which is also the earliest write, so a duplicate never moves a turn.
-                guard seen.insert(row.key).inserted else { continue }
-                sessions.insert(row.sessionID)
-                aggregator.record(timestamp: row.timestamp, modelID: row.modelID, counts: row.counts)
-            case .ignored:
-                continue
-            case .skipped:
-                aggregator.skipped += 1
+            let statement = try SQLiteSnapshotReader.prepare(db, """
+                SELECT m.row_id, m.session_id, m.chat_message, m.created_at, s.model
+                FROM message_nodes m JOIN sessions s ON m.session_id = s.id
+                ORDER BY m.row_id;
+                """)
+            defer { sqlite3_finalize(statement) }
+            while true {
+                let step = sqlite3_step(statement)
+                guard step != SQLITE_DONE else { break }
+                guard step == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
+                switch Self.parseCLI(
+                    rowID: sqlite3_column_int64(statement, 0),
+                    sessionID: text(statement, 1),
+                    chatMessage: text(statement, 2),
+                    rowCreatedAt: sqlite3_column_int64(statement, 3),
+                    sessionModel: text(statement, 4)
+                ) {
+                case .counted(let row):
+                    // Lowest row_id wins, which is also the earliest write, so a duplicate never moves a turn.
+                    guard seen.insert(row.key).inserted else { continue }
+                    sessions.insert(row.sessionID)
+                    aggregator.record(timestamp: row.timestamp, modelID: row.modelID, counts: row.counts)
+                case .ignored:
+                    continue
+                case .skipped:
+                    aggregator.skipped += 1
+                }
             }
         }
     }
@@ -225,7 +246,7 @@ public struct DevinCollector: UsageCollector {
     /// `title -> CLI session`, used only to suppress Desktop usage the CLI already counted.
     /// An ambiguous title resolves to no session.
     private func titleLookup(_ db: OpaquePointer) throws -> [String: TitleMatch] {
-        let statement = try prepare(db, """
+        let statement = try SQLiteSnapshotReader.prepare(db, """
             SELECT id, title, model FROM sessions
             WHERE title IS NOT NULL AND TRIM(title) != '';
             """)
@@ -234,7 +255,7 @@ public struct DevinCollector: UsageCollector {
         while true {
             let step = sqlite3_step(statement)
             guard step != SQLITE_DONE else { break }
-            guard step == SQLITE_ROW else { throw lastError(db) }
+            guard step == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
             let sessionID = text(statement, 0)
             guard let title = Self.trimmed(text(statement, 1)) else { continue }
             if let existing = lookup[title] {
@@ -328,6 +349,7 @@ public struct DevinCollector: UsageCollector {
     private struct DesktopFileResult {
         var records: [DesktopRecord] = []
         var skipped = 0
+        var readFailed = false
     }
 
     private struct DesktopRecord {
@@ -358,28 +380,52 @@ public struct DevinCollector: UsageCollector {
     private func collectDesktop(
         titles: [String: TitleMatch],
         cliSessions: Set<String>,
-        into aggregator: inout Aggregator
-    ) {
-        for file in Self.eventFiles(in: eventsDirectory) {
+        into aggregator: inout Aggregator,
+        fingerprintFailed: Bool
+    ) -> Bool {
+        let scan = Self.eventFiles(in: eventsDirectory)
+        var hadFailure = scan.hadError || fingerprintFailed
+        if hadFailure {
+            aggregator.skipped += 1
+        }
+        for file in scan.files {
             let result = desktopRecords(file: file, titles: titles)
             aggregator.skipped += result.skipped
+            if result.readFailed { hadFailure = true }
             for record in result.records where !cliSessions.contains(record.sessionID) {
                 aggregator.record(timestamp: record.timestamp, modelID: record.modelID, counts: record.counts)
             }
         }
+        return hadFailure
     }
 
-    private static func eventFiles(in directory: URL) -> [URL] {
+    private static func eventFiles(in directory: URL) -> (files: [URL], hadError: Bool) {
         let keys: [URLResourceKey] = [.isRegularFileKey]
-        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys)
-        else { return [] }
+        var hadError = false
+        guard let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: keys,
+            errorHandler: { _, _ in
+                hadError = true
+                return true
+            }
+        ) else {
+            return ([], true)
+        }
         var files: [URL] = []
         for case let url as URL in enumerator {
-            guard url.pathExtension == "ndjson",
-                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            guard url.pathExtension == "ndjson" else { continue }
+            let isRegularFile: Bool
+            do {
+                isRegularFile = try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true
+            } catch {
+                hadError = true
+                continue
+            }
+            guard isRegularFile else { continue }
             files.append(url)
         }
-        return files.sorted { $0.path < $1.path }
+        return (files.sorted { $0.path < $1.path }, hadError)
     }
 
     private func desktopRecords(file: URL, titles: [String: TitleMatch]) -> DesktopFileResult {
@@ -435,6 +481,7 @@ public struct DevinCollector: UsageCollector {
             }
         } catch {
             result.skipped += 1
+            result.readFailed = true
             return result
         }
 
@@ -793,27 +840,6 @@ public struct DevinCollector: UsageCollector {
     }
 
     // MARK: - SQLite helpers
-
-    private func hasTable(_ db: OpaquePointer, _ name: String) throws -> Bool {
-        let statement = try prepare(db, "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '\(name)';")
-        defer { sqlite3_finalize(statement) }
-        let step = sqlite3_step(statement)
-        guard step != SQLITE_DONE else { return false }
-        guard step == SQLITE_ROW else { throw lastError(db) }
-        return true
-    }
-
-    private func prepare(_ db: OpaquePointer, _ sql: String) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw lastError(db)
-        }
-        return statement
-    }
-
-    private func lastError(_ db: OpaquePointer) -> CollectorError {
-        .sql(String(cString: sqlite3_errmsg(db)))
-    }
 
     private func text(_ statement: OpaquePointer, _ index: Int32) -> String {
         guard let value = sqlite3_column_text(statement, index) else { return "" }

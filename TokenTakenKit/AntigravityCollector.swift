@@ -132,7 +132,9 @@ public struct AntigravityCollector: UsageCollector {
 
     private func read(_ file: DatabaseFile, temporaryDirectory: URL) throws -> Conversation? {
         let modified = Self.modifiedMilliseconds(file.url)
-        return try withDatabase(file, temporaryDirectory: temporaryDirectory) { db -> Conversation? in
+        return try SQLiteSnapshotReader.withReadableDatabase(
+            at: file.url, temporaryDirectory: temporaryDirectory
+        ) { db -> Conversation? in
             guard let rows = try generationRows(db) else { return nil }
             // The session created-at dates the conversation as a whole; an unreadable mtime degrades to `now`,
             // which is the only stamp left when neither decodes.
@@ -142,107 +144,21 @@ public struct AntigravityCollector: UsageCollector {
         }
     }
 
-    /// Opens a conversation database read-only and probes `sqlite_master` to verify it is readable. Closed WAL
-    /// databases lose their `-wal` and `-shm` sidecars, so `SQLITE_OPEN_READONLY` succeeds on open and only fails on
-    /// the first prepare when SQLite cannot create `-shm`. When the read-only open or probe fails, copies the
-    /// database and any sidecars to `temporaryDirectory` and opens the copy read-write so SQLite can create `-shm`
-    /// and replay any `-wal` without ever opening the original for writing.
-    private func withDatabase<T>(
-        _ file: DatabaseFile,
-        temporaryDirectory: URL,
-        _ body: (OpaquePointer) throws -> T?
-    ) throws -> T? {
-        // A `-wal` without its `-shm` would make a read-only open create the `-shm` beside the client's file.
-        let manager = FileManager.default
-        let orphanedWal = manager.fileExists(atPath: file.url.path + "-wal")
-            && !manager.fileExists(atPath: file.url.path + "-shm")
-        if !orphanedWal, let handle = Self.open(file.url, flags: SQLITE_OPEN_READONLY) {
-            if Self.probe(handle) {
-                defer { sqlite3_close(handle) }
-                return try body(handle)
-            }
-            sqlite3_close(handle)
-        }
-        let copyURL = temporaryDirectory.appendingPathComponent(UUID().uuidString + ".db")
-        defer { Self.removeWithSidecars(copyURL) }
-        try Self.copyWithSidecars(file.url, to: copyURL)
-        guard let handle = Self.open(copyURL, flags: SQLITE_OPEN_READWRITE) else {
-            throw CollectorError.open("Could not open an Antigravity conversation database")
-        }
-        defer { sqlite3_close(handle) }
-        guard Self.probe(handle) else {
-            throw CollectorError.open("Could not open an Antigravity conversation database")
-        }
-        return try body(handle)
-    }
-
-    private static func open(_ url: URL, flags: Int32) -> OpaquePointer? {
-        var handle: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &handle, flags, nil) == SQLITE_OK, let handle else {
-            if let handle { sqlite3_close(handle) }
-            return nil
-        }
-        sqlite3_busy_timeout(handle, 5_000)
-        return handle
-    }
-
-    private static func probe(_ db: OpaquePointer) -> Bool {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master;", -1, &statement, nil) == SQLITE_OK,
-              let statement else { return false }
-        defer { sqlite3_finalize(statement) }
-        return sqlite3_step(statement) == SQLITE_ROW
-    }
-
-    private static func copyWithSidecars(_ url: URL, to destination: URL) throws {
-        let manager = FileManager.default
-        try manager.copyItem(at: url, to: destination)
-        for suffix in ["-wal", "-shm"] {
-            let sidecar = URL(fileURLWithPath: url.path + suffix)
-            guard manager.fileExists(atPath: sidecar.path) else { continue }
-            try manager.copyItem(at: sidecar, to: URL(fileURLWithPath: destination.path + suffix))
-        }
-    }
-
-    private static func removeWithSidecars(_ url: URL) {
-        let manager = FileManager.default
-        for suffix in ["", "-wal", "-shm"] {
-            try? manager.removeItem(atPath: url.path + suffix)
-        }
-    }
-
     /// `nil` when the database has no `gen_metadata` table at all, i.e. it is not a generation database.
     private func generationRows(_ db: OpaquePointer) throws -> [Generation]? {
-        guard try Self.hasGenerationTable(db) else { return nil }
-        let statement = try Self.prepare(db, "SELECT idx, data FROM gen_metadata ORDER BY idx;")
+        guard try SQLiteSnapshotReader.tableExists(db, "gen_metadata") else { return nil }
+        let statement = try SQLiteSnapshotReader.prepare(db, "SELECT idx, data FROM gen_metadata ORDER BY idx;")
         defer { sqlite3_finalize(statement) }
         var rows: [Generation] = []
         while true {
             let result = sqlite3_step(statement)
             guard result != SQLITE_DONE else { break }
-            guard result == SQLITE_ROW else { throw CollectorError.sql(String(cString: sqlite3_errmsg(db))) }
+            guard result == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
             guard let data = Self.blob(statement, 1) else { continue }
             let index = sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 0)
             rows.append(Generation(index: index, data: data))
         }
         return rows
-    }
-
-    private static func hasGenerationTable(_ db: OpaquePointer) throws -> Bool {
-        let statement = try prepare(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gen_metadata';")
-        defer { sqlite3_finalize(statement) }
-        let result = sqlite3_step(statement)
-        if result == SQLITE_DONE { return false }
-        if result == SQLITE_ROW { return true }
-        throw CollectorError.sql(String(cString: sqlite3_errmsg(db)))
-    }
-
-    private static func prepare(_ db: OpaquePointer, _ sql: String) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw CollectorError.sql(String(cString: sqlite3_errmsg(db)))
-        }
-        return statement
     }
 
     /// `trajectory_metadata_blob` row `id='main'`, field `#2`, as epoch ms. Older databases have a single row and

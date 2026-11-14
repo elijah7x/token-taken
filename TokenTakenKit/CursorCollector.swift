@@ -91,91 +91,28 @@ public struct CursorCollector: UsageCollector {
 
     // MARK: - Login state
 
-    /// Reads Cursor's access token directly from its live VS Code state database with `SQLITE_OPEN_READONLY`.
-    /// Read-only mode coordinates safely with a concurrent writer and reads committed rows from the WAL;
-    /// `immutable=1` is avoided because it skips the WAL and is unsafe while another process writes
-    /// (https://www.sqlite.org/c3ref/open.html#uri-filenames).
+    /// Reads Cursor's access token directly from its live VS Code state database via `SQLiteSnapshotReader`,
+    /// falling back to a private copy only when direct read-only access or WAL sidecars cannot be opened.
     private func sessionToken() throws -> String {
         let manager = FileManager.default
         let databaseURL = home.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
         guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
 
-        do {
-            return try Self.readToken(at: databaseURL)
-        } catch is ShmOpenFailure where Self.isWALDatabase(at: databaseURL) {
-            // Fall back to a private online backup for this call only when the WAL `-shm` file cannot be opened.
-            let temporaryDirectory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-            try manager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
-            defer { try? manager.removeItem(at: temporaryDirectory) }
-            let copyURL = temporaryDirectory.appendingPathComponent("state.vscdb")
-            try Self.backupDatabase(from: databaseURL, to: copyURL)
-            do {
-                return try Self.readToken(at: copyURL)
-            } catch let fallbackFailure as ShmOpenFailure {
-                throw fallbackFailure.error
-            }
-        } catch let failure as ShmOpenFailure {
-            throw failure.error
+        return try SQLiteSnapshotReader.withReadableDatabase(
+            at: databaseURL,
+            temporaryDirectory: manager.temporaryDirectory
+        ) { db in
+            try Self.readToken(from: db)
         }
     }
 
-    private struct ShmOpenFailure: Error, Sendable {
-        let error: CollectorError
-    }
-
-    private static func isShmOpenFailure(_ code: Int32) -> Bool {
-        let primary = code & 0xFF
-        return primary == SQLITE_CANTOPEN || primary == SQLITE_READONLY
-    }
-
-    private static func isWALDatabase(at url: URL) -> Bool {
-        let manager = FileManager.default
-        if manager.fileExists(atPath: url.path + "-wal") || manager.fileExists(atPath: url.path + "-shm") {
-            return true
-        }
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
-        defer { try? handle.close() }
-        guard let header = try? handle.read(upToCount: 20),
-              header.count == 20,
-              header.starts(with: Data("SQLite format 3\0".utf8)) else {
-            return false
-        }
-        return header[header.startIndex + 18] == 2 || header[header.startIndex + 19] == 2
-    }
-
-    private static func readToken(at databaseURL: URL) throws -> String {
-        var handle: OpaquePointer?
-        let result = sqlite3_open_v2(databaseURL.path, &handle, SQLITE_OPEN_READONLY, nil)
-        guard result == SQLITE_OK, let handle else {
-            let extended = handle.map { sqlite3_extended_errcode($0) } ?? result
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not open the Cursor state database"
-            if let handle { sqlite3_close(handle) }
-            let error = CollectorError.open(message)
-            if isShmOpenFailure(result) || isShmOpenFailure(extended) {
-                throw ShmOpenFailure(error: error)
-            }
-            throw error
-        }
-        defer { sqlite3_close(handle) }
-        sqlite3_busy_timeout(handle, 5_000)
-
-        var statement: OpaquePointer?
-        let prepareResult = sqlite3_prepare_v2(
-            handle, "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';", -1, &statement, nil
+    private static func readToken(from db: OpaquePointer) throws -> String {
+        let statement = try SQLiteSnapshotReader.prepare(
+            db, "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken';"
         )
-        guard prepareResult == SQLITE_OK, let statement else {
-            let extended = sqlite3_extended_errcode(handle)
-            let error = CollectorError.sql(String(cString: sqlite3_errmsg(handle)))
-            if let statement { sqlite3_finalize(statement) }
-            if isShmOpenFailure(prepareResult) || isShmOpenFailure(extended) {
-                throw ShmOpenFailure(error: error)
-            }
-            throw error
-        }
         defer { sqlite3_finalize(statement) }
 
-        let stepResult = sqlite3_step(statement)
-        switch stepResult {
+        switch sqlite3_step(statement) {
         case SQLITE_ROW:
             guard let value = sqlite3_column_text(statement, 0) else { throw CollectorError.sourceUnavailable }
             let token = String(cString: value).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -187,50 +124,7 @@ public struct CursorCollector: UsageCollector {
         case SQLITE_DONE:
             throw CollectorError.sourceUnavailable
         default:
-            let extended = sqlite3_extended_errcode(handle)
-            let error = CollectorError.sql(String(cString: sqlite3_errmsg(handle)))
-            if isShmOpenFailure(stepResult) || isShmOpenFailure(extended) {
-                throw ShmOpenFailure(error: error)
-            }
-            throw error
-        }
-    }
-
-    // Kept solely as the fallback path when a WAL database's `-shm` file cannot be opened read-only.
-    private static func backupDatabase(from sourceURL: URL, to destinationURL: URL) throws {
-        var source: OpaquePointer?
-        let openSource = sqlite3_open_v2(sourceURL.path, &source, SQLITE_OPEN_READONLY, nil)
-        guard openSource == SQLITE_OK, let source else {
-            let message = source.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not open the Cursor state database"
-            if let source { sqlite3_close(source) }
-            throw CollectorError.open(message)
-        }
-        defer { sqlite3_close(source) }
-        sqlite3_busy_timeout(source, 5_000)
-
-        var destination: OpaquePointer?
-        let openDestination = sqlite3_open_v2(
-            destinationURL.path, &destination, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil
-        )
-        guard openDestination == SQLITE_OK, let destination else {
-            let message = destination.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not create a Cursor state snapshot"
-            if let destination { sqlite3_close(destination) }
-            throw CollectorError.open(message)
-        }
-        defer { sqlite3_close(destination) }
-
-        guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
-            throw CollectorError.sql(String(cString: sqlite3_errmsg(destination)))
-        }
-        let stepResult = sqlite3_backup_step(backup, -1)
-        let finishResult = sqlite3_backup_finish(backup)
-        guard stepResult == SQLITE_DONE, finishResult == SQLITE_OK else {
-            throw CollectorError.sql("Could not back up the Cursor state database")
-        }
-        // The copy inherits WAL mode from the live file; a read-only open of a WAL database without its
-        // -wal/-shm files fails, so convert the private copy to a rollback journal.
-        guard sqlite3_exec(destination, "PRAGMA journal_mode=DELETE;", nil, nil, nil) == SQLITE_OK else {
-            throw CollectorError.sql(String(cString: sqlite3_errmsg(destination)))
+            throw SQLiteSnapshotReader.lastError(db)
         }
     }
 
