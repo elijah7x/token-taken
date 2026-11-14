@@ -4,6 +4,8 @@
 
 Accepted
 
+Status note: [ADR-0013](0013-automatic-updates.md) supersedes the manual-only v0.1 update delivery decision here.
+
 ## Date
 
 2026-11-10

@@ -189,6 +189,14 @@ final class AppSettings {
         }
     }
 
+    /// Automatic background update checks and quiet installation when idle.
+    var autoUpdateEnabled: Bool {
+        didSet {
+            guard autoUpdateEnabled != oldValue else { return }
+            defaults.set(autoUpdateEnabled, forKey: Keys.autoUpdateEnabled)
+        }
+    }
+
     func relaunch() {
         CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -244,6 +252,7 @@ final class AppSettings {
             Keys.syncEnabled: false,
             Keys.cursorAccountCollection: false,
             Keys.mobileReportEnabled: false,
+            Keys.autoUpdateEnabled: true,
         ])
 
         appearance = AppAppearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
@@ -258,6 +267,7 @@ final class AppSettings {
         syncEnabled = defaults.bool(forKey: Keys.syncEnabled)
         cursorAccountCollection = defaults.bool(forKey: Keys.cursorAccountCollection)
         mobileReportEnabled = defaults.bool(forKey: Keys.mobileReportEnabled)
+        autoUpdateEnabled = defaults.bool(forKey: Keys.autoUpdateEnabled)
         launchAtLoginStatus = SMAppService.mainApp.status
         applyUnitStyle(bumpRevision: false)
         // NSApp is not up yet while the app's state is built; apply once launch finishes so a session
@@ -296,5 +306,6 @@ final class AppSettings {
         static let syncEnabled = "syncEnabled"
         static let cursorAccountCollection = "cursorAccountCollection"
         static let mobileReportEnabled = "mobileReportEnabled"
+        static let autoUpdateEnabled = "autoUpdateEnabled"
     }
 }

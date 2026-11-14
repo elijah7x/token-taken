@@ -9,10 +9,10 @@ Status: pre-alpha. The macOS app and CLI share a local SQLite collection and agg
 - XcodeGen generates the Xcode project from `project.yml`.
 - The app is non-sandboxed and distributed outside the Mac App Store with Developer ID so it can read agent logs in the user's home folder and write to iCloud Drive without CloudKit entitlements.
 - Release artifacts use hardened-runtime signatures and secure timestamps on the framework, helpers, and app, signed inside out. Debug helpers remain ad-hoc without a secure timestamp.
-- Distribution is a notarized, stapled DMG. Updates are manual in v0.1, without Sparkle; notarization credentials come only from a keychain profile.
+- Distribution is a notarized, stapled DMG. Updates use a custom automatic background updater without Sparkle, verifying feed hashes, Developer ID team identity, and Gatekeeper assessment before silent install; notarization credentials come only from a keychain profile.
 - A String Catalog provides English and Simplified Chinese from v1.
 
-See [ADR-0001](decisions/0001-native-macos-app.md) and [ADR-0004](decisions/0004-distribution.md).
+See [ADR-0001](decisions/0001-native-macos-app.md), [ADR-0004](decisions/0004-distribution.md), and [ADR-0013](decisions/0013-automatic-updates.md).
 
 ## Targets and layering
 
@@ -111,6 +111,11 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 - Emits versioned JSON with documented errors and exit codes under `docs/contracts/cli.md`.
 - Does not import or launch app UI.
 
+### Updater
+
+- `TokenTakenKit` provides `UpdateFeed`, `AppVersion`, and `UpdateFeedSelection` to decode schema-v1 `updates.json` and GitHub Releases API fallback payloads, restrict DMG downloads to allowlisted `https` hosts, and enforce strictly newer `(version, build)` progression with no rollbacks.
+- `TokenTaken` provides `UpdateChecker` (scheduling checks 15 seconds after launch, every 6 hours, and on activation when the last check is over 6 hours old while **Keep Token Taken up to date automatically** is on, plus manual Check for Updates) and `AppUpdater` (downloading and verifying DMG size, SHA-256, `io.github.elijah7x.TokenTaken` Developer ID team signature, version/build match, and Gatekeeper assessment, staging the app, and installing in place on 10-minute idle when no refresh or window is in use—relaunching in the background—or on quit). Debug and ad-hoc builds never update.
+
 ## Data flow
 
 1. Collectors return daily and hourly batches with device attribution. Missing locations throw `sourceUnavailable`, never a successful empty snapshot.
@@ -125,7 +130,7 @@ Approximating an account-level source from device-local aggregates remains unsup
 
 - **On launch:** display cached data first, then start a refresh. Keep stale data labeled until the refresh succeeds.
 - **On demand (manual-first):** let the user refresh from the main window (`Cmd-R`), menu bar extra, or Settings. There is no user-configurable refresh interval, keeping background work minimal (owner decision 2026-11-10).
-- **Fallback:** run an automatic fallback refresh every 4 hours through a single sleep-tolerant timer (`>= 10` minute tolerance), skipping when a refresh is already running and refreshing on wake from sleep if more than 4 hours have passed since the last success. Collection is incremental per ADR-0006: unchanged sources keep their stored rows and only changed inputs are re-read. No other periodic background work runs, except the opt-in hourly iPhone-report timer in the Mobile report module, which stops when its setting is off. Sync reads happen with each refresh, except that a remote Mac read as `unavailable` or `partial` (not `stale`) triggers a remote-only re-read after 10 seconds, 30 seconds, 2 minutes and 10 minutes, then returns to the normal schedule. Independent source collectors run concurrently and expose last success and errors; `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records, and source health becomes stale by default after 24 hours.
+- **Fallback:** run an automatic fallback refresh every 4 hours through a single sleep-tolerant timer (`>= 10` minute tolerance), skipping when a refresh is already running and refreshing on wake from sleep if more than 4 hours have passed since the last success. Collection is incremental per ADR-0006: unchanged sources keep their stored rows and only changed inputs are re-read. No other periodic background work runs, except the opt-in hourly iPhone-report timer in the Mobile report module, which stops when its setting is off, and the 6-hour automatic update check when **Keep Token Taken up to date automatically** is on. Sync reads happen with each refresh, except that a remote Mac read as `unavailable` or `partial` (not `stale`) triggers a remote-only re-read after 10 seconds, 30 seconds, 2 minutes and 10 minutes, then returns to the normal schedule. Independent source collectors run concurrently and expose last success and errors; `AppModel.dataIssues` summarizes failed/unavailable/stale sources and skipped records, and source health becomes stale by default after 24 hours.
 - **Incremental:** use source cursors or incremental engine output when available and verified. Otherwise run a complete enough collection to prevent gaps. Never treat an unsupported incremental mode as complete.
 - **Engine boundary:** ADR-0005 accepts complete daily history and rolling per-source hourly exports without a per-event export. Model-level hourly attribution and recovery of Codex total-only legacy records are not available.
 

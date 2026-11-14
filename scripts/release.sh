@@ -170,6 +170,21 @@ diskutil image create from --format ULMO --volumeName "Token Taken" "$stage" "$d
 if [[ $wait_for_notarization -eq 1 ]]; then
     xcrun notarytool submit "$dmg" --keychain-profile "$profile" --wait
     xcrun stapler staple "$dmg"
+
+    feed="$(dirname "$dmg")/updates.json"
+    update_base_url="${TOKEN_TAKEN_UPDATE_BASE_URL:-https://elijah.ac.cn/token-taken/releases/v$version-$build_number}"
+    feed_args=(
+        --dmg "$dmg"
+        --version "$version"
+        --build "$build_number"
+        --base-url "$update_base_url"
+        --output "$feed"
+    )
+    if [[ -n "${TOKEN_TAKEN_RELEASE_NOTES:-}" ]]; then
+        feed_args+=(--notes-file "$TOKEN_TAKEN_RELEASE_NOTES")
+    fi
+    feed_path="$(python3 "$root/scripts/make-update-feed.py" "${feed_args[@]}")"
+    echo "Update feed: $feed_path"
 else
     xcrun notarytool submit "$dmg" --keychain-profile "$profile" --no-wait
     echo "Notarization was submitted without waiting. After acceptance, run: xcrun stapler staple \"$dmg\""

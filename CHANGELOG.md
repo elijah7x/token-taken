@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added automatic background update checks and silent installation (`UpdateFeed`, `AppVersion`, `UpdateFeedSelection`, `UpdateChecker`, `AppUpdater`): checks the static `updates.json` feed with GitHub Releases API fallback 15 seconds after launch, every 6 hours, and on activation when stale while **Keep Token Taken up to date automatically** is enabled; verifies size, SHA-256, Developer ID team signature, version/build, and Gatekeeper assessment; installs in place after 10 minutes of idle (relaunching in the background) or on quit; shows a one-time menu bar notice after updating; and adds `scripts/make-update-feed.py` to `scripts/release.sh` ([ADR-0013](docs/decisions/0013-automatic-updates.md)).
 - Added report coverage on iPhone showing which Macs the published report includes and noting that the iPhone and Macs must share the same Apple ID.
 - Added opt-in Cursor account collection: a native collector reads Cursor's own sign-in on this Mac, downloads the account's usage export once per refresh, and writes it to an `account` device so several signed-in Macs count the account once (ADR-0010). Device kinds (`mac`, `account`) follow into the store, the synced-device views, the summary breakdowns, and `token-taken devices` (`kind`, with `local` never true for an account).
 
@@ -33,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Updated the [privacy contract](docs/contracts/privacy.md) to allow automatic update checks and verified DMG downloads from allowlisted `https` hosts with only standard request headers and `User-Agent: TokenTaken/<version>`, and amended [ADR-0004](docs/decisions/0004-distribution.md) via [ADR-0013](docs/decisions/0013-automatic-updates.md).
 - Remote Macs with partial data now show "Partial" instead of "Unavailable", and issue counts in the status note and sidebar banner are split by state (`unavailable`, `partial`, `stale`), falling back to an `incomplete` count when states are mixed.
 - Sync settings now explain that all Macs and the iPhone must share the same Apple ID, and switching Apple ID clears cached remote Mac data and re-reads from the new account.
 - Token Taken now runs on Apple silicon Macs only: the app, `TokenTakenKit`, `token-taken`, and the bundled `tokscale` engine are built and checked as arm64 alone (ADR-0012), which makes the download smaller.
