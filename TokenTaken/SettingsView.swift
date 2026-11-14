@@ -7,7 +7,6 @@ import TokenTakenKit
 struct SettingsView: View {
     @Environment(MainWindowRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var updateChecker = UpdateChecker()
 
     var body: some View {
         ScrollView {
@@ -35,7 +34,7 @@ struct SettingsView: View {
         case .sync:
             SyncSettingsTab()
         case .about:
-            AboutSettingsTab(updateChecker: updateChecker)
+            AboutSettingsTab()
         }
     }
 }
@@ -1416,19 +1415,50 @@ private struct RemoteStatusLabel: View {
 // MARK: - About
 
 private struct AboutSettingsTab: View {
-    let updateChecker: UpdateChecker
-
+    @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var installationMessage: String?
     @State private var installationFailed = false
 
-    private var version: String {
+    private var updateChecker: UpdateChecker { .shared }
+    private var appUpdater: AppUpdater { .shared }
+
+    private var fallbackVersion: String {
         let marketing = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
         return "\(marketing) (\(build))"
     }
 
+    private var versionText: String {
+        updateChecker.currentVersion?.description ?? fallbackVersion
+    }
+
+    private var activeAvailableUpdate: AvailableUpdate? {
+        if case .ready(let update) = appUpdater.phase {
+            return update
+        }
+        if case .available(let update) = updateChecker.state {
+            return update
+        }
+        return nil
+    }
+
+    private var isUpdaterBusy: Bool {
+        switch appUpdater.phase {
+        case .downloading, .verifying, .installing:
+            true
+        case .idle, .ready, .failed:
+            false
+        }
+    }
+
+    private var isUpdaterFailed: Bool {
+        if case .failed = appUpdater.phase { return true }
+        return false
+    }
+
     var body: some View {
+        @Bindable var settings = settings
         VStack(alignment: .leading, spacing: 36) {
             HStack(spacing: 14) {
                 Image(nsImage: NSApplication.shared.applicationIconImage)
@@ -1450,7 +1480,7 @@ private struct AboutSettingsTab: View {
                             .font(.system(size: 12))
                             .foregroundStyle(Palette.ink3)
                             .accessibilityHidden(true)
-                        Text(verbatim: version)
+                        Text(verbatim: versionText)
                             .font(.system(size: 12))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
@@ -1463,6 +1493,16 @@ private struct AboutSettingsTab: View {
             SettingsRowsGroup {
                 updateRow
                 SettingsHairline()
+                SettingsControlRow(
+                    title: "Keep Token Taken up to date automatically",
+                    help: "Checks for new versions every few hours and installs them quietly when you are not using the app. Turn off to check only when you click Check for Updates."
+                ) {
+                    Toggle("Keep Token Taken up to date automatically", isOn: $settings.autoUpdateEnabled)
+                        .labelsHidden()
+                        .toggleStyle(GlassToggleStyle())
+                        .accessibilityLabel(Text("Keep Token Taken up to date automatically"))
+                }
+                SettingsHairline()
                 AboutValueRow(label: "License", value: Text(verbatim: "MIT"))
                 SettingsHairline()
                 AboutValueRow(label: "Acknowledgements", value: Text(verbatim: "tokscale, TokenTracker"))
@@ -1472,15 +1512,7 @@ private struct AboutSettingsTab: View {
 
             SettingsRowsGroup {
                 SettingsControlRow(title: "Command-Line Tool", help: "Use token-taken in Terminal") {
-                    if reduceTransparency && !ThemeRuntime.isCosmos {
-                        Button("Install Command-Line Tool", action: install)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    } else {
-                        Button("Install Command-Line Tool", action: install)
-                            .themedGlassButton()
-                            .controlSize(.small)
-                    }
+                    secondaryActionButton("Install Command-Line Tool", action: install)
                 }
 
                 if let installationMessage {
@@ -1498,49 +1530,68 @@ private struct AboutSettingsTab: View {
     }
 
     private var updateRow: some View {
-        HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("Version")
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(Palette.ink1)
-                    Text(verbatim: version)
-                        .font(.system(size: 13))
-                        .foregroundStyle(Palette.ink2)
-                        .monospacedDigit()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("Version")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Palette.ink1)
+                        Text(verbatim: versionText)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.ink2)
+                            .monospacedDigit()
+                    }
+                    updateStateLabel
                 }
-                updateStateLabel
+
+                Spacer(minLength: 12)
+
+                HStack(spacing: 8) {
+                    if case .ready = appUpdater.phase {
+                        prominentActionButton("Restart to Update") {
+                            appUpdater.installNowAndRelaunch()
+                        }
+                    } else if case .available(let update) = updateChecker.state,
+                              !settings.autoUpdateEnabled || isUpdaterFailed,
+                              !isUpdaterBusy {
+                        secondaryActionButton("Update") {
+                            appUpdater.prepare(update)
+                        }
+                    }
+
+                    secondaryActionButton("Check for Updates") {
+                        Task { await updateChecker.checkNow() }
+                    }
+                    .disabled(updateChecker.isChecking || updateChecker.state == .unsupported || isUpdaterBusy)
+                }
             }
 
-            Spacer(minLength: 12)
-
-            HStack(spacing: 8) {
-                if case .available(_, let url) = updateChecker.state {
-                    if reduceTransparency && !ThemeRuntime.isCosmos {
-                        Link("Download", destination: url)
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                    } else {
-                        Link("Download", destination: url)
-                            .themedGlassButton()
-                            .controlSize(.small)
+            if let update = activeAvailableUpdate,
+               !update.feed.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                releaseNotesBox(update.feed.notes)
+            } else if let notice = appUpdater.justUpdated,
+                      !notice.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text("What's New in \(notice.version)")
+                            .font(.system(size: 11.5, weight: .semibold))
+                            .foregroundStyle(Palette.ink2)
+                            .monospacedDigit()
+                        Spacer(minLength: 8)
+                        Button {
+                            appUpdater.dismissJustUpdated()
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(Palette.ink3)
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("Dismiss"))
                     }
-                }
-
-                if reduceTransparency && !ThemeRuntime.isCosmos {
-                    Button("Check for Updates") {
-                        Task { await updateChecker.check() }
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(updateChecker.isChecking)
-                } else {
-                    Button("Check for Updates") {
-                        Task { await updateChecker.check() }
-                    }
-                    .themedGlassButton()
-                    .controlSize(.small)
-                    .disabled(updateChecker.isChecking)
+                    releaseNotesBox(notice.notes)
                 }
             }
         }
@@ -1550,10 +1601,7 @@ private struct AboutSettingsTab: View {
 
     @ViewBuilder
     private var updateStateLabel: some View {
-        switch updateChecker.state {
-        case .idle:
-            EmptyView()
-        case .checking:
+        if updateChecker.state == .checking {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.mini)
@@ -1561,29 +1609,163 @@ private struct AboutSettingsTab: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
             }
-        case .upToDate:
-            Text("Up to date")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.ink3)
-        case .available(let latestVersion, _):
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text("Update available")
-                Text(verbatim: "· \(latestVersion)")
+        } else {
+            switch appUpdater.phase {
+            case .downloading(let fraction):
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Downloading update…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.ink3)
+                    ProgressView(value: min(max(fraction, 0), 1))
+                        .controlSize(.small)
+                        .frame(maxWidth: 180)
+                }
+            case .verifying:
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Verifying update…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.ink3)
+                }
+            case .installing:
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Installing update…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Palette.ink3)
+                }
+            case .ready(let update):
+                Text("Version \(update.version.description) ready to install")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.roleAccent)
                     .monospacedDigit()
+            case .failed(let message):
+                Text(message)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(SourceHealth.State.failed.dotColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .idle:
+                checkerStateLabel
             }
-            .font(.system(size: 11.5))
-            .foregroundStyle(Palette.roleAccent)
-        case .noRelease:
-            Text("No published release yet")
+        }
+    }
+
+    @ViewBuilder
+    private var checkerStateLabel: some View {
+        switch updateChecker.state {
+        case .idle, .checking:
+            EmptyView()
+        case .upToDate:
+            TimelineView(.everyMinute) { _ in
+                Group {
+                    if let lastCheckedAt = updateChecker.lastCheckedAt {
+                        if Date.now.timeIntervalSince(lastCheckedAt) < 60 {
+                            Text("Up to date · checked just now")
+                        } else {
+                            Text("Up to date · checked \(Self.relativeFormatter.localizedString(for: lastCheckedAt, relativeTo: .now))")
+                        }
+                    } else {
+                        Text("Up to date")
+                    }
+                }
                 .font(.system(size: 11.5))
                 .foregroundStyle(Palette.ink3)
+                .monospacedDigit()
+            }
+        case .available(let update):
+            Text("Version \(update.version.description) available")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.roleAccent)
+                .monospacedDigit()
         case .failed(let message):
             Text(message)
                 .font(.system(size: 11.5))
                 .foregroundStyle(SourceHealth.State.failed.dotColor)
                 .fixedSize(horizontal: false, vertical: true)
+        case .unsupported:
+            Text("Updates are disabled in development builds")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
+
+    private func releaseNotesBox(_ notes: String) -> some View {
+        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+        return ViewThatFits(in: .vertical) {
+            releaseNotesContent(notes)
+            ScrollView {
+                releaseNotesContent(notes)
+            }
+            .frame(height: 160)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            shape.fill(ThemeRuntime.isCosmos ? CosmosPalette.background : Palette.ink1.opacity(0.03))
+        }
+        .overlay {
+            if ThemeRuntime.isCosmos {
+                shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
+            }
+        }
+    }
+
+    private func releaseNotesContent(_ notes: String) -> some View {
+        let attributed = (try? AttributedString(
+            markdown: notes,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace
+            )
+        )) ?? AttributedString(notes)
+
+        return Text(attributed)
+            .font(.system(size: 12))
+            .foregroundStyle(Palette.ink2)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private func secondaryActionButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        if reduceTransparency && !ThemeRuntime.isCosmos {
+            Button(title, action: action)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        } else {
+            Button(title, action: action)
+                .themedGlassButton()
+                .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private func prominentActionButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
+        if ThemeRuntime.isCosmos {
+            Button(title, action: action)
+                .buttonStyle(CosmosProminentButtonStyle())
+                .controlSize(.small)
+        } else if ThemeRuntime.isField || reduceTransparency {
+            Button(title, action: action)
+                .buttonStyle(.borderedProminent)
+                .tint(Palette.roleAccent)
+                .controlSize(.small)
+        } else {
+            Button(title, action: action)
+                .buttonStyle(.glassProminent)
+                .tint(Palette.roleAccent)
+                .controlSize(.small)
+        }
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
 
     private func install() {
         do {
@@ -1595,6 +1777,21 @@ private struct AboutSettingsTab: View {
             installationMessage = error.localizedDescription
             installationFailed = true
         }
+    }
+}
+
+private struct CosmosProminentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(CosmosPalette.background)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                Rectangle()
+                    .fill(CosmosPalette.accent.opacity(configuration.isPressed ? 0.85 : 1))
+            )
+            .contentShape(Rectangle())
     }
 }
 

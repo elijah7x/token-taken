@@ -21,6 +21,10 @@ struct MenuBarContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let notice = AppUpdater.shared.justUpdated {
+                justUpdatedRow(version: notice.version)
+            }
+
             headerRow
 
             heroCard
@@ -233,22 +237,75 @@ struct MenuBarContent: View {
         .accessibilityValue(Text("\(TokenFormat.spoken(source.counts.total)) tokens, \(Share.percent(source.counts.total, of: today.total.total)) of total"))
     }
 
-    private var actionRow: some View {
-        HStack(spacing: 6) {
-            MenuBarPrimaryButton(title: "Open Token Taken") {
-                router.route = .dashboard
-                openWindow(id: MainWindowView.windowID)
-                NSApplication.shared.activate()
-                dismiss()
-            }
+    private func justUpdatedRow(version: String) -> some View {
+        let shape = RoundedRectangle(cornerRadius: settings.theme == .cosmos ? 0 : Radius.inner, style: .continuous)
+        return HStack(spacing: 8) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.roleAccent)
+                .accessibilityHidden(true)
 
-            MenuBarSecondaryButton(title: "Settings…", foreground: Palette.ink1) {
+            Text("Updated to \(version)")
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(Palette.ink1)
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 4)
+
+            Button("What's New") {
+                router.settingsSection = .about
                 router.openSettings(using: openWindow)
                 dismiss()
             }
+            .buttonStyle(.plain)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(Palette.roleAccent)
+            .fixedSize()
 
-            MenuBarSecondaryButton(title: "Quit", foreground: Palette.ink2) {
-                NSApplication.shared.terminate(nil)
+            Button {
+                AppUpdater.shared.dismissJustUpdated()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.ink3)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Dismiss"))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background { shape.fill(settings.theme == .cosmos ? CosmosPalette.background : Palette.cardSurface) }
+        .overlay { shape.strokeBorder(settings.theme == .cosmos ? CosmosPalette.controlRule : Palette.hairline, lineWidth: settings.theme == .cosmos ? 1 : 0.5) }
+    }
+
+    private var actionRow: some View {
+        VStack(spacing: 6) {
+            if case .ready = AppUpdater.shared.phase {
+                MenuBarPrimaryButton(title: "Restart to Update") {
+                    AppUpdater.shared.installNowAndRelaunch()
+                }
+            }
+
+            HStack(spacing: 6) {
+                MenuBarPrimaryButton(title: "Open Token Taken") {
+                    router.route = .dashboard
+                    openWindow(id: MainWindowView.windowID)
+                    NSApplication.shared.activate()
+                    dismiss()
+                }
+
+                MenuBarSecondaryButton(title: "Settings…", foreground: Palette.ink1) {
+                    router.openSettings(using: openWindow)
+                    dismiss()
+                }
+
+                MenuBarSecondaryButton(title: "Quit", foreground: Palette.ink2) {
+                    NSApplication.shared.terminate(nil)
+                }
             }
         }
     }

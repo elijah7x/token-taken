@@ -665,6 +665,22 @@
         }
       }
     },
+    "An update verification step timed out." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "An update verification step timed out."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新验证步骤超时。"
+          }
+        }
+      }
+    },
     "Appearance" : {
       "localizations" : {
         "en" : {
@@ -847,6 +863,22 @@
         }
       }
     },
+    "Check for Updates…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check for Updates…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检查更新…"
+          }
+        }
+      }
+    },
     "Checking…" : {
       "localizations" : {
         "en" : {
@@ -859,6 +891,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在检查…"
+          }
+        }
+      }
+    },
+    "Checks for new versions every few hours and installs them quietly when you are not using the app. Turn off to check only when you click Check for Updates." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checks for new versions every few hours and installs them quietly when you are not using the app. Turn off to check only when you click Check for Updates."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每隔几小时检查新版本，并在你未使用应用时静默安装。关闭后仅在点击“检查更新”时检查。"
           }
         }
       }
@@ -1115,6 +1163,22 @@
         }
       }
     },
+    "Could not build the update code-signing requirement." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not build the update code-signing requirement."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法构建更新的代码签名要求。"
+          }
+        }
+      }
+    },
     "Could not check for updates." : {
       "localizations" : {
         "en" : {
@@ -1137,6 +1201,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法打开本地用量数据库。"
+          }
+        }
+      }
+    },
+    "Could not read update information." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not read update information."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取更新信息。"
           }
         }
       }
@@ -1263,6 +1343,22 @@
         }
       }
     },
+    "Dismiss" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dismiss"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
     "Does not include %@" : {
       "localizations" : {
         "en" : {
@@ -1279,18 +1375,18 @@
         }
       }
     },
-    "Download" : {
+    "Downloading update…" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Download"
+            "value" : "Downloading update…"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "下载"
+            "value" : "正在下载更新…"
           }
         }
       }
@@ -1406,6 +1502,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跟随系统"
+          }
+        }
+      }
+    },
+    "Gatekeeper did not accept the downloaded update." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gatekeeper did not accept the downloaded update."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gatekeeper 未接受已下载的更新。"
           }
         }
       }
@@ -1594,6 +1706,22 @@
         }
       }
     },
+    "Installing update…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing update…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在安装更新…"
+          }
+        }
+      }
+    },
     "Interface language" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1626,6 +1754,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "采集引擎自定义路径无效"
+          }
+        }
+      }
+    },
+    "Keep Token Taken up to date automatically" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep Token Taken up to date automatically"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动保持 Token Taken 为最新版本"
           }
         }
       }
@@ -2012,22 +2156,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "还没有其他 Mac"
-          }
-        }
-      }
-    },
-    "No published release yet" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No published release yet"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无已发布版本"
           }
         }
       }
@@ -2698,6 +2826,22 @@
         }
       }
     },
+    "Restart to Update" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restart to Update"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重启以更新"
+          }
+        }
+      }
+    },
     "Save PNG…" : {
       "localizations" : {
         "en" : {
@@ -3248,6 +3392,150 @@
         }
       }
     },
+    "The disk image does not contain Token Taken.app." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The disk image does not contain Token Taken.app."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "磁盘映像中不包含 Token Taken.app。"
+          }
+        }
+      }
+    },
+    "The downloaded app is not signed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded app is not signed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的应用未签名。"
+          }
+        }
+      }
+    },
+    "The downloaded app signature is not valid for Token Taken." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded app signature is not valid for Token Taken."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的应用签名对 Token Taken 无效。"
+          }
+        }
+      }
+    },
+    "The downloaded app version did not match the update feed." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded app version did not match the update feed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的应用版本与更新源不匹配。"
+          }
+        }
+      }
+    },
+    "The downloaded disk image could not be opened." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded disk image could not be opened."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开下载的磁盘映像。"
+          }
+        }
+      }
+    },
+    "The downloaded update failed its checksum check." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded update failed its checksum check."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的更新未能通过校验和检查。"
+          }
+        }
+      }
+    },
+    "The downloaded update size did not match." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The downloaded update size did not match."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载的更新大小不匹配。"
+          }
+        }
+      }
+    },
+    "The update could not be copied." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The update could not be copied."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法复制更新。"
+          }
+        }
+      }
+    },
+    "The update could not restart Token Taken." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The update could not restart Token Taken."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新无法重新启动 Token Taken。"
+          }
+        }
+      }
+    },
     "Theme" : {
       "localizations" : {
         "en" : {
@@ -3446,6 +3734,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Token"
+          }
+        }
+      }
+    },
+    "Token Taken cannot update itself in this folder. Move it to Applications or update manually." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken cannot update itself in this folder. Move it to Applications or update manually."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken 无法在此文件夹中自行更新。请将其移至“应用程序”文件夹或手动更新。"
           }
         }
       }
@@ -3668,18 +3972,50 @@
         }
       }
     },
-    "Update available" : {
+    "Up to date · checked %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Update available"
+            "value" : "Up to date · checked %@"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "有新版本"
+            "value" : "已是最新 · 检查于 %@"
+          }
+        }
+      }
+    },
+    "Up to date · checked just now" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Up to date · checked just now"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已是最新 · 刚刚检查"
+          }
+        }
+      }
+    },
+    "Update" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新"
           }
         }
       }
@@ -3696,6 +4032,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "检查更新失败（HTTP %lld）。"
+          }
+        }
+      }
+    },
+    "Update download failed (HTTP %lld)." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Update download failed (HTTP %lld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下载更新失败（HTTP %lld）。"
           }
         }
       }
@@ -3732,6 +4084,22 @@
         }
       }
     },
+    "Updated to %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updated to %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已更新至 %@"
+          }
+        }
+      }
+    },
     "Updated · %@" : {
       "localizations" : {
         "en" : {
@@ -3760,6 +4128,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新于 · 刚刚"
+          }
+        }
+      }
+    },
+    "Updates are disabled in development builds" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updates are disabled in development builds"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开发构建中已禁用更新"
+          }
+        }
+      }
+    },
+    "Updates are only supported in Developer ID signed builds." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Updates are only supported in Developer ID signed builds."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅 Developer ID 签名的版本支持更新。"
           }
         }
       }
@@ -3902,6 +4302,22 @@
         }
       }
     },
+    "Verifying update…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verifying update…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在验证更新…"
+          }
+        }
+      }
+    },
     "Version" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3912,12 +4328,76 @@
         }
       }
     },
+    "Version %@ available" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version %@ available"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有可用版本 %@"
+          }
+        }
+      }
+    },
+    "Version %@ ready to install" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version %@ ready to install"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "版本 %@ 已就绪，可安装"
+          }
+        }
+      }
+    },
     "Week" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "周"
+          }
+        }
+      }
+    },
+    "What's New" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What's New"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更新内容"
+          }
+        }
+      }
+    },
+    "What's New in %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What's New in %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 更新内容"
           }
         }
       }

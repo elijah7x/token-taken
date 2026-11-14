@@ -4,6 +4,7 @@ import TokenTakenKit
 
 @main
 struct TokenTakenApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var settings: AppSettings
     @State private var model: AppModel
     @State private var refreshCoordinator: RefreshCoordinator?
@@ -11,6 +12,7 @@ struct TokenTakenApp: App {
 
     init() {
         let settings = AppSettings()
+        let coordinator: RefreshCoordinator?
         do {
             let refreshCoordinator = try RefreshCoordinator(settings: settings)
             let model = AppModel(settings: settings, store: refreshCoordinator.store)
@@ -21,6 +23,7 @@ struct TokenTakenApp: App {
             _settings = State(initialValue: settings)
             _model = State(initialValue: model)
             _refreshCoordinator = State(initialValue: refreshCoordinator)
+            coordinator = refreshCoordinator
         } catch {
             let model = AppModel(
                 settings: settings,
@@ -30,7 +33,9 @@ struct TokenTakenApp: App {
             _settings = State(initialValue: settings)
             _model = State(initialValue: model)
             _refreshCoordinator = State(initialValue: nil)
+            coordinator = nil
         }
+        appDelegate.configure(settings: settings, refreshCoordinator: coordinator)
     }
 
     var body: some Scene {
@@ -45,6 +50,9 @@ struct TokenTakenApp: App {
         .defaultSize(width: 1100, height: 720)
         .windowResizability(.contentMinSize)
         .commands {
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesCommand(router: router)
+            }
             CommandGroup(replacing: .appSettings) {
                 SettingsCommand(router: router)
             }
@@ -131,5 +139,54 @@ private struct SettingsCommand: View {
             router.openSettings(using: openWindow)
         }
         .keyboardShortcut(",", modifiers: .command)
+    }
+}
+
+private struct CheckForUpdatesCommand: View {
+    let router: MainWindowRouter
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Check for Updates…") {
+            router.settingsSection = .about
+            router.openSettings(using: openWindow)
+            Task { await UpdateChecker.shared.checkNow() }
+        }
+    }
+}
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var settings: AppSettings?
+    private var refreshCoordinator: RefreshCoordinator?
+    private var didStartUpdater = false
+
+    func configure(settings: AppSettings, refreshCoordinator: RefreshCoordinator?) {
+        self.settings = settings
+        self.refreshCoordinator = refreshCoordinator
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !didStartUpdater, let settings else { return }
+        didStartUpdater = true
+
+        AppUpdater.shared.consumeLaunchMarker()
+        AppUpdater.shared.canInstallSilently = { [weak refreshCoordinator] in
+            if refreshCoordinator?.isRefreshing == true {
+                return false
+            }
+            if NSApp.modalWindow != nil {
+                return false
+            }
+            if NSApp.isActive, NSApp.keyWindow != nil {
+                return false
+            }
+            return true
+        }
+        UpdateChecker.shared.start(automatic: { settings.autoUpdateEnabled })
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        _ = AppUpdater.shared.installStagedOnQuit()
     }
 }
