@@ -18,7 +18,8 @@ public struct AntigravityCollector: UsageCollector {
     public let sourceIDs = ["antigravity"]
 
     private static let sourceID = "antigravity"
-    private static let stateFormatVersion = 1
+    // Bump to 2 so state saved before the closed-WAL fix misses `saved.stamp == stamp` and re-reads all DBs once.
+    private static let stateFormatVersion = 2
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
     private let roots: [Root]
@@ -91,6 +92,7 @@ public struct AntigravityCollector: UsageCollector {
         defer { try? manager.removeItem(at: temporaryDirectory) }
 
         var aggregator = Aggregator(deviceID: deviceID, timeZone: timeZone, now: now)
+        var unreadableDatabases = 0
         for file in files {
             let conversation: Conversation?
             do {
@@ -98,6 +100,7 @@ public struct AntigravityCollector: UsageCollector {
             } catch {
                 // A database that cannot be read is a partial read; count it so hourly coverage stays unknown.
                 aggregator.skipUnreadableDatabase()
+                unreadableDatabases += 1
                 Self.logger.error("source=antigravity unreadable_database")
                 continue
             }
@@ -110,8 +113,9 @@ public struct AntigravityCollector: UsageCollector {
         }
 
         var batch = aggregator.batch()
-        // Save the fingerprint only when the files did not change during the read, so the next run re-collects.
-        if let stateFile, Self.fingerprints(files) == fingerprints {
+        // Save the fingerprint only when every database was read and none changed during the read; otherwise an
+        // unchanged fingerprint would stop the next run from retrying the databases this one could not read.
+        if let stateFile, unreadableDatabases == 0, Self.fingerprints(files) == fingerprints {
             let saved = SavedState(stamp: stamp, files: fingerprints)
             batch.stateCommits = [{ try stateFile.save(saved) }]
         }
@@ -138,35 +142,56 @@ public struct AntigravityCollector: UsageCollector {
         }
     }
 
-    /// Read-only open of a live conversation database. SQLite refuses a read-only WAL open when its `-shm` is not
-    /// writable, so a failure falls back to a private copy read through the same snapshot.
+    /// Opens a conversation database read-only and probes `sqlite_master` to verify it is readable. Closed WAL
+    /// databases lose their `-wal` and `-shm` sidecars, so `SQLITE_OPEN_READONLY` succeeds on open and only fails on
+    /// the first prepare when SQLite cannot create `-shm`. When the read-only open or probe fails, copies the
+    /// database and any sidecars to `temporaryDirectory` and opens the copy read-write so SQLite can create `-shm`
+    /// and replay any `-wal` without ever opening the original for writing.
     private func withDatabase<T>(
         _ file: DatabaseFile,
         temporaryDirectory: URL,
         _ body: (OpaquePointer) throws -> T?
     ) throws -> T? {
-        if let handle = Self.openReadOnly(file.url) {
-            defer { sqlite3_close(handle) }
-            return try body(handle)
+        // A `-wal` without its `-shm` would make a read-only open create the `-shm` beside the client's file.
+        let manager = FileManager.default
+        let orphanedWal = manager.fileExists(atPath: file.url.path + "-wal")
+            && !manager.fileExists(atPath: file.url.path + "-shm")
+        if !orphanedWal, let handle = Self.open(file.url, flags: SQLITE_OPEN_READONLY) {
+            if Self.probe(handle) {
+                defer { sqlite3_close(handle) }
+                return try body(handle)
+            }
+            sqlite3_close(handle)
         }
         let copyURL = temporaryDirectory.appendingPathComponent(UUID().uuidString + ".db")
-        defer { try? FileManager.default.removeItem(at: copyURL) }
+        defer { Self.removeWithSidecars(copyURL) }
         try Self.copyWithSidecars(file.url, to: copyURL)
-        guard let handle = Self.openReadOnly(copyURL) else {
+        guard let handle = Self.open(copyURL, flags: SQLITE_OPEN_READWRITE) else {
             throw CollectorError.open("Could not open an Antigravity conversation database")
         }
         defer { sqlite3_close(handle) }
+        guard Self.probe(handle) else {
+            throw CollectorError.open("Could not open an Antigravity conversation database")
+        }
         return try body(handle)
     }
 
-    private static func openReadOnly(_ url: URL) -> OpaquePointer? {
+    private static func open(_ url: URL, flags: Int32) -> OpaquePointer? {
         var handle: OpaquePointer?
-        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let handle else {
+        guard sqlite3_open_v2(url.path, &handle, flags, nil) == SQLITE_OK, let handle else {
             if let handle { sqlite3_close(handle) }
             return nil
         }
         sqlite3_busy_timeout(handle, 5_000)
         return handle
+    }
+
+    private static func probe(_ db: OpaquePointer) -> Bool {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master;", -1, &statement, nil) == SQLITE_OK,
+              let statement else { return false }
+        defer { sqlite3_finalize(statement) }
+        return sqlite3_step(statement) == SQLITE_ROW
     }
 
     private static func copyWithSidecars(_ url: URL, to destination: URL) throws {
@@ -179,11 +204,17 @@ public struct AntigravityCollector: UsageCollector {
         }
     }
 
+    private static func removeWithSidecars(_ url: URL) {
+        let manager = FileManager.default
+        for suffix in ["", "-wal", "-shm"] {
+            try? manager.removeItem(atPath: url.path + suffix)
+        }
+    }
+
     /// `nil` when the database has no `gen_metadata` table at all, i.e. it is not a generation database.
     private func generationRows(_ db: OpaquePointer) throws -> [Generation]? {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT idx, data FROM gen_metadata ORDER BY idx;", -1, &statement, nil) == SQLITE_OK,
-              let statement else { return nil }
+        guard try Self.hasGenerationTable(db) else { return nil }
+        let statement = try Self.prepare(db, "SELECT idx, data FROM gen_metadata ORDER BY idx;")
         defer { sqlite3_finalize(statement) }
         var rows: [Generation] = []
         while true {
@@ -195,6 +226,23 @@ public struct AntigravityCollector: UsageCollector {
             rows.append(Generation(index: index, data: data))
         }
         return rows
+    }
+
+    private static func hasGenerationTable(_ db: OpaquePointer) throws -> Bool {
+        let statement = try prepare(db, "SELECT 1 FROM sqlite_master WHERE type='table' AND name='gen_metadata';")
+        defer { sqlite3_finalize(statement) }
+        let result = sqlite3_step(statement)
+        if result == SQLITE_DONE { return false }
+        if result == SQLITE_ROW { return true }
+        throw CollectorError.sql(String(cString: sqlite3_errmsg(db)))
+    }
+
+    private static func prepare(_ db: OpaquePointer, _ sql: String) throws -> OpaquePointer {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw CollectorError.sql(String(cString: sqlite3_errmsg(db)))
+        }
+        return statement
     }
 
     /// `trajectory_metadata_blob` row `id='main'`, field `#2`, as epoch ms. Older databases have a single row and
