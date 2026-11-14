@@ -109,12 +109,26 @@ final class AntigravityCollectorTests: XCTestCase {
         }
     }
 
+    private func insertGenerationRows(_ db: OpaquePointer, rows: [[UInt8]], startingAt offset: Int64 = 0) throws {
+        var insert: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "INSERT INTO gen_metadata VALUES (?1, ?2, 0);", -1, &insert, nil) == SQLITE_OK,
+              let insert else { throw TestError.sqlite("Could not prepare insert") }
+        defer { sqlite3_finalize(insert) }
+        for (index, row) in rows.enumerated() {
+            sqlite3_reset(insert)
+            sqlite3_bind_int64(insert, 1, offset + Int64(index))
+            _ = row.withUnsafeBytes { sqlite3_bind_blob(insert, 2, $0.baseAddress, Int32(row.count), transient) }
+            guard sqlite3_step(insert) == SQLITE_DONE else { throw TestError.sqlite("Could not insert row") }
+        }
+    }
+
     private func writeDatabase(
         at url: URL,
         rows: [[UInt8]],
         anchor: Int64? = nil,
         steps: [Step] = [],
-        includeMetadataTable: Bool = true
+        includeMetadataTable: Bool = true,
+        walMode: Bool = false
     ) throws {
         try? FileManager.default.removeItem(at: url)
         var handle: OpaquePointer?
@@ -122,22 +136,16 @@ final class AntigravityCollectorTests: XCTestCase {
             throw TestError.sqlite("Could not create synthetic database")
         }
         defer { sqlite3_close(db) }
+        if walMode {
+            try execute(db, "PRAGMA journal_mode=WAL;")
+        }
         try execute(db, "CREATE TABLE gen_metadata (idx INTEGER, data BLOB, size INTEGER);")
         if includeMetadataTable {
             try execute(db, "CREATE TABLE trajectory_metadata_blob (id TEXT, data BLOB);")
         }
         try execute(db, "CREATE TABLE steps (idx INTEGER, step_type INTEGER, metadata BLOB);")
 
-        var insert: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "INSERT INTO gen_metadata VALUES (?1, ?2, 0);", -1, &insert, nil) == SQLITE_OK,
-              let insert else { throw TestError.sqlite("Could not prepare insert") }
-        defer { sqlite3_finalize(insert) }
-        for (index, row) in rows.enumerated() {
-            sqlite3_reset(insert)
-            sqlite3_bind_int64(insert, 1, Int64(index))
-            _ = row.withUnsafeBytes { sqlite3_bind_blob(insert, 2, $0.baseAddress, Int32(row.count), transient) }
-            guard sqlite3_step(insert) == SQLITE_DONE else { throw TestError.sqlite("Could not insert row") }
-        }
+        try insertGenerationRows(db, rows: rows)
 
         if let anchor {
             let data = field(2, bytes: timestamp(milliseconds: anchor))
@@ -488,5 +496,145 @@ final class AntigravityCollectorTests: XCTestCase {
 
         XCTAssertEqual(batch.daily.count, 1)
         XCTAssertEqual(batch.daily.first?.counts.input, 10)
+    }
+
+    func testReadsClosedWalDatabaseWithoutSidecars() async throws {
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        let url = cliRoot(home).appendingPathComponent("closed-wal.db")
+        let stamp = milliseconds("2026-11-10T10:00:00Z")
+        try writeDatabase(
+            at: url,
+            rows: [
+                blob(Row(
+                    responseID: "resp-wal-1", model: "gemini-4-argon",
+                    input: 120, cacheRead: 30, output: 80, reasoning: 20, explicit: stamp
+                )),
+            ],
+            walMode: true
+        )
+        // Apple's SQLite keeps WAL sidecars after close; the client removes them, so the fixture does too.
+        for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: url.path + suffix) }
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+        let header = try Data(contentsOf: url)
+        XCTAssertGreaterThanOrEqual(header.count, 20)
+        XCTAssertEqual(header[18], 2)
+        XCTAssertEqual(header[19], 2)
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertEqual(batch.daily.count, 1)
+        let record = try XCTUnwrap(batch.daily.first)
+        XCTAssertEqual(record.eventCount, 1)
+        XCTAssertEqual(record.counts.input, 120)
+        XCTAssertEqual(record.counts.cacheRead, 30)
+        XCTAssertEqual(record.counts.output, 80)
+        XCTAssertEqual(record.counts.reasoning, 20)
+        XCTAssertEqual(record.counts.total, 250)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+    }
+
+    func testReadsWalDatabaseWithUncheckpointedWal() async throws {
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        let staging = directory.appendingPathComponent("staging.db")
+        let destination = cliRoot(home).appendingPathComponent("uncheckpointed.db")
+        let stamp = milliseconds("2026-11-10T10:00:00Z")
+
+        do {
+            var handle: OpaquePointer?
+            guard sqlite3_open(staging.path, &handle) == SQLITE_OK, let db = handle else {
+                throw TestError.sqlite("Could not create staging WAL database")
+            }
+            defer { sqlite3_close(db) }
+            try execute(db, "PRAGMA journal_mode=WAL;")
+            try execute(db, "PRAGMA wal_autocheckpoint=0;")
+            try execute(db, "CREATE TABLE gen_metadata (idx INTEGER, data BLOB, size INTEGER);")
+            try execute(db, "CREATE TABLE trajectory_metadata_blob (id TEXT, data BLOB);")
+            try execute(db, "CREATE TABLE steps (idx INTEGER, step_type INTEGER, metadata BLOB);")
+            try insertGenerationRows(db, rows: [
+                blob(Row(responseID: "resp-main", model: "gemini-4-argon", input: 100, output: 10, explicit: stamp)),
+            ])
+            try execute(db, "PRAGMA wal_checkpoint(TRUNCATE);")
+            // With autocheckpoint disabled, this row lives only in -wal until checkpointed.
+            try insertGenerationRows(db, rows: [
+                blob(Row(responseID: "resp-wal", model: "gemini-4-argon", input: 250, output: 40, explicit: stamp)),
+            ], startingAt: 1)
+
+            try FileManager.default.copyItem(at: staging, to: destination)
+            try FileManager.default.copyItem(
+                at: URL(fileURLWithPath: staging.path + "-wal"),
+                to: URL(fileURLWithPath: destination.path + "-wal")
+            )
+        }
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path + "-shm"))
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertEqual(batch.daily.count, 1)
+        let record = try XCTUnwrap(batch.daily.first)
+        XCTAssertEqual(record.eventCount, 2)
+        XCTAssertEqual(record.counts.input, 350)
+        XCTAssertEqual(record.counts.output, 50)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path + "-shm"))
+    }
+
+    func testUnreadableDatabaseIsPartialReadNotSkipped() async throws {
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        let corruptURL = cliRoot(home).appendingPathComponent("corrupt.db")
+        try Data("not a sqlite database".utf8).write(to: corruptURL)
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
+    }
+
+    func testStateFromBeforeFixIsIgnored() async throws {
+        struct LegacyFile: Codable, Sendable {
+            var client: String
+            var database: FileFingerprint
+            var wal: FileFingerprint?
+        }
+        struct LegacyState: Codable, Sendable {
+            var stamp: CollectionStamp
+            var files: [LegacyFile]
+        }
+
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        let stateDirectory = directory.appendingPathComponent("state", isDirectory: true)
+        let url = cliRoot(home).appendingPathComponent("conv.db")
+        try writeDatabase(
+            at: url,
+            rows: [
+                blob(Row(responseID: "resp-1", model: "gemini-4-argon", input: 42, explicit: milliseconds("2026-11-10T10:00:00Z"))),
+            ],
+            walMode: true
+        )
+
+        let fingerprint = try XCTUnwrap(FileFingerprint(url: url))
+        let legacyState = LegacyState(
+            stamp: CollectionStamp(formatVersion: 1, timeZone: utc),
+            files: [LegacyFile(client: "cli", database: fingerprint, wal: nil)]
+        )
+        try CollectorStateFile<LegacyState>(directory: stateDirectory, name: "antigravity").save(legacyState)
+
+        let first = try await collector(home: home, stateDirectory: stateDirectory).collect()
+        XCTAssertTrue(first.unchangedSourceIDs.isEmpty)
+        XCTAssertEqual(first.daily.count, 1)
+        XCTAssertEqual(first.daily.first?.counts.input, 42)
+        for commit in first.stateCommits { try commit() }
+
+        let second = try await collector(home: home, stateDirectory: stateDirectory).collect()
+        XCTAssertEqual(second.unchangedSourceIDs, ["antigravity"])
     }
 }
