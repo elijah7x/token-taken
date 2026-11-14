@@ -276,9 +276,9 @@ private struct DimensionSwitchRow: View {
     }
 
     private func select(_ target: BreakdownDimension) {
-        withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) {
-            dimension = target
-        }
+        // No window-wide animation: animating the whole dashboard re-ran layout and pointer hit-testing on every
+        // frame and froze the main thread for 1-1.7 s per switch with a real mouse. The charts animate themselves.
+        dimension = target
     }
 }
 
