@@ -20,11 +20,15 @@ enum SQLiteSnapshotReader {
         // A `-wal` without its `-shm` would make a read-only open create `-shm` beside the client's file.
         let orphanedWal = manager.fileExists(atPath: url.path + "-wal")
             && !manager.fileExists(atPath: url.path + "-shm")
-        if !orphanedWal, let handle = openReadOnlyIfReadable(url) {
+        if !orphanedWal, let handle = try openReadOnlyIfReadable(url) {
             defer { sqlite3_close(handle) }
             return try body(handle)
         }
 
+        // A rollback journal means a write is in progress; the main file alone is not a consistent snapshot.
+        if manager.fileExists(atPath: url.path + "-journal") {
+            throw CollectorError.open("SQLite database has a write in progress")
+        }
         let stagingDirectory = temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
             try manager.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
@@ -84,26 +88,38 @@ enum SQLiteSnapshotReader {
         .sql(String(cString: sqlite3_errmsg(db)))
     }
 
-    private static func openReadOnlyIfReadable(_ url: URL) -> OpaquePointer? {
+    /// `nil` when the direct read fails in a way a private copy can fix. A busy or locked database means a writer
+    /// holds it, and copying the main file would expose an uncommitted state, so that throws and the next refresh retries.
+    private static func openReadOnlyIfReadable(_ url: URL) throws -> OpaquePointer? {
         var handle: OpaquePointer?
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK, let handle else {
             if let handle { sqlite3_close(handle) }
             return nil
         }
         sqlite3_busy_timeout(handle, 5_000)
-        guard probe(handle) else {
+        let result = probeResult(handle)
+        guard result == SQLITE_ROW else {
             sqlite3_close(handle)
+            let primary = result & 0xFF
+            if primary == SQLITE_BUSY || primary == SQLITE_LOCKED {
+                throw CollectorError.open("SQLite database is busy")
+            }
             return nil
         }
         return handle
     }
 
     private static func probe(_ db: OpaquePointer) -> Bool {
+        probeResult(db) == SQLITE_ROW
+    }
+
+    private static func probeResult(_ db: OpaquePointer) -> Int32 {
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master;", -1, &statement, nil) == SQLITE_OK,
-              let statement else { return false }
+        let prepared = sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master;", -1, &statement, nil)
+        guard prepared == SQLITE_OK, let statement else { return sqlite3_extended_errcode(db) }
         defer { sqlite3_finalize(statement) }
-        return sqlite3_step(statement) == SQLITE_ROW
+        let step = sqlite3_step(statement)
+        return step == SQLITE_ROW ? step : sqlite3_extended_errcode(db)
     }
 
     /// The files are copied one by one, so a client that reopens and checkpoints the database mid-copy could leave a
