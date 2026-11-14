@@ -335,7 +335,7 @@ final class ZcodeCollectorTests: XCTestCase {
         XCTAssertFalse(hourlyBucket.reasoningKnown)
     }
 
-    func testOnlineBackupReadsLiveWALAndThrowsWhenLiveOpenFails() async throws {
+    func testReadsLiveWALWithOpenWriterAndThrowsWhenOpenFails() async throws {
         let url = try makeDatabase()
         var writer: OpaquePointer?
         XCTAssertEqual(sqlite3_open(url.path, &writer), SQLITE_OK)
@@ -347,7 +347,7 @@ final class ZcodeCollectorTests: XCTestCase {
                 'completed', \(walTimestamp), 'glm-wal', 'zai', 50, 20, 5, 0, 0
             );
             """)
-        // Keep the writer connection open while collecting so the snapshot comes from SQLite online backup.
+        // Keep the writer connection open while collecting so the read sees committed WAL rows.
         let collector = ZcodeCollector(
             databaseURL: url,
             deviceID: "device-a",
@@ -366,8 +366,62 @@ final class ZcodeCollectorTests: XCTestCase {
         )
         do {
             _ = try await failingCollector.collect()
-            XCTFail("Expected corrupt database backup/open to throw")
+            XCTFail("Expected corrupt database open to throw")
         } catch {
+        }
+    }
+
+    func testReadsClosedWALDatabaseWithoutSidecars() async throws {
+        let url = try makeDatabase()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, "PRAGMA journal_mode=WAL;")
+        try execute(db, "PRAGMA wal_checkpoint(TRUNCATE);")
+        sqlite3_close(db)
+
+        for suffix in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: url.path + suffix)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+        let header = try Data(contentsOf: url)
+        XCTAssertGreaterThanOrEqual(header.count, 20)
+        XCTAssertEqual(header[18], 2)
+        XCTAssertEqual(header[19], 2)
+
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        let batch = try await collector.collect()
+
+        XCTAssertEqual(batch.daily.count, 3)
+        XCTAssertEqual(batch.daily[0].counts, TokenCounts(input: 350, cacheRead: 100, cacheWrite: 50, output: 100, reasoning: 20))
+        XCTAssertEqual(batch.daily[1].counts, TokenCounts(input: 220, cacheRead: 50, cacheWrite: 30, output: 80, reasoning: 10))
+        XCTAssertEqual(batch.daily[2].counts, TokenCounts(input: 600, cacheRead: 300, cacheWrite: 100, output: 150, reasoning: 50))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+    }
+
+    func testSchemaFailureThrowsInsteadOfReturningEmpty() async throws {
+        let url = directory.appendingPathComponent("missing-schema.sqlite")
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, "CREATE TABLE unrelated (id INTEGER);")
+        sqlite3_close(db)
+
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        do {
+            _ = try await collector.collect()
+            XCTFail("Missing schema tables must throw")
+        } catch CollectorError.sql {
         }
     }
 

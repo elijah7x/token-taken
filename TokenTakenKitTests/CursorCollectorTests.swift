@@ -343,6 +343,62 @@ final class CursorCollectorTests: XCTestCase {
         XCTAssertEqual(batch.daily.count, 4)
     }
 
+    func testReadsTokenFromClosedWALDatabaseWithoutSidecars() async throws {
+        let url = stateDatabaseURL
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, "PRAGMA journal_mode=WAL;")
+        try execute(db, "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);")
+        try execute(db, "INSERT INTO ItemTable (key, value) VALUES ('cursorAuth/accessToken', 'synthetic-closed-wal-token');")
+        sqlite3_close(db)
+
+        for suffix in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: url.path + suffix)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+        let header = try Data(contentsOf: url)
+        XCTAssertGreaterThanOrEqual(header.count, 20)
+        XCTAssertEqual(header[18], 2)
+        XCTAssertEqual(header[19], 2)
+
+        try writeCLIConfig(["authInfo": ["userId": identifier]])
+        let captured = CapturedRequest()
+        let batch = try await collector(fetch: respond(export, captured: captured)).collect()
+
+        let request = try XCTUnwrap(captured.request)
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Cookie"),
+            "WorkosCursorSessionToken=user_synthetic_1%3A%3Asynthetic-closed-wal-token"
+        )
+        XCTAssertEqual(batch.daily.count, 4)
+        XCTAssertEqual(
+            batch.daily.reduce(.zero) { $0 + $1.counts },
+            TokenCounts(input: 64, cacheRead: 28, cacheWrite: 30, output: 41)
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+    }
+
+    func testMissingItemTableThrowsSQLErrorInsteadOfUnavailable() async throws {
+        let url = stateDatabaseURL
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, "CREATE TABLE OtherTable (key TEXT);")
+        sqlite3_close(db)
+
+        do {
+            _ = try await collector(fetch: respond(export)).collect()
+            XCTFail("Missing ItemTable must fail loudly")
+        } catch let error as CollectorError {
+            guard case .sql = error else { return XCTFail("Expected CollectorError.sql, got \(error)") }
+        }
+    }
+
     func testCSVParserHandlesQuotedCommasQuotesAndNewlines() {
         let text = "a,\"b,c\",\"d\"\"e\",\"f\ng\"\r\n1,2,3,4\n"
         let records = CursorCollector.csvRecords(text)

@@ -357,4 +357,84 @@ final class DevinCollectorTests: XCTestCase {
         } catch CollectorError.sourceUnavailable {
         }
     }
+
+    func testReadsClosedWALDatabaseWithoutSidecars() async throws {
+        let request = chatMessage(
+            requestID: "request-wal-1", generationModel: "swe-2",
+            startedGenerationAt: "2026-01-02T10:00:00.000Z",
+            input: 100, output: 10, cacheRead: 50, cacheWrite: 20
+        )
+        let url = try makeDatabase(
+            sessions: [Session(id: "session-a", title: nil, model: "swe-2")],
+            rows: [
+                Row(rowID: 1, session: "session-a", createdAt: seconds("2026-01-03T00:00:00Z"), message: request),
+            ]
+        )
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, "PRAGMA journal_mode=WAL;")
+        try execute(db, "PRAGMA wal_checkpoint(TRUNCATE);")
+        sqlite3_close(db)
+
+        for suffix in ["-wal", "-shm"] {
+            try? FileManager.default.removeItem(atPath: url.path + suffix)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+        let header = try Data(contentsOf: url)
+        XCTAssertGreaterThanOrEqual(header.count, 20)
+        XCTAssertEqual(header[18], 2)
+        XCTAssertEqual(header[19], 2)
+
+        let batch = try await collector().collect()
+        XCTAssertEqual(batch.daily.count, 1)
+        let record = try XCTUnwrap(batch.daily.first)
+        XCTAssertEqual(record.counts, TokenCounts(input: 100, cacheRead: 50, cacheWrite: 20, output: 10))
+        XCTAssertEqual(record.eventCount, 1)
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-wal"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path + "-shm"))
+    }
+
+    func testReadFailureLeavesStateCommitsEmptyWhileBadRowDoesNot() async throws {
+        try FileManager.default.createDirectory(at: eventsDirectory, withIntermediateDirectories: true)
+        let state = directory.appendingPathComponent("collector-state", isDirectory: true)
+
+        let readable = [
+            #"{"notification":{"sessionUpdate":"usage_update","_meta":{"cognition.ai/inputTokens":100,"cognition.ai/outputTokens":20,"cognition.ai/model":"swe-2-desktop"},"content":{"metadata":{"created_at":"2026-01-05T10:15:00.000Z"}}}}"#,
+            "not-json-line",
+        ].joined(separator: "\n")
+        try Data(readable.utf8).write(to: eventsDirectory.appendingPathComponent("readable.ndjson"))
+
+        let unreadable = eventsDirectory.appendingPathComponent("unreadable.ndjson")
+        try Data("{}".utf8).write(to: unreadable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadable.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path) }
+
+        let failedFileBatch = try await collector(stateDirectory: state).collect()
+        XCTAssertEqual(failedFileBatch.daily.count, 1)
+        XCTAssertEqual(failedFileBatch.skippedRecords, 2)
+        XCTAssertTrue(failedFileBatch.stateCommits.isEmpty)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: unreadable.path)
+        try FileManager.default.removeItem(at: unreadable)
+
+        let unreadableSubdir = eventsDirectory.appendingPathComponent("locked", isDirectory: true)
+        try FileManager.default.createDirectory(at: unreadableSubdir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: unreadableSubdir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: unreadableSubdir.path) }
+
+        let enumeratorFailureBatch = try await collector(stateDirectory: state).collect()
+        XCTAssertEqual(enumeratorFailureBatch.skippedRecords, 2)
+        XCTAssertTrue(enumeratorFailureBatch.stateCommits.isEmpty)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: unreadableSubdir.path)
+        try FileManager.default.removeItem(at: unreadableSubdir)
+
+        // Undecodable rows inside a readable file still count in skipped but allow the state commit.
+        let badRowOnlyBatch = try await collector(stateDirectory: state).collect()
+        XCTAssertEqual(badRowOnlyBatch.skippedRecords, 1)
+        XCTAssertEqual(badRowOnlyBatch.stateCommits.count, 1)
+    }
 }

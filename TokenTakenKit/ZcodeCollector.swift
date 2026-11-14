@@ -43,24 +43,6 @@ public struct ZcodeCollector: UsageCollector {
             return CollectionBatch(unchangedSourceIDs: Set(sourceIDs))
         }
 
-        // SQLite documents immutable=1 as unsafe while another process can write, so read a temporary snapshot.
-        // Source: https://www.sqlite.org/c3ref/open.html#uri-filenames
-        let temporaryDirectory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try manager.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
-        defer { try? manager.removeItem(at: temporaryDirectory) }
-        let copyURL = temporaryDirectory.appendingPathComponent("db.sqlite")
-        try backupDatabase(from: databaseURL, to: copyURL)
-
-        var handle: OpaquePointer?
-        let result = sqlite3_open_v2(copyURL.path, &handle, SQLITE_OPEN_READONLY, nil)
-        guard result == SQLITE_OK, let handle else {
-            let message = handle.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not open the Zcode database"
-            if let handle { sqlite3_close(handle) }
-            throw CollectorError.open(message)
-        }
-        defer { sqlite3_close(handle) }
-
-        let boundary = try nativeBoundary(db: handle)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
@@ -69,8 +51,28 @@ public struct ZcodeCollector: UsageCollector {
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
             currentHour: currentHour, cutoff: cutoff
         )
-        try collectNative(db: handle, into: &aggregator)
-        try collectLegacy(db: handle, boundary: boundary, into: &aggregator)
+
+        try SQLiteSnapshotReader.withReadableDatabase(
+            at: databaseURL,
+            temporaryDirectory: manager.temporaryDirectory
+        ) { handle in
+            // A single deferred read transaction pins one snapshot across boundary, native, and legacy
+            // queries while a writer is live, without needing an unconditional online backup.
+            guard sqlite3_exec(handle, "BEGIN;", nil, nil, nil) == SQLITE_OK else {
+                throw SQLiteSnapshotReader.lastError(handle)
+            }
+            do {
+                let boundary = try nativeBoundary(db: handle)
+                try collectNative(db: handle, into: &aggregator)
+                try collectLegacy(db: handle, boundary: boundary, into: &aggregator)
+                guard sqlite3_exec(handle, "COMMIT;", nil, nil, nil) == SQLITE_OK else {
+                    throw SQLiteSnapshotReader.lastError(handle)
+                }
+            } catch {
+                _ = sqlite3_exec(handle, "ROLLBACK;", nil, nil, nil)
+                throw error
+            }
+        }
         guard manager.fileExists(atPath: databaseURL.path) else { throw CollectorError.sourceUnavailable }
         var batch = aggregator.batch()
         if let stateFile {
@@ -100,46 +102,6 @@ public struct ZcodeCollector: UsageCollector {
             database = FileFingerprint(url: databaseURL)
             wal = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-wal"))
             shm = FileFingerprint(url: URL(fileURLWithPath: databaseURL.path + "-shm"))
-        }
-    }
-
-    private func backupDatabase(from sourceURL: URL, to destinationURL: URL) throws {
-        var source: OpaquePointer?
-        let openSource = sqlite3_open_v2(sourceURL.path, &source, SQLITE_OPEN_READONLY, nil)
-        guard openSource == SQLITE_OK, let source else {
-            let message = source.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not open the Zcode database"
-            if let source { sqlite3_close(source) }
-            throw CollectorError.open(message)
-        }
-        defer { sqlite3_close(source) }
-        sqlite3_busy_timeout(source, 5_000)
-
-        var destination: OpaquePointer?
-        let openDestination = sqlite3_open_v2(
-            destinationURL.path,
-            &destination,
-            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
-            nil
-        )
-        guard openDestination == SQLITE_OK, let destination else {
-            let message = destination.map { String(cString: sqlite3_errmsg($0)) } ?? "Could not create temporary Zcode snapshot"
-            if let destination { sqlite3_close(destination) }
-            throw CollectorError.open(message)
-        }
-        defer { sqlite3_close(destination) }
-
-        guard let backup = sqlite3_backup_init(destination, "main", source, "main") else {
-            throw lastError(destination)
-        }
-        let stepResult = sqlite3_backup_step(backup, -1)
-        let finishResult = sqlite3_backup_finish(backup)
-        guard stepResult == SQLITE_DONE, finishResult == SQLITE_OK else {
-            throw CollectorError.sql("Could not back up the Zcode database")
-        }
-        // The copy inherits WAL mode from the live file; a read-only open of a WAL database without its
-        // -wal/-shm files fails, so convert the private copy to a rollback journal.
-        guard sqlite3_exec(destination, "PRAGMA journal_mode=DELETE;", nil, nil, nil) == SQLITE_OK else {
-            throw lastError(destination)
         }
     }
 
@@ -174,14 +136,14 @@ public struct ZcodeCollector: UsageCollector {
         """
 
     private func nativeBoundary(db: OpaquePointer) throws -> Int64? {
-        let statement = try prepare(db, "SELECT MIN(started_at) FROM model_usage WHERE \(Self.nativeBoundaryCondition);")
+        let statement = try SQLiteSnapshotReader.prepare(db, "SELECT MIN(started_at) FROM model_usage WHERE \(Self.nativeBoundaryCondition);")
         defer { sqlite3_finalize(statement) }
-        guard sqlite3_step(statement) == SQLITE_ROW else { throw lastError(db) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
         return sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 0)
     }
 
     private func collectNative(db: OpaquePointer, into aggregator: inout Aggregator) throws {
-        let statement = try prepare(db, """
+        let statement = try SQLiteSnapshotReader.prepare(db, """
             SELECT started_at, model_id, input_tokens, output_tokens, reasoning_tokens,
                    cache_read_input_tokens, cache_creation_input_tokens
             FROM model_usage WHERE \(Self.nativeScanCondition);
@@ -190,7 +152,7 @@ public struct ZcodeCollector: UsageCollector {
         while true {
             let result = sqlite3_step(statement)
             guard result != SQLITE_DONE else { break }
-            guard result == SQLITE_ROW else { throw lastError(db) }
+            guard result == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
             aggregator.record(
                 timestamp: sqlite3_column_int64(statement, 0),
                 modelID: text(statement, 1),
@@ -206,7 +168,7 @@ public struct ZcodeCollector: UsageCollector {
     }
 
     private func collectLegacy(db: OpaquePointer, boundary: Int64?, into aggregator: inout Aggregator) throws {
-        let statement = try prepare(db, """
+        let statement = try SQLiteSnapshotReader.prepare(db, """
             SELECT session_id, time_created, rowid,
                    COALESCE(json_extract(data, '$.time.created'), 0),
                    COALESCE(json_extract(data, '$.time.completed'), 0),
@@ -240,7 +202,7 @@ public struct ZcodeCollector: UsageCollector {
         while true {
             let result = sqlite3_step(statement)
             guard result != SQLITE_DONE else { break }
-            guard result == SQLITE_ROW else { throw lastError(db) }
+            guard result == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
             let provider = text(statement, 11).lowercased()
             guard !provider.contains("anthropic"), !provider.contains("openai"), !provider.contains("google") else {
                 continue
@@ -306,18 +268,6 @@ public struct ZcodeCollector: UsageCollector {
             ),
             reasoningKnown: validSplit
         )
-    }
-
-    private func prepare(_ db: OpaquePointer, _ sql: String) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
-            throw lastError(db)
-        }
-        return statement
-    }
-
-    private func lastError(_ db: OpaquePointer) -> CollectorError {
-        .sql(String(cString: sqlite3_errmsg(db)))
     }
 
     private func text(_ statement: OpaquePointer, _ index: Int32) -> String {

@@ -13,8 +13,10 @@ public enum HistoryEpochs {
     /// because its turns are now dated by the request stamp rather than the row write time, which shifts usage
     /// between local days (ADR-0009). Antigravity moves to 2 because it no longer counts the fixed per-model
     /// preamble as input, which lowers already-counted tokens (ADR-0009). Cursor is listed at its first revision
-    /// so the account-scoped collector's epoch is visible here rather than implied.
-    private static let revisions: [String: Int] = ["devin": 2, "antigravity": 2, "cursor": 1]
+    /// so the account-scoped collector's epoch is visible here rather than implied. Devin and Antigravity move to 3
+    /// because a store upgraded to schema 3 recorded revision 2 without rebaselining, so those corrections never
+    /// replaced the older, larger days; revision 3 applies them once.
+    private static let revisions: [String: Int] = ["devin": 3, "antigravity": 3, "cursor": 1]
 
     public static func epoch(for sourceID: String) -> String {
         let revision = revisions[sourceID] ?? 1
