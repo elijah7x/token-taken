@@ -20,8 +20,9 @@ final class RefreshCoordinator {
     /// A launch sooner than this after the last successful collection reuses the stored numbers;
     /// re-reading every log seconds after the previous read cannot find new data.
     static let launchRefreshFreshness: TimeInterval = 15 * 60
-    /// Re-read remotes caught mid-write or awaiting iCloud download without waiting for the 4-hour fallback.
-    static let remoteRetryDelays: [TimeInterval] = [120, 600]
+    /// Re-read remotes caught mid-write or awaiting iCloud download without waiting for the 4-hour fallback;
+    /// the early retries pick up iCloud downloads requested by the first read.
+    static let remoteRetryDelays: [TimeInterval] = [10, 30, 120, 600]
     static let remoteRetryTolerance: TimeInterval = 15
     /// Opt-in hourly republication keeps the iPhone report at most one refresh cycle old (ADR-0011);
     /// it is the only periodic work beyond the 4-hour fallback and stops when the setting is off.
@@ -238,6 +239,7 @@ final class RefreshCoordinator {
         } else {
             remoteRetryTask?.cancel()
             remoteRetryTask = nil
+            remoteRetryAttempt = 0
         }
         // A failed root or folder read must retry even before any remote Mac has been cached.
         let needsRetry = readFailed || remoteSnapshots.contains {
