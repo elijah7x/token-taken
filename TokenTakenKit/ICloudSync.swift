@@ -228,6 +228,8 @@ public enum ICloudSync {
                 guard metadata.deviceId == id else { throw SyncError.invalidSnapshot }
                 guard !metadata.tombstone else { return nil }
             } catch {
+                // The manifest names the payloads, so requesting them together avoids a second retry round on a fresh Mac.
+                if requestDownloads { requestFolderDownloads(folder) }
                 return unavailable(device: Device(id: id, name: id))
             }
             let device = Device(id: id, name: metadata.displayName)
@@ -347,6 +349,18 @@ public enum ICloudSync {
         let month = String(name.dropFirst(prefix.count).dropLast(".json".count))
         guard month.range(of: #"^[0-9]{4}-(0[1-9]|1[0-2])$"#, options: .regularExpression) != nil else { return nil }
         return month
+    }
+
+    private static func requestFolderDownloads(_ folder: URL) {
+        let manager = FileManager.default
+        guard let entries = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: []) else { return }
+        for entry in entries {
+            let name = entry.lastPathComponent
+            guard name.hasPrefix("."), name.hasSuffix(".icloud") else { continue }
+            let realName = String(name.dropFirst().dropLast(".icloud".count))
+            guard !realName.isEmpty else { continue }
+            try? manager.startDownloadingUbiquitousItem(at: folder.appendingPathComponent(realName))
+        }
     }
 
     private static func unavailable(device: Device, lastWrite: Date? = nil) -> RemoteDeviceSnapshot {
