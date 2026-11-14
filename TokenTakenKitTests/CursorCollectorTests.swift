@@ -32,11 +32,14 @@ final class CursorCollectorTests: XCTestCase {
         }
     }
 
+    private var stateDatabaseURL: URL {
+        directory.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+    }
+
     /// Builds Cursor's `state.vscdb` shape in a temporary home. The token is synthetic, never a real credential.
     private func makeStateDatabase(token: String) throws {
-        let root = directory.appendingPathComponent("Library/Application Support/Cursor/User/globalStorage", isDirectory: true)
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let url = root.appendingPathComponent("state.vscdb")
+        let url = stateDatabaseURL
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         var handle: OpaquePointer?
         guard sqlite3_open(url.path, &handle) == SQLITE_OK, let db = handle else {
             throw TestError.sqlite("Could not create a synthetic Cursor state database")
@@ -307,6 +310,37 @@ final class CursorCollectorTests: XCTestCase {
         } catch let error as CollectorError {
             guard case .sourceUnavailable = error else { return XCTFail("Unexpected error: \(error)") }
         }
+    }
+
+    func testReadsTokenFromLiveWALDatabaseWithOpenWriter() async throws {
+        let url = stateDatabaseURL
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var writer: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &writer), SQLITE_OK)
+        let liveDB = try XCTUnwrap(writer)
+        defer {
+            _ = sqlite3_exec(liveDB, "ROLLBACK;", nil, nil, nil)
+            sqlite3_close(liveDB)
+        }
+        try execute(liveDB, "PRAGMA journal_mode=WAL;")
+        try execute(liveDB, "PRAGMA wal_autocheckpoint=0;")
+        try execute(liveDB, "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);")
+        try execute(liveDB, "INSERT INTO ItemTable (key, value) VALUES ('cursorAuth/accessToken', 'synthetic-wal-session-token');")
+        // Hold an uncommitted write open during collection so `collect()` reads against a live WAL writer.
+        try execute(liveDB, "BEGIN IMMEDIATE;")
+        try execute(liveDB, "INSERT INTO ItemTable (key, value) VALUES ('cursor/concurrentWrite', 'in-progress');")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path + "-wal"))
+
+        try writeCLIConfig(["authInfo": ["userId": identifier]])
+        let captured = CapturedRequest()
+        let batch = try await collector(fetch: respond(export, captured: captured)).collect()
+
+        let request = try XCTUnwrap(captured.request)
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Cookie"),
+            "WorkosCursorSessionToken=user_synthetic_1%3A%3Asynthetic-wal-session-token"
+        )
+        XCTAssertEqual(batch.daily.count, 4)
     }
 
     func testCSVParserHandlesQuotedCommasQuotesAndNewlines() {
