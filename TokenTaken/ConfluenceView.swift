@@ -16,6 +16,7 @@ struct ConfluenceView: View {
         self.dimension = dimension
     }
 
+    @Environment(AppSettings.self) private var settings: AppSettings?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Closed or background windows keep their views alive; animate only while the window is active.
     @Environment(\.appearsActive) private var appearsActive
@@ -31,6 +32,10 @@ struct ConfluenceView: View {
     private let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
 
     var body: some View {
+        let isLiquidGlass = settings.map { $0.theme == .liquidGlass }
+            ?? (!ThemeRuntime.isField && !ThemeRuntime.isCosmos)
+        let vesselBodyStyle: LiquidGlassVessel.BodyStyle = isLiquidGlass ? .prismatic : .solid
+
         GeometryReader { proxy in
             let layout = ConfluenceLayout(summary: summary, dimension: dimension, size: proxy.size)
             let rawTarget = hover?.target ?? focused
@@ -53,6 +58,7 @@ struct ConfluenceView: View {
                     activeTarget: activeTarget,
                     isDark: scheme == .dark,
                     reduceTransparency: reduceTransparency,
+                    vesselBodyStyle: vesselBodyStyle,
                     focused: $focused
                 )
                 // A refresh that leaves the displayed values unchanged gets no spring.
@@ -162,6 +168,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
     let reduceTransparency: Bool
+    let vesselBodyStyle: LiquidGlassVessel.BodyStyle
     var focused: FocusState<ConfluenceTarget?>.Binding
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -187,7 +194,8 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     layout: current,
                     activeTarget: activeTarget,
                     isDark: isDark,
-                    reduceTransparency: reduceTransparency
+                    reduceTransparency: reduceTransparency,
+                    vesselBodyStyle: vesselBodyStyle
                 )
                 .drawStreamsAndLeaders(in: &context)
             }
@@ -234,7 +242,8 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                 layout: current,
                 activeTarget: activeTarget,
                 isDark: isDark,
-                reduceTransparency: reduceTransparency
+                reduceTransparency: reduceTransparency,
+                vesselBodyStyle: vesselBodyStyle
             )
             .drawVessel(in: &shifted, wobblePhase: wobblePhase)
         }
@@ -1589,6 +1598,7 @@ private struct ConfluenceRenderer {
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
     let reduceTransparency: Bool
+    let vesselBodyStyle: LiquidGlassVessel.BodyStyle
 
     func drawStreamsAndLeaders(in context: inout GraphicsContext) {
         let vesselShape = RoundedRectangle(cornerRadius: layout.reservoirCorner, style: .continuous)
@@ -1633,7 +1643,8 @@ private struct ConfluenceRenderer {
             isDark: isDark,
             reduceTransparency: reduceTransparency,
             inflows: inflows,
-            wobblePhase: wobblePhase
+            wobblePhase: wobblePhase,
+            bodyStyle: vesselBodyStyle
         )
     }
 
