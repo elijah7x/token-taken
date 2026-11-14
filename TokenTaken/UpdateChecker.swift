@@ -178,7 +178,13 @@ final class UpdateChecker {
             return nil
         }
 
-        if !results.isEmpty, failures.count == results.count {
+        let anyFeeds = results.contains { result in
+            if case .feeds(let feeds) = result { return !feeds.isEmpty }
+            return false
+        }
+        // A 404 from one source says nothing when another source errored, so only
+        // report "up to date" when every source answered.
+        if !results.isEmpty, !failures.isEmpty, !anyFeeds {
             let message = failures.first ?? String(localized: "Could not check for updates.")
             logger.error("Update check failed across all sources: \(message, privacy: .public)")
             if userInitiated {
