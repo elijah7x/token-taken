@@ -57,9 +57,9 @@ Status: Draft v0 (2026-11-09)
 - The menu bar extra shows today's compact Cosmos scene when today has usage. The share card offers the same scope (overall, one source, one model), aspect (2:3, 1:1, 3:2), cost and composition options as the other themes. Wide cards put the scene left of the info panel; square and tall cards put it above. A scoped card renders the scope's breakdown along the other dimension (a source shows its models, a model its sources). The card shows period totals, estimated cost with the existing disclaimer when enabled, the top three items, and the five-category composition when enabled; an unavailable snapshot falls back to a plain dark panel.
 - Cosmos uses system sans type, monospaced tabular figures for numeric readouts, and opaque dark panels. It does not use Liquid Glass, serif type, or Field's custom period picker; its period picker, segmented controls, toggles and buttons are square, bordered Cosmos controls, and breakdown rows carry no per-item color dots.
 - Adaptive render scale limits GPU cost. Reduce Motion renders a still frame without removing data or interactions. Metal failure leaves the surrounding usage data and ranked list available.
-- Cosmos is dark only: it disables the Light/Dark/Follow System control, shows an explanation, and forces dark appearance without changing the saved preference. It keeps the default icon (the Liquid Glass coin) until a Cosmos variant is accepted.
+- Cosmos is dark only: it disables the Light/Dark/Follow System control, shows an explanation, and forces dark appearance without changing the saved preference. It swaps the Dock and Finder icon at runtime to the bundled `CosmosAppIcon.icns`, the same coin as a dark mass pressing a glowing spacetime grid into a gravity well.
 
 ## Open questions
 
 - Approved reference-design location and the final required screenshot matrix.
-- Cosmos native performance acceptance and a Dock icon variant.
+- Cosmos native performance acceptance.
