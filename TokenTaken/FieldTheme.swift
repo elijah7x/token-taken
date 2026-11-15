@@ -206,11 +206,19 @@ enum FieldTreemap {
 /// cuts, reaches the Dock and Finder. Liquid Glass and Cosmos use the bundle's AppIcon.
 @MainActor
 enum ThemeAppIcon {
-    private static let fieldImage: NSImage? = Bundle.main.url(forResource: "FieldAppIcon", withExtension: "icns")
-        .flatMap(NSImage.init(contentsOf:))
+    private static let fieldImage = bundledIcon("FieldAppIcon")
+    private static let cosmosImage = bundledIcon("CosmosAppIcon")
+
+    private static func bundledIcon(_ name: String) -> NSImage? {
+        Bundle.main.url(forResource: name, withExtension: "icns").flatMap(NSImage.init(contentsOf:))
+    }
 
     static func image(for theme: AppTheme) -> NSImage? {
-        theme == .field ? fieldImage : nil
+        switch theme {
+        case .field: fieldImage
+        case .cosmos: cosmosImage
+        case .liquidGlass: nil
+        }
     }
 
     /// Last icon written to the bundle: nil means not yet written this launch.
