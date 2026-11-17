@@ -12,15 +12,9 @@ struct LensShareSnapshot {
     let frozenRange: ClosedRange<Int>?
     let frozenTotal: Int64
 
-    /// Day-period hourly buckets carry no per-model breakdown (`ADR-0005`); single-model cards fall back
-    /// to the Tide vessel so the share image still conveys accurate daily share and harness strata.
-    static func shouldFallbackToVessel(data: ShareCardData, buckets: [LensBucket]) -> Bool {
-        guard case .model = data.kind else { return false }
-        if data.summary.period == .day {
-            return true
-        }
-        return data.counts.total > 0 && !buckets.isEmpty && buckets.allSatisfy { $0.byModel.isEmpty }
-    }
+    /// Day-period hourly buckets carry no per-model breakdown (`ADR-0005`), so a single-model day card
+    /// keeps the Lens style and states the gap instead of drawing invented hourly bars.
+    let modelDetailUnavailable: Bool
 
     init(
         buckets: [LensBucket],
@@ -30,6 +24,11 @@ struct LensShareSnapshot {
     ) {
         let period = data.summary.period
         self.period = period
+        if case .model = data.kind {
+            self.modelDetailUnavailable = period == .day || (!buckets.isEmpty && buckets.allSatisfy { $0.byModel.isEmpty })
+        } else {
+            self.modelDetailUnavailable = false
+        }
 
         let scoped: [LensBucket]
         let resolvedDimension: BreakdownDimension
@@ -103,7 +102,9 @@ struct LensShareSnapshot {
         self.modelOrder = models
 
         let resolvedRange: ClosedRange<Int>?
-        if let explicit = frozenRange, !scoped.isEmpty {
+        if modelDetailUnavailable {
+            resolvedRange = nil
+        } else if let explicit = frozenRange, !scoped.isEmpty {
             let maxIdx = scoped.lastIndex(where: { !$0.isFuture }) ?? (scoped.count - 1)
             let lo = min(max(0, explicit.lowerBound), maxIdx)
             let hi = min(max(lo, explicit.upperBound), maxIdx)
@@ -232,6 +233,15 @@ struct LensShareGraphic: View {
     var body: some View {
         Canvas { context, size in
             draw(in: &context, size: size)
+        }
+        .overlay {
+            if snapshot.modelDetailUnavailable {
+                Text("Hourly collection has no model breakdown")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Palette.ink3)
+                    .multilineTextAlignment(.center)
+                    .padding(24)
+            }
         }
         .accessibilityHidden(true)
     }

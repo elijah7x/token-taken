@@ -1973,7 +1973,7 @@ struct ShareCardView: View {
     private var isDark: Bool { scheme == .dark }
 
     private var usesLensGraphic: Bool {
-        liquidView == .lens && !LensShareSnapshot.shouldFallbackToVessel(data: data, buckets: lensBuckets)
+        liquidView == .lens
     }
 
     var body: some View {
