@@ -148,6 +148,16 @@ struct MainWindowView: View {
                     if settings.theme == .cosmos {
                         CosmosSceneView(summary: model.summary, dimension: dimension, highlight: $cosmosHighlight)
                             .frame(maxWidth: .infinity, minHeight: 280, maxHeight: .infinity)
+                    } else if settings.theme == .liquidGlass && settings.liquidView == .lens {
+                        LensView(
+                            buckets: model.lensBuckets,
+                            dimension: dimension,
+                            period: model.period,
+                            slice: { model.lensSlice($0) }
+                        )
+                        .padding(.horizontal, 28)
+                        .padding(.top, 4)
+                        .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
                     } else {
                         ConfluenceView(summary: model.summary, dimension: dimension)
                             .padding(.horizontal, 8)

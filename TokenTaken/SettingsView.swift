@@ -555,6 +555,11 @@ private struct GeneralSettingsTab: View {
 
                     if settings.theme == .liquidGlass {
                         SettingsHairline()
+                        SettingsControlRow(title: "View") {
+                            LiquidViewPicker(selection: $settings.liquidView)
+                        }
+
+                        SettingsHairline()
                         SettingsControlRow(title: "Interface transparency", help: "How much shows through the window") {
                             InterfaceTransparencySlider(value: $settings.interfaceTransparency)
                         }
