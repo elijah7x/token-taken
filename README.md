@@ -1,69 +1,34 @@
-**English** · [简体中文](README.zh-CN.md)
+English | [简体中文](README.zh-CN.md)
 
 # Token Taken
 
-A small, beautiful token-usage dashboard for macOS with native Liquid Glass.
+A small, calm macOS app for tracking AI coding-agent token usage—with native Liquid Glass, a menu bar extra, a CLI, and a display-only iPhone companion.
 
-**Status: Pre-alpha (v0.1.0 in development).**
+## Why
 
-## v1 features
+Before building Token Taken, I tried several other usage trackers, only to run into the same small frustrations: numbers that never quite felt right, interfaces that got in the way, and no clean way to share a summary without taking and cropping screenshots by hand. After enough of that friction, I decided to build the small, well-crafted macOS app I actually wanted to open each day. Something quiet to glance at, faithful to native macOS, with shareable summary cards built right in.
 
-- Day, week (Monday start), month, year, and all-time totals, with per-model and per-source breakdowns.
-- One combined total across several Macs, with per-device breakdowns when iCloud Drive sync is on. Each Mac's daily records use that Mac's local calendar day, so a merged day can mix time zones.
-- A minimal menu bar extra showing today's token total and a quick glance.
-- A native Liquid Glass theme, with a theme system designed for later Geek and Sketchbook themes.
-- A `token-taken` CLI with JSON output and JSON/CSV data export.
-- English and Simplified Chinese app interfaces through a String Catalog.
-- Cost estimates from a versioned price table (`tokscale-4.21.0-2026-11-10+alias-v3`). Estimates are not bills.
+## What it does
 
-Supported device-local sources in v1: Claude Code, Codex, Zcode, oh-my-pi, pi, Kimi Code, Grok, OpenCode, Gemini CLI, Factory Droid, Devin (CLI and desktop), Antigravity (CLI and IDE extension), DeepSeek Harness, and fx. Cursor and Qoder are deferred; see [ADR-0003](docs/decisions/0003-usage-engine.md) and [ADR-0005](docs/decisions/0005-collection-granularity.md).
+- **Native macOS dashboard & menu bar** — Day, week (Monday start), month, year, and all-time totals broken down by harness and model across Liquid Glass, Field, and Cosmos themes, plus a minimal menu bar extra for today's total.
+- **Broad agent coverage** — Collects locally from Claude Code, Codex, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Factory Droid, Grok, Devin, Antigravity, MiniMax Code, DeepSeek Harness, DeepSeek CLI, and fx, with opt-in Cursor account collection.
+- **Built-in share cards** — Renders PNG cards (copy, save, or share) scoped to your overall usage, a single harness, or a single model, with optional composition, rank, and cost estimates.
+- **Multi-Mac & iPhone companion** — Opt-in iCloud Drive sync merges usage across Macs on the same Apple ID and feeds a display-only iOS 26 companion app with its own shareable Liquid Glass card.
+- **`token-taken` CLI** — Reads the same local store and synced snapshots for machine-readable JSON summaries and JSON/CSV exports.
 
 ## Privacy
 
-The v1 design is local-first:
+- **Local and read-only** — Agent logs and local databases are read locally without modification. Token Taken collects no telemetry.
+- **Opt-in, aggregate-only sync** — iCloud Drive sync and the iPhone companion report are off by default. Synced data contains only aggregate usage metadata—no prompts, responses, file paths, project names, or credentials.
+- **Estimated costs** — Cost figures are read-time estimates from a bundled price table, never provider bills.
 
-- Token Taken reads supported agent logs read-only.
-- iCloud Drive sync is opt-in and off by default.
-- Sync contains aggregate usage metadata only. It excludes prompts, responses, file paths, project names, credentials, and cost.
-- Token Taken has no telemetry.
+## Status
 
-See the [privacy contract](docs/contracts/privacy.md) and [sync contract](docs/contracts/sync.md).
+Only the source code is public for now—no release has been published yet. Packaged builds are coming soon; **Star** this repository if you'd like to be notified when the first release is out.
 
-## Requirements
+## Building from source
 
-- macOS 26.0 or later
-- Apple silicon Mac
-
-## CLI
-
-`token-taken` queries the same local store and optional iCloud Drive device snapshots as the app:
-
-```sh
-token-taken summary --period week
-token-taken models --period month --json
-token-taken export --format csv --period all
-```
-
-The [CLI contract](docs/contracts/cli.md) defines the output schema, filters, warnings, and exit codes.
-
-## Documentation
-
-- [Product specification](docs/product.md)
-- [Architecture](docs/architecture.md)
-- Decisions: [native macOS app](docs/decisions/0001-native-macos-app.md), [iCloud Drive sync](docs/decisions/0002-icloud-drive-sync.md), [usage engine](docs/decisions/0003-usage-engine.md), [Developer ID distribution](docs/decisions/0004-distribution.md), [collection granularity](docs/decisions/0005-collection-granularity.md), [incremental collection](docs/decisions/0006-incremental-collection.md)
-- [Contracts index](docs/contracts/README.md)
-- Contract details: [statistics](docs/contracts/statistics.md), [CLI](docs/contracts/cli.md), [sync](docs/contracts/sync.md), [privacy](docs/contracts/privacy.md), [upstream reuse](docs/contracts/upstream.md), [themes](docs/contracts/themes.md)
-- [Changelog](CHANGELOG.md)
-
-## Acknowledgements
-
-Token Taken uses these MIT-licensed projects as references:
-
-- [tokscale](https://github.com/junhoyeo/tokscale): collection, parsing, pricing, and JSON CLI design.
-- [TokenTracker](https://github.com/xiufengsun/TokenTracker): Node collectors and local API design.
-- [Token Monitor](https://github.com/Javis603/token-monitor): synchronization and history design.
-
-Token Taken bundles the pinned `tokscale` 4.21.0 binary and a `tokscale`-derived price snapshot (`tokscale-4.21.0-2026-11-10+alias-v3`). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for license notices, including the separate license exclusion for TokenTracker's React Bits assets.
+Requires an Apple silicon Mac on macOS 26 or later, and Xcode. The iPhone companion lives in `ios/`. Architecture and design notes are in [`docs/`](docs/).
 
 ## License
 

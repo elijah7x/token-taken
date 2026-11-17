@@ -99,19 +99,19 @@ The example abbreviates the arrays: it lists the last three days and two months,
   "generatedAt": "2026-11-12T09:41:07Z",
   "generator": {
     "deviceId": "6F1C2A0E-3B4D-4E8A-9C21-0B7D5E9A1F34",
-    "displayName": "Elijah's MacBook Pro",
+    "displayName": "Studio MacBook Pro",
     "appVersion": "0.1.0 (12)"
   },
   "timeZoneID": "Asia/Shanghai",
   "coverage": {
     "devices": [
       {
-        "displayName": "Elijah's MacBook Pro",
+        "displayName": "Studio MacBook Pro",
         "lastWriteUTC": "2026-11-12T09:40:52Z",
         "status": "ok"
       },
       {
-        "displayName": "Elijah's Mac mini",
+        "displayName": "Mac mini",
         "lastWriteUTC": "2026-11-11T02:12:31Z",
         "status": "stale"
       }

@@ -9,3 +9,10 @@ xcuserdata/
 TokenTaken.xcodeproj/
 Vendor/
 ios/TokenTakenMobile.xcodeproj/
+
+# Signing and secrets
+*.p8
+*.p12
+*.mobileprovision
+*.dmg
+.env*
