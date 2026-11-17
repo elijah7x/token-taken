@@ -11,6 +11,20 @@ enum AppTheme: String, CaseIterable {
     case cosmos = "cosmos"
 }
 
+enum LiquidView: String, CaseIterable, Identifiable {
+    case confluence
+    case lens
+
+    var id: Self { self }
+
+    var title: LocalizedStringKey {
+        switch self {
+        case .confluence: "Confluence"
+        case .lens: "Lens"
+        }
+    }
+}
+
 enum AppLanguage: String, CaseIterable, Identifiable {
     case system
     case english
@@ -94,6 +108,13 @@ final class AppSettings {
             ThemeRuntime.isCosmos = theme == .cosmos
             applyAppearance()
             formatRevision &+= 1
+        }
+    }
+
+    var liquidView: LiquidView {
+        didSet {
+            guard liquidView != oldValue else { return }
+            defaults.set(liquidView.rawValue, forKey: Keys.liquidView)
         }
     }
 
@@ -246,6 +267,7 @@ final class AppSettings {
         defaults.removeObject(forKey: Keys.refreshIntervalMinutes)
         defaults.register(defaults: [
             Keys.theme: AppTheme.liquidGlass.rawValue,
+            Keys.liquidView: LiquidView.confluence.rawValue,
             Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
             Keys.language: AppLanguage.system.rawValue,
             Keys.numberUnits: NumberUnits.automatic.rawValue,
@@ -258,6 +280,7 @@ final class AppSettings {
         appearance = AppAppearance(rawValue: defaults.string(forKey: Keys.appearance) ?? "") ?? .system
         let storedTheme = AppTheme(rawValue: defaults.string(forKey: Keys.theme) ?? "") ?? .liquidGlass
         theme = storedTheme
+        liquidView = LiquidView(rawValue: defaults.string(forKey: Keys.liquidView) ?? "") ?? .confluence
         ThemeRuntime.isField = storedTheme == .field
         ThemeRuntime.isCosmos = storedTheme == .cosmos
         interfaceTransparency = defaults.object(forKey: Keys.interfaceTransparency) as? Double ?? Self.defaultInterfaceTransparency
@@ -296,6 +319,7 @@ final class AppSettings {
 
     private enum Keys {
         static let theme = "theme"
+        static let liquidView = "liquidView"
         static let appearance = "appearance"
         static let interfaceTransparency = "interfaceTransparency"
         static let language = "appLanguage"

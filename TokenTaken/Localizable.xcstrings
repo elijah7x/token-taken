@@ -33,6 +33,22 @@
         }
       }
     },
+    "%@ of period" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ of period"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "占本期 %@"
+          }
+        }
+      }
+    },
     "%@ of this period · approximately %@ tokens per hour" : {
       "localizations" : {
         "en" : {
@@ -111,6 +127,22 @@
         }
       }
     },
+    "%@ unpriced" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ unpriced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 未定价"
+          }
+        }
+      }
+    },
     "%@ · %@" : {
       "localizations" : {
         "en" : {
@@ -153,6 +185,22 @@
         }
       }
     },
+    "%@, %@ tokens, top: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@, %2$@ tokens, top: %3$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，%2$@ Token，前几名：%3$@"
+          }
+        }
+      }
+    },
     "%@, %@, …" : {
       "localizations" : {
         "en" : {
@@ -165,6 +213,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@、%2$@ 等"
+          }
+        }
+      }
+    },
+    "%@, missing hourly coverage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, missing hourly coverage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，缺少小时采集覆盖"
+          }
+        }
+      }
+    },
+    "%@, upcoming" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, upcoming"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@，尚未到来"
           }
         }
       }
@@ -1049,6 +1129,12 @@
     },
     "Confluence" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confluence"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1612,6 +1698,54 @@
         }
       }
     },
+    "Hourly collection has no model breakdown" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hourly collection has no model breakdown"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按小时采集不含模型拆分"
+          }
+        }
+      }
+    },
+    "Hourly coverage is missing for this time" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hourly coverage is missing for this time"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该时段缺少小时数据"
+          }
+        }
+      }
+    },
+    "Hourly granularity has no model pricing" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hourly granularity has no model pricing"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "小时粒度不含模型定价"
+          }
+        }
+      }
+    },
     "How much shows through the window" : {
       "localizations" : {
         "en" : {
@@ -1896,6 +2030,22 @@
         }
       }
     },
+    "Lens" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "透镜"
+          }
+        }
+      }
+    },
     "License" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2156,6 +2306,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "还没有其他 Mac"
+          }
+        }
+      }
+    },
+    "No prices for these models" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No prices for these models"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这些模型暂无价格"
           }
         }
       }
@@ -2584,6 +2750,22 @@
         }
       }
     },
+    "Partial hourly coverage" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Partial hourly coverage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "小时数据不完整"
+          }
+        }
+      }
+    },
     "Portrait 2:3" : {
       "localizations" : {
         "en" : {
@@ -2812,6 +2994,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重新启动"
+          }
+        }
+      }
+    },
+    "Release" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "释放"
+          }
+        }
+      }
+    },
+    "Release lens" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release lens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "释放透镜"
+          }
+        }
+      }
+    },
+    "Release lens (Esc)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Release lens (Esc)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "释放透镜 (Esc)"
           }
         }
       }
@@ -3860,6 +4090,22 @@
         }
       }
     },
+    "Top models" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Top models"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活跃模型"
+          }
+        }
+      }
+    },
     "Total" : {
       "localizations" : {
         "en" : {
@@ -3872,6 +4118,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "总计"
+          }
+        }
+      }
+    },
+    "Total %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Total %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "合计 %@"
           }
         }
       }
@@ -4206,6 +4468,22 @@
         }
       }
     },
+    "Usage timeline" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Usage timeline"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用量时间条"
+          }
+        }
+      }
+    },
     "Use token-taken in Terminal" : {
       "localizations" : {
         "en" : {
@@ -4356,6 +4634,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "版本 %@ 已就绪，可安装"
+          }
+        }
+      }
+    },
+    "View" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "视图"
           }
         }
       }
@@ -4648,6 +4942,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Token"
+          }
+        }
+      }
+    },
+    "≈ %@ · estimate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "≈ %@ · estimate"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "≈ %@ · 估算"
           }
         }
       }

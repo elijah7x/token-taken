@@ -25,6 +25,12 @@ Status: Draft v0 (2026-11-09)
 - Where appearance selection is supported, the user chooses Follow System, Light, or Dark in Settings and the choice applies to every window and the menu bar extra. Text contrast MUST meet at least WCAG AA in every supported appearance and all interactive states.
 - Every theme MUST preserve legibility and layout for English (`en`) and Simplified Chinese (`zh-Hans`) without changing number semantics.
 
+## Liquid Glass views
+
+- `liquid-glass` provides a **View** (`liquidView`) setting with two schematic thumbnail choices: **Confluence** (`confluence`, default) and **Lens** (`lens`).
+- Confluence renders the period's harnesses or models flowing into the reservoir and out into token categories. Lens swaps only that central hero visual for a fixed-height three-column glass readout card above a stacked time-bar chart with an interactive Liquid Glass magnifier for single-bucket and contiguous-range inspection, keeping the surrounding tray, dimension switch, and breakdown list unchanged.
+- The View setting and Lens apply exclusively to `liquid-glass`; Field (`sketchbook`) and Cosmos (`cosmos`) keep their own approved scenes and do not expose or share Lens.
+
 ## Menu bar
 
 - The menu-bar presentation follows the effective app appearance (Follow System by default), including a documented dark-only theme's forced dark appearance, and remains minimal.

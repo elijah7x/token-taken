@@ -17,6 +17,7 @@ final class AppModel {
 
     private(set) var summary: UsageSummary
     private(set) var todaySummary: UsageSummary
+    private(set) var lensBuckets: [LensBucket] = []
     private(set) var storageError: String?
     /// Set when the last read failed; the previous numbers stay on screen instead of partial ones.
     private(set) var readError: String?
@@ -153,6 +154,7 @@ final class AppModel {
         selectedPeriod = period
         let loaded = Self.load(store, period: period)
         (summary, todaySummary, readError) = (loaded.summary, loaded.today, loaded.error)
+        lensBuckets = loaded.lensBuckets
         isEmpty = Self.storeIsEmpty(records: loaded.records, summary: loaded.summary)
     }
 
@@ -172,6 +174,7 @@ final class AppModel {
         }
         let loaded = Self.load(initialStore, period: period)
         (summary, todaySummary, readError) = (loaded.summary, loaded.today, loaded.error)
+        lensBuckets = loaded.lensBuckets
         isEmpty = Self.storeIsEmpty(records: loaded.records, summary: loaded.summary)
     }
 
@@ -185,36 +188,45 @@ final class AppModel {
         self.refreshCoordinator = refreshCoordinator
     }
 
+    func lensSlice(_ range: ClosedRange<Int>) -> LensSlice {
+        UsageAggregator.lensSlice(lensBuckets, range: range, period: selectedPeriod, devices: summary.devices)
+    }
+
     func refresh() {
         let store = store
         do {
-            // One read of the store serves both summaries, instead of one scan per summary.
+            // One read of the store serves both summaries and lens buckets, instead of one scan per query.
             let rows = try UsageAggregator.preload(store)
             let aggregator = Self.makeAggregator(store, rows: rows)
             let newSummary = try aggregator.summary(for: selectedPeriod)
             let newToday = try aggregator.summary(for: .day)
-            (summary, todaySummary) = (newSummary, newToday)
             let empty = Self.storeIsEmpty(records: rows.records, summary: newSummary)
+            let newLensBuckets = empty ? [] : ((try? aggregator.lensBuckets(for: selectedPeriod)) ?? [])
+            (summary, todaySummary, lensBuckets) = (newSummary, newToday, newLensBuckets)
             if empty != isEmpty { isEmpty = empty }
             readError = nil
         } catch {
+            // Keep the last good buckets alongside the retained summary; the read error is surfaced.
             readError = error.localizedDescription
         }
     }
 
     private static func load(
         _ store: any UsageStore, period: Period
-    ) -> (summary: UsageSummary, today: UsageSummary, records: [UsageRecord], error: String?) {
+    ) -> (summary: UsageSummary, today: UsageSummary, lensBuckets: [LensBucket], records: [UsageRecord], error: String?) {
         do {
             let rows = try UsageAggregator.preload(store)
             let aggregator = makeAggregator(store, rows: rows)
-            return (try aggregator.summary(for: period), try aggregator.summary(for: .day),
-                    rows.records, nil)
+            let summary = try aggregator.summary(for: period)
+            let today = try aggregator.summary(for: .day)
+            let empty = storeIsEmpty(records: rows.records, summary: summary)
+            let lensBuckets = empty ? [] : ((try? aggregator.lensBuckets(for: period)) ?? [])
+            return (summary, today, lensBuckets, rows.records, nil)
         } catch {
             // The empty store cannot fail, so the window starts blank with the error shown.
             let empty = makeAggregator(EmptyUsageStore())
             return (try! empty.summary(for: period), try! empty.summary(for: .day),
-                    [], error.localizedDescription)
+                    [], [], error.localizedDescription)
         }
     }
 

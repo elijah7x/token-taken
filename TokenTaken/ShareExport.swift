@@ -1731,10 +1731,15 @@ struct CosmosShareCard: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: "Token Taken")
-                .font(.system(size: 24, weight: .semibold))
-                .foregroundStyle(CosmosPalette.ink)
-                .lineLimit(1)
+            HStack(alignment: .center, spacing: 10) {
+                ShareBrandLogo(theme: .cosmos, size: 38)
+                    .accessibilityHidden(true)
+
+                Text(verbatim: "Token Taken")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(CosmosPalette.ink)
+                    .lineLimit(1)
+            }
 
             Text(periodDescription)
                 .font(.system(size: 20))
@@ -2073,9 +2078,8 @@ struct ShareCardView: View {
     // MARK: - Header, Scope, Hero, Cost, Supporting Facts
 
     private var wordmarkRow: some View {
-        HStack(alignment: .center, spacing: 15) {
-            ShareDropGlyph()
-                .frame(width: 36, height: 42)
+        HStack(alignment: .center, spacing: 12) {
+            ShareBrandLogo(theme: .liquidGlass, size: 54)
                 .accessibilityHidden(true)
 
             Text(verbatim: "Token Taken")
@@ -2387,59 +2391,54 @@ struct ShareCardView: View {
     }
 }
 
-// MARK: - Wordmark Droplet Glyph & Full-Card Tide Vessel Canvas
+// MARK: - Brand App Icon Logo & Full-Card Tide Vessel Canvas
 
-private struct ShareDropGlyph: View {
-    var body: some View {
-        Canvas { context, size in
-            let sx = size.width / 14
-            let sy = size.height / 16
+@MainActor
+private struct ShareBrandLogo: View {
+    let theme: AppTheme
+    let size: CGFloat
 
-            var drop = Path()
-            drop.move(to: CGPoint(x: 7 * sx, y: 0.8 * sy))
-            drop.addCurve(
-                to: CGPoint(x: 1.4 * sx, y: 10.3 * sy),
-                control1: CGPoint(x: 7 * sx, y: 0.8 * sy),
-                control2: CGPoint(x: 1.4 * sx, y: 6.9 * sy)
-            )
-            drop.addCurve(
-                to: CGPoint(x: 7.0 * sx, y: 15.9 * sy),
-                control1: CGPoint(x: 1.4 * sx, y: 13.4 * sy),
-                control2: CGPoint(x: 3.9 * sx, y: 15.9 * sy)
-            )
-            drop.addCurve(
-                to: CGPoint(x: 12.6 * sx, y: 10.3 * sy),
-                control1: CGPoint(x: 10.1 * sx, y: 15.9 * sy),
-                control2: CGPoint(x: 12.6 * sx, y: 13.4 * sy)
-            )
-            drop.addCurve(
-                to: CGPoint(x: 7 * sx, y: 0.8 * sy),
-                control1: CGPoint(x: 12.6 * sx, y: 6.9 * sy),
-                control2: CGPoint(x: 7 * sx, y: 0.8 * sy)
-            )
-            drop.closeSubpath()
-
-            context.fill(
-                drop,
-                with: .linearGradient(
-                    Gradient(colors: [Color(hex: "#7CC8F2"), Color(hex: "#3A9BE0")]),
-                    startPoint: CGPoint(x: size.width / 2, y: 0),
-                    endPoint: CGPoint(x: size.width / 2, y: size.height)
-                )
-            )
-
-            var highlight = Path()
-            highlight.move(to: CGPoint(x: 4.2 * sx, y: 10.6 * sy))
-            highlight.addQuadCurve(
-                to: CGPoint(x: 6.6 * sx, y: 13.2 * sy),
-                control: CGPoint(x: 4.5 * sx, y: 12.7 * sy)
-            )
-            context.stroke(
-                highlight,
-                with: .color(.white.opacity(0.78)),
-                style: StrokeStyle(lineWidth: max(1.5, 1.1 * sx), lineCap: .round)
-            )
+    private static let defaultAppIcon: NSImage? = {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: url)
+        {
+            return image
         }
+        return Bundle.main.image(forResource: "AppIcon") ?? NSImage(named: "AppIcon")
+    }()
+
+    private var resolvedCGImage: CGImage? {
+        let nsImage = ThemeAppIcon.image(for: theme)
+            ?? Self.defaultAppIcon
+            ?? NSApp?.applicationIconImage
+        guard let nsImage else { return nil }
+
+        // Select a high-resolution bitmap cut (>= 256px) directly so offscreen ImageRenderer
+        // never picks the 16pt icon cut or drops lazy NSIconRef representations.
+        if let bestBitmap = nsImage.representations
+            .compactMap({ $0 as? NSBitmapImageRep })
+            .filter({ $0.pixelsWide >= 256 && $0.pixelsHigh >= 256 })
+            .min(by: { $0.pixelsWide < $1.pixelsWide }),
+           let cg = bestBitmap.cgImage
+        {
+            return cg
+        }
+
+        var proposed = CGRect(x: 0, y: 0, width: 256, height: 256)
+        return nsImage.cgImage(forProposedRect: &proposed, context: nil, hints: nil)
+    }
+
+    var body: some View {
+        Group {
+            if let cgImage = resolvedCGImage {
+                Image(decorative: cgImage, scale: 1.0)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(1, contentMode: .fit)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.224, style: .continuous))
     }
 }
 
