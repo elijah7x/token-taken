@@ -37,8 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- Replaced the legacy double-T menu bar template glyph (`MenuBarGlyph`) with a tilted coin-and-T glyph matching the coin app icon.
-- 将菜单栏默认模板图标（`MenuBarGlyph`）由早期“双 T”字形替换为与主图标一致的微倾硬币镂空 T 图形。
+- Replaced the legacy double-T menu bar template glyph (`MenuBarGlyph`) with a solid coin and cut-out T glyph matching the coin app icon.
+- 将菜单栏默认模板图标（`MenuBarGlyph`）由早期“双 T”字形替换为与主图标一致的实心圆币镂空 T 图形。
 - Replaced the iOS discrete rank-band table with the shared `UsageRank` log-log interpolation curve (`rank-curve-2026-11`) over last-30-day tokens across all harnesses, adding extrapolated anchors below 350M down to 100k (top 99%), unified `top X%` formatting, and updated estimate footnote wording.
 - Renamed user-facing "Source" / "Sources" (`来源`) UI labels to "Harness" / "Harnesses" (`工具`) while preserving `source` identifiers in the data model, CLI, and report schemas.
 - Updated the [privacy contract](docs/contracts/privacy.md) to allow automatic update checks and verified DMG downloads from allowlisted `https` hosts with only standard request headers and `User-Agent: TokenTaken/<version>`, and amended [ADR-0004](docs/decisions/0004-distribution.md) via [ADR-0013](docs/decisions/0013-automatic-updates.md).
