@@ -232,6 +232,8 @@ struct LensShareGraphic: View {
 
     var body: some View {
         Canvas { context, size in
+            // Hourly buckets carry no model detail, so drawing them would show empty bars and "No usage".
+            guard !snapshot.modelDetailUnavailable else { return }
             draw(in: &context, size: size)
         }
         .overlay {
