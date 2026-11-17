@@ -2766,6 +2766,22 @@
         }
       }
     },
+    "Peak · %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Peak · %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "峰值 · %@"
+          }
+        }
+      }
+    },
     "Portrait 2:3" : {
       "localizations" : {
         "en" : {

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added the Liquid Glass `Lens` share card graphic (`LensShareGraphic`): when **View** is set to `Lens`, share cards render a pure-`Canvas` stacked time-bar chart with a hand-drawn glass lens capsule frozen on the peak bucket, a single peak-value pill above the lens, `Peak · {time}` in the card header, portrait (`2:3`), square (`1:1`), and landscape (`3:2`) layouts, and a Tide vessel fallback for single-model day cards where hourly buckets have no model breakdown.
 - Added a **View** setting (`Confluence` or `Lens`) under the Liquid Glass theme with schematic thumbnail cards, an interactive `Lens` stacked time-bar chart and three-column glass readout card for single-bucket and contiguous-range slicing, and the theme's app icon logo on share card headers.
 - 为 Liquid Glass 主题新增「视图」设置（「汇流」与「透镜」缩略图切换，默认「汇流」），提供支持单桶与区间切片探查的「透镜」时间条与三栏玻璃读数卡，并将所有主题分享卡页头的品牌小图标替换为对应主题的产品 App 图标。
 - Added automatic background update checks and silent installation (`UpdateFeed`, `AppVersion`, `UpdateFeedSelection`, `UpdateChecker`, `AppUpdater`): checks the static `updates.json` feed with GitHub Releases API fallback 15 seconds after launch, every 6 hours, and on activation when stale while **Keep Token Taken up to date automatically** is enabled; verifies size, SHA-256, Developer ID team signature, version/build, and Gatekeeper assessment; installs in place after 10 minutes of idle (relaunching in the background) or on quit; shows a one-time menu bar notice after updating; and adds `scripts/make-update-feed.py` to `scripts/release.sh` ([ADR-0013](docs/decisions/0013-automatic-updates.md)).
@@ -36,6 +37,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Replaced the legacy double-T menu bar template glyph (`MenuBarGlyph`) with a solid coin and cut-out T glyph matching the coin app icon.
+- 将菜单栏默认模板图标（`MenuBarGlyph`）由早期“双 T”字形替换为与主图标一致的实心圆币镂空 T 图形。
 - Replaced the iOS discrete rank-band table with the shared `UsageRank` log-log interpolation curve (`rank-curve-2026-11`) over last-30-day tokens across all harnesses, adding extrapolated anchors below 350M down to 100k (top 99%), unified `top X%` formatting, and updated estimate footnote wording.
 - Renamed user-facing "Source" / "Sources" (`来源`) UI labels to "Harness" / "Harnesses" (`工具`) while preserving `source` identifiers in the data model, CLI, and report schemas.
 - Updated the [privacy contract](docs/contracts/privacy.md) to allow automatic update checks and verified DMG downloads from allowlisted `https` hosts with only standard request headers and `User-Agent: TokenTaken/<version>`, and amended [ADR-0004](docs/decisions/0004-distribution.md) via [ADR-0013](docs/decisions/0013-automatic-updates.md).

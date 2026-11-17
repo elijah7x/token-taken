@@ -188,6 +188,22 @@ final class AppModel {
         self.refreshCoordinator = refreshCoordinator
     }
 
+    func lensBuckets(for period: Period) -> [LensBucket] {
+        if period == selectedPeriod {
+            return lensBuckets
+        }
+        let store = store
+        do {
+            let rows = try UsageAggregator.preload(store)
+            if rows.records.isEmpty && rows.hourly.isEmpty {
+                return []
+            }
+            return try Self.makeAggregator(store, rows: rows).lensBuckets(for: period)
+        } catch {
+            return []
+        }
+    }
+
     func lensSlice(_ range: ClosedRange<Int>) -> LensSlice {
         UsageAggregator.lensSlice(lensBuckets, range: range, period: selectedPeriod, devices: summary.devices)
     }

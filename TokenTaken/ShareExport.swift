@@ -103,10 +103,24 @@ struct ShareExportSheet: View {
 
     private var summary: UsageSummary { model.summary }
     private var isCosmos: Bool { settings.theme == .cosmos }
+    private var isLiquidLens: Bool { settings.theme == .liquidGlass && settings.liquidView == .lens }
     private var primaryInk: Color { isCosmos ? CosmosPalette.ink : Palette.ink1 }
     private var secondaryInk: Color { isCosmos ? CosmosPalette.ink2 : Palette.ink2 }
     private var tertiaryInk: Color { isCosmos ? CosmosPalette.ink3 : Palette.ink3 }
     private var hairline: Color { isCosmos ? CosmosPalette.rule : Palette.hairline }
+
+    private var availableAspects: [ShareAspect] {
+        ShareAspect.allCases.filter { isCosmos || isLiquidLens || $0 != .square }
+    }
+
+    private var effectiveAspect: ShareAspect {
+        availableAspects.contains(aspect) ? aspect : .portrait
+    }
+
+    private var currentLensBuckets: [LensBucket] {
+        guard isLiquidLens else { return [] }
+        return model.lensBuckets(for: summary.period)
+    }
 
     private var effectiveScope: ShareScope {
         switch scope {
@@ -139,7 +153,7 @@ struct ShareExportSheet: View {
         )
     }
 
-    private var cardCanvasSize: CGSize { aspect.canvasSize }
+    private var cardCanvasSize: CGSize { effectiveAspect.canvasSize }
 
     private func cosmosDimension(for scope: ShareScope) -> BreakdownDimension {
         switch scope {
@@ -264,10 +278,12 @@ struct ShareExportSheet: View {
 
             ShareCardView(
                 data: cardData,
-                aspect: aspect,
+                aspect: effectiveAspect,
                 showCost: showCost,
                 showComposition: showComposition,
                 dimension: dimension,
+                liquidView: settings.liquidView,
+                lensBuckets: currentLensBuckets,
                 cosmosSnapshot: currentCosmosSnapshot,
                 rank: displayedRank,
                 inscription: activeInscription,
@@ -677,7 +693,7 @@ struct ShareExportSheet: View {
     }
 
     @ViewBuilder private var aspectSegmentedControl: some View {
-        let options = ShareAspect.allCases.filter { isCosmos || $0 != .square }
+        let options = availableAspects
         segmentedContainer {
             HStack(spacing: isCosmos ? 0 : 2) {
                 ForEach(options) { option in
@@ -690,7 +706,7 @@ struct ShareExportSheet: View {
     }
 
     private func aspectSegment(_ option: ShareAspect) -> some View {
-        let isSelected = aspect == option
+        let isSelected = effectiveAspect == option
         return Button {
             withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
                 aspect = option
@@ -726,8 +742,8 @@ struct ShareExportSheet: View {
     }
 
     private func moveAspect(by offset: Int) {
-        let options = ShareAspect.allCases.filter { isCosmos || $0 != .square }
-        guard let index = options.firstIndex(of: aspect) else { return }
+        let options = availableAspects
+        guard let index = options.firstIndex(of: effectiveAspect) else { return }
         let nextIndex = min(max(index + offset, 0), options.count - 1)
         aspect = options[nextIndex]
         focusedAspect = aspect
@@ -897,12 +913,13 @@ struct ShareExportSheet: View {
             scope: effectiveScope,
             scopedSummary: resolvedScoped
         )
-        let canvasSize = cardCanvasSize
+        let resolvedAspect = effectiveAspect
+        let canvasSize = resolvedAspect.canvasSize
         let exportSceneSummary = resolvedScoped ?? summary
         let exportSnapshotKey = makeCosmosSnapshotKey(
             scope: effectiveScope,
             sceneSummary: exportSceneSummary,
-            aspect: aspect
+            aspect: resolvedAspect
         )
         let exportCosmosSnapshot: NSImage?
         if isCosmos, renderedCosmosSnapshotKey == exportSnapshotKey {
@@ -911,18 +928,21 @@ struct ShareExportSheet: View {
             exportCosmosSnapshot = CosmosSnapshot.image(
                 summary: exportSceneSummary,
                 dimension: exportSnapshotKey.dimension,
-                size: cosmosShareSceneSize(for: aspect),
+                size: cosmosShareSceneSize(for: resolvedAspect),
                 scale: 2
             )
         } else {
             exportCosmosSnapshot = nil
         }
+        let exportLensBuckets = isLiquidLens ? model.lensBuckets(for: summary.period) : []
         let view = ShareCardView(
             data: exportData,
-            aspect: aspect,
+            aspect: resolvedAspect,
             showCost: showCost,
             showComposition: showComposition,
             dimension: dimension,
+            liquidView: settings.liquidView,
+            lensBuckets: exportLensBuckets,
             cosmosSnapshot: exportCosmosSnapshot,
             rank: resolvedRank,
             inscription: activeInscription,
@@ -1939,6 +1959,8 @@ struct ShareCardView: View {
     let showCost: Bool
     let showComposition: Bool
     var dimension: BreakdownDimension = .sources
+    var liquidView: LiquidView = .confluence
+    var lensBuckets: [LensBucket] = []
     var cosmosSnapshot: NSImage?
     var rank: Double? = nil
     var inscription = ""
@@ -1949,6 +1971,10 @@ struct ShareCardView: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var isDark: Bool { scheme == .dark }
+
+    private var usesLensGraphic: Bool {
+        liquidView == .lens
+    }
 
     var body: some View {
         if ThemeRuntime.isCosmos {
@@ -1971,8 +1997,380 @@ struct ShareCardView: View {
                 inscription: inscription,
                 signature: signature
             )
+        } else if usesLensGraphic {
+            lensCard
         } else {
             tideCard
+        }
+    }
+
+    // MARK: - Liquid Glass Lens share card
+
+    private var lensCard: some View {
+        let snapshot = LensShareSnapshot(
+            buckets: lensBuckets,
+            data: data,
+            dimension: dimension
+        )
+        let size = aspect.canvasSize
+
+        return ZStack(alignment: .topLeading) {
+            ShareLiquidCardBackdrop(
+                accentColor: data.accentColor,
+                hasUsage: data.counts.total > 0,
+                bloomRect: lensBloomRect(for: aspect),
+                isDark: isDark,
+                reduceTransparency: reduceTransparency
+            )
+
+            switch aspect {
+            case .portrait:
+                lensPortraitContent(snapshot: snapshot, size: size)
+            case .square:
+                lensSquareContent(snapshot: snapshot, size: size)
+            case .landscape:
+                lensLandscapeContent(snapshot: snapshot, size: size)
+            }
+        }
+        .frame(width: size.width, height: size.height)
+    }
+
+    private func lensBloomRect(for aspect: ShareAspect) -> CGRect {
+        let size = aspect.canvasSize
+        switch aspect {
+        case .portrait:
+            return CGRect(x: 76, y: 640, width: size.width - 152, height: size.height - 716)
+        case .square:
+            return CGRect(x: 68, y: 460, width: size.width - 136, height: size.height - 524)
+        case .landscape:
+            let contentWidth = size.width - 152
+            let rightWidth = (contentWidth * 0.55).rounded()
+            return CGRect(x: size.width - 76 - rightWidth, y: 72, width: rightWidth, height: size.height - 148)
+        }
+    }
+
+    private func lensPortraitContent(snapshot: LensShareSnapshot, size: CGSize) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 24) {
+                wordmarkRow
+                Spacer(minLength: 20)
+                lensHeaderTimeLabel(snapshot: snapshot)
+                    .font(.system(size: 33, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.80)
+            }
+
+            headlineRow
+                .padding(.top, 32)
+
+            heroBlock(numberSize: 164, unitSize: 82, tokenLabelSize: 38)
+                .padding(.top, 12)
+
+            if showCost {
+                costRow(amountSize: 38, noteSize: 32)
+                    .padding(.top, 10)
+            }
+
+            portraitSupportingFacts
+                .padding(.top, 24)
+
+            if let rank {
+                rankRow(rank)
+                    .padding(.top, 18)
+            }
+
+            LensShareGraphic(snapshot: snapshot)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 34)
+
+            if showComposition, !activeCategoryParts.isEmpty {
+                lensCompositionStrip(compact: false)
+                    .padding(.top, 22)
+            }
+
+            lensFooterRow(rankFontSize: 22, dateFontSize: 25)
+                .padding(.top, 22)
+        }
+        .padding(.horizontal, 76)
+        .padding(.top, 72)
+        .padding(.bottom, 24)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private func lensSquareContent(snapshot: LensShareSnapshot, size: CGSize) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 20) {
+                HStack(alignment: .center, spacing: 11) {
+                    ShareBrandLogo(theme: .liquidGlass, size: 48)
+                        .accessibilityHidden(true)
+
+                    Text(verbatim: "Token Taken")
+                        .font(.system(size: 32, weight: .semibold))
+                        .tracking(-0.4)
+                        .foregroundStyle(Palette.ink1)
+                }
+
+                Spacer(minLength: 16)
+
+                lensHeaderTimeLabel(snapshot: snapshot)
+                    .font(.system(size: 29, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.80)
+            }
+
+            HStack(alignment: .center, spacing: 14) {
+                Circle()
+                    .fill(data.accentColor)
+                    .frame(width: 17, height: 17)
+                    .accessibilityHidden(true)
+
+                data.headlineText(
+                    locale: locale,
+                    modelFont: .system(size: 29, weight: .semibold, design: .monospaced)
+                )
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(Palette.ink2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .truncationMode(.middle)
+            }
+            .padding(.top, 20)
+
+            heroBlock(numberSize: 120, unitSize: 60, tokenLabelSize: 32)
+                .padding(.top, 8)
+
+            if showCost {
+                costRow(amountSize: 31, noteSize: 26)
+                    .padding(.top, 8)
+            }
+
+            lensSquareSupportingFacts
+                .padding(.top, 16)
+
+            if let rank {
+                Text("Last 30 days · about top \(UsageRank.formatted(rank))")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.80)
+                    .padding(.top, 12)
+            }
+
+            LensShareGraphic(snapshot: snapshot)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, 22)
+
+            if showComposition, !activeCategoryParts.isEmpty {
+                lensCompositionStrip(compact: true)
+                    .padding(.top, 16)
+            }
+
+            lensFooterRow(rankFontSize: 20, dateFontSize: 22)
+                .padding(.top, 16)
+        }
+        .padding(.horizontal, 68)
+        .padding(.top, 54)
+        .padding(.bottom, 22)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private func lensLandscapeContent(snapshot: LensShareSnapshot, size: CGSize) -> some View {
+        let hMargin: CGFloat = 76
+        let contentWidth = size.width - hMargin * 2
+        let rightWidth = (contentWidth * 0.55).rounded()
+        let columnGap: CGFloat = 52
+        let leftWidth = max(320, contentWidth - rightWidth - columnGap)
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: columnGap) {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        wordmarkRow
+
+                        lensHeaderTimeLabel(snapshot: snapshot)
+                            .font(.system(size: 31, weight: .medium))
+                            .foregroundStyle(Palette.ink2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.80)
+                    }
+
+                    headlineRow
+                        .padding(.top, 38)
+
+                    heroBlock(numberSize: 144, unitSize: 72, tokenLabelSize: 36)
+                        .padding(.top, 16)
+
+                    if showCost {
+                        costRow(amountSize: 36, noteSize: 30)
+                            .padding(.top, 12)
+                    }
+
+                    Spacer(minLength: 20)
+
+                    Rectangle()
+                        .fill(Palette.hairline)
+                        .frame(height: 2)
+
+                    landscapeSupportingFacts
+                        .padding(.top, 22)
+
+                    if let rank {
+                        rankRow(rank)
+                            .padding(.top, 18)
+                    }
+                }
+                .frame(minWidth: leftWidth, maxWidth: leftWidth, maxHeight: .infinity, alignment: .topLeading)
+
+                VStack(alignment: .leading, spacing: 20) {
+                    LensShareGraphic(snapshot: snapshot)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if showComposition, !activeCategoryParts.isEmpty {
+                        lensCompositionStrip(compact: true)
+                    }
+                }
+                .frame(minWidth: rightWidth, maxWidth: rightWidth, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            lensFooterRow(rankFontSize: 22, dateFontSize: 25)
+                .padding(.top, 24)
+        }
+        .padding(.horizontal, hMargin)
+        .padding(.top, 72)
+        .padding(.bottom, 24)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func lensHeaderTimeLabel(snapshot: LensShareSnapshot) -> some View {
+        if let frozenTime = snapshot.frozenTimeText(locale: locale) {
+            Text(verbatim: String(localized: "Peak · \(frozenTime)", locale: locale))
+        } else {
+            Text(periodDescription)
+        }
+    }
+
+    private var lensSquareSupportingFacts: some View {
+        HStack(alignment: .top, spacing: 44) {
+            ForEach(data.supportingFacts) { fact in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(fact.label)
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(Palette.ink2)
+                        .lineLimit(1)
+
+                    Text(verbatim: fact.value)
+                        .font(fact.isMonospacedValue
+                            ? .system(size: 30, weight: .semibold, design: .monospaced)
+                            : .system(size: 32, weight: .semibold))
+                        .foregroundStyle(Palette.ink1)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.70)
+                        .truncationMode(.middle)
+                }
+                .layoutPriority(fact.isMonospacedValue ? 0 : 1)
+            }
+        }
+    }
+
+    private var activeCategoryParts: [(category: TokenCategory, tokens: Int64)] {
+        TokenCategory.allCases.compactMap { category in
+            let value = data.counts[category]
+            return value > 0 ? (category, value) : nil
+        }
+    }
+
+    private func lensCompositionStrip(compact: Bool) -> some View {
+        let total = max(1, data.counts.total)
+        let parts = activeCategoryParts
+        let barHeight: CGFloat = compact ? 12 : 14
+
+        return VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+            Canvas { context, size in
+                let fullRect = CGRect(origin: .zero, size: size)
+                let capsule = Path(roundedRect: fullRect, cornerRadius: barHeight * 0.5, style: .continuous)
+                context.fill(capsule, with: .color(Palette.barTrack))
+
+                let segments: [(color: Color, tokens: Int64)] = parts.map {
+                    (Palette.color(for: $0.category), $0.tokens)
+                } + (data.counts.uncategorized > 0
+                    ? [(Palette.ink3.opacity(0.45), data.counts.uncategorized)]
+                    : [])
+                guard !segments.isEmpty else { return }
+
+                context.drawLayer { layer in
+                    layer.clip(to: capsule)
+                    let gap: CGFloat = 2.5
+                    let totalGaps = CGFloat(max(0, segments.count - 1)) * gap
+                    let usable = max(0, size.width - totalGaps)
+                    var cursorX: CGFloat = 0
+
+                    for (idx, seg) in segments.enumerated() {
+                        let rawW = usable * CGFloat(seg.tokens) / CGFloat(total)
+                        let w = idx == segments.count - 1
+                            ? max(2, size.width - cursorX)
+                            : max(2, rawW)
+                        let segRect = CGRect(x: cursorX, y: 0, width: w, height: size.height)
+                        layer.fill(
+                            Path(roundedRect: segRect, cornerRadius: 3, style: .continuous),
+                            with: .color(seg.color)
+                        )
+                        cursorX += w + gap
+                    }
+                }
+            }
+            .frame(height: barHeight)
+            .accessibilityHidden(true)
+
+            HStack(spacing: compact ? 15 : 20) {
+                ForEach(parts, id: \.category) { part in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Palette.color(for: part.category))
+                            .frame(width: compact ? 9.5 : 11, height: compact ? 9.5 : 11)
+                            .accessibilityHidden(true)
+
+                        Text(part.category.title)
+                            .foregroundStyle(Palette.ink2)
+
+                        Text(verbatim: Share.percent(part.tokens, of: total))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Palette.ink1)
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: compact ? 19.5 : 22, weight: .medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                }
+            }
+        }
+    }
+
+    private func lensFooterRow(rankFontSize: CGFloat, dateFontSize: CGFloat) -> some View {
+        let dateText = Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day())
+
+        return HStack(alignment: .firstTextBaseline, spacing: 20) {
+            if rank != nil {
+                Text("Rank is an estimate derived from public usage sources.")
+                    .font(.system(size: rankFontSize, weight: .regular))
+                    .foregroundStyle(Palette.ink3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 0)
+            Text(verbatim: dateText)
+                .font(.system(size: dateFontSize, weight: .medium))
+                .foregroundStyle(Palette.ink3)
+                .monospacedDigit()
+                .layoutPriority(1)
         }
     }
 
@@ -2564,6 +2962,102 @@ private struct ShareTideVesselCanvas: View {
                 context.stroke(Path(rimRect), with: .color(Palette.hairline), lineWidth: 2)
             }
         }
+    }
+}
+
+private struct ShareLiquidCardBackdrop: View {
+    let accentColor: Color
+    let hasUsage: Bool
+    let bloomRect: CGRect
+    let isDark: Bool
+    let reduceTransparency: Bool
+
+    var body: some View {
+        Canvas { context, size in
+            let fullRect = CGRect(origin: .zero, size: size)
+
+            if reduceTransparency {
+                context.fill(Path(fullRect), with: .color(Palette.solid))
+                let rimRect = fullRect.insetBy(dx: 1, dy: 1)
+                context.stroke(Path(rimRect), with: .color(Palette.hairline), lineWidth: 2)
+                return
+            }
+
+            let topBase = isDark ? Color(hex: "#1B212C") : Color(hex: "#F7F4F0")
+            let bottomBase = isDark ? Color(hex: "#121722") : Color(hex: "#EEF2F8")
+            context.fill(
+                Path(fullRect),
+                with: .linearGradient(
+                    Gradient(colors: [topBase, bottomBase]),
+                    startPoint: CGPoint(x: size.width / 2, y: 0),
+                    endPoint: CGPoint(x: size.width / 2, y: size.height)
+                )
+            )
+
+            let glowSpan = max(size.width, size.height)
+            let warmGlow = isDark
+                ? Color(.sRGB, red: 200 / 255, green: 122 / 255, blue: 82 / 255, opacity: 0.34)
+                : Color(.sRGB, red: 255 / 255, green: 205 / 255, blue: 172 / 255, opacity: 0.68)
+            let coolGlow = isDark
+                ? Color(.sRGB, red: 72 / 255, green: 112 / 255, blue: 192 / 255, opacity: 0.40)
+                : Color(.sRGB, red: 172 / 255, green: 203 / 255, blue: 248 / 255, opacity: 0.72)
+            let depthGlow = isDark
+                ? Color(.sRGB, red: 96 / 255, green: 84 / 255, blue: 168 / 255, opacity: 0.28)
+                : Color(.sRGB, red: 204 / 255, green: 216 / 255, blue: 246 / 255, opacity: 0.78)
+
+            context.fill(
+                Path(fullRect),
+                with: .radialGradient(
+                    Gradient(colors: [warmGlow, .clear]),
+                    center: CGPoint(x: size.width * 0.10, y: size.height * 0.06),
+                    startRadius: 0,
+                    endRadius: glowSpan * 0.58
+                )
+            )
+            context.fill(
+                Path(fullRect),
+                with: .radialGradient(
+                    Gradient(colors: [coolGlow, .clear]),
+                    center: CGPoint(x: size.width * 0.96, y: size.height * 0.32),
+                    startRadius: 0,
+                    endRadius: glowSpan * 0.62
+                )
+            )
+            context.fill(
+                Path(fullRect),
+                with: .radialGradient(
+                    Gradient(colors: [depthGlow, .clear]),
+                    center: CGPoint(x: size.width * 0.42, y: size.height * 1.06),
+                    startRadius: 0,
+                    endRadius: glowSpan * 0.64
+                )
+            )
+
+            if hasUsage {
+                let bloomCenter = CGPoint(x: bloomRect.midX, y: bloomRect.midY)
+                let bloomRadius = max(bloomRect.width, bloomRect.height) * 0.65
+                context.fill(
+                    Path(fullRect),
+                    with: .radialGradient(
+                        Gradient(colors: [
+                            accentColor.opacity(isDark ? 0.16 : 0.18),
+                            .clear,
+                        ]),
+                        center: bloomCenter,
+                        startRadius: 0,
+                        endRadius: bloomRadius
+                    )
+                )
+            }
+
+            let rimRect = fullRect.insetBy(dx: 1.5, dy: 1.5)
+            context.stroke(
+                Path(rimRect),
+                with: .color(.white.opacity(isDark ? 0.14 : 0.65)),
+                lineWidth: 3
+            )
+        }
+        .accessibilityHidden(true)
     }
 }
 
