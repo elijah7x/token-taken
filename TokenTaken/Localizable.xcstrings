@@ -607,6 +607,16 @@
         }
       }
     },
+    "Advanced" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高级"
+          }
+        }
+      }
+    },
     "Agents on this Mac whose logs are read." : {
       "localizations" : {
         "en" : {
@@ -855,6 +865,16 @@
         }
       }
     },
+    "Breakdown unavailable" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无拆分明细"
+          }
+        }
+      }
+    },
     "Breakdown view" : {
       "localizations" : {
         "en" : {
@@ -871,12 +891,42 @@
         }
       }
     },
+    "Broken link at %@ — reinstall or uninstall to fix" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 处的链接已损坏 - 请重新安装或卸载以修复"
+          }
+        }
+      }
+    },
+    "Buckwheat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "荞麦"
+          }
+        }
+      }
+    },
     "By tokens, descending" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "按 Token 降序"
+          }
+        }
+      }
+    },
+    "Cabbages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卷心菜"
           }
         }
       }
@@ -1207,6 +1257,16 @@
         }
       }
     },
+    "Corn" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "玉米"
+          }
+        }
+      }
+    },
     "Cosmos" : {
       "localizations" : {
         "en" : {
@@ -1281,12 +1341,42 @@
         }
       }
     },
+    "Could not copy the image to the clipboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法将图片复制到剪贴板。"
+          }
+        }
+      }
+    },
     "Could not open the local usage store." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法打开本地用量数据库。"
+          }
+        }
+      }
+    },
+    "Could not open the share menu." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开分享菜单。"
+          }
+        }
+      }
+    },
+    "Could not prepare the share image: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法准备分享图片：%@"
           }
         }
       }
@@ -1303,6 +1393,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取更新信息。"
+          }
+        }
+      }
+    },
+    "Could not render the share card image." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法渲染分享卡片图片。"
+          }
+        }
+      }
+    },
+    "Could not save PNG: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法保存 PNG：%@"
           }
         }
       }
@@ -1528,6 +1638,16 @@
         }
       }
     },
+    "Export Failed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出失败"
+          }
+        }
+      }
+    },
     "Failed" : {
       "localizations" : {
         "en" : {
@@ -1572,6 +1692,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "五类 Token 图例"
+          }
+        }
+      }
+    },
+    "Flax" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "亚麻"
           }
         }
       }
@@ -1794,6 +1924,16 @@
         }
       }
     },
+    "Install" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "安装"
+          }
+        }
+      }
+    },
     "Install Command-Line Tool" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1820,6 +1960,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已安装到 %@"
+          }
+        }
+      }
+    },
+    "Installed at %@\nThis folder is not in PATH. Add to your shell profile:\n%@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已安装到 %@\n此目录不在 PATH 中，请添加到你的 shell 配置文件：\n%@"
           }
         }
       }
@@ -2026,6 +2176,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录时启动"
+          }
+        }
+      }
+    },
+    "Lavender" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "薰衣草"
           }
         }
       }
@@ -2268,6 +2428,16 @@
         }
       }
     },
+    "Move Token Taken to your Applications folder before installing the command-line tool." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先将 Token Taken 移至“应用程序”文件夹，再安装命令行工具。"
+          }
+        }
+      }
+    },
     "New input" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2436,6 +2606,16 @@
         }
       }
     },
+    "Not installed · Use token-taken in Terminal" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未安装 · 可在终端中使用 token-taken"
+          }
+        }
+      }
+    },
     "Not published yet" : {
       "localizations" : {
         "en" : {
@@ -2480,6 +2660,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "数字单位"
+          }
+        }
+      }
+    },
+    "OK" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "好"
           }
         }
       }
@@ -2568,6 +2758,16 @@
         }
       }
     },
+    "Open-source licenses" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开源许可"
+          }
+        }
+      }
+    },
     "Opens Settings" : {
       "localizations" : {
         "en" : {
@@ -2580,6 +2780,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开设置"
+          }
+        }
+      }
+    },
+    "Orchard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "果园"
           }
         }
       }
@@ -2724,6 +2934,16 @@
         }
       }
     },
+    "Overrides for the local collection engine." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地采集引擎覆盖配置。"
+          }
+        }
+      }
+    },
     "Overview" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2850,6 +3070,16 @@
         }
       }
     },
+    "Pumpkins" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "南瓜地"
+          }
+        }
+      }
+    },
     "Quit" : {
       "localizations" : {
         "en" : {
@@ -2878,6 +3108,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "排名为估算，依据公开用量数据推算"
+          }
+        }
+      }
+    },
+    "Rapeseed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "油菜花"
           }
         }
       }
@@ -2920,6 +3160,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在只读解析这台 Mac 上受支持的 Agent 日志，完成后自动呈现汇流图。"
+          }
+        }
+      }
+    },
+    "Reading supported agent logs in read-only mode. Your usage overview will appear automatically when finished." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在以只读模式读取支持的代理日志。完成后将自动显示你的用量概览。"
           }
         }
       }
@@ -3062,12 +3312,32 @@
         }
       }
     },
+    "Removed %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已移除 %@"
+          }
+        }
+      }
+    },
     "Reservoir" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "总量"
+          }
+        }
+      }
+    },
+    "Reset" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置"
           }
         }
       }
@@ -3596,6 +3866,16 @@
         }
       }
     },
+    "Tea rows" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "茶垄"
+          }
+        }
+      }
+    },
     "Temporarily unavailable" : {
       "localizations" : {
         "en" : {
@@ -3634,6 +3914,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 Mac 无法绘制宇宙场景。"
+          }
+        }
+      }
+    },
+    "The custom collection engine path is invalid or not executable. Fix or clear the override, or turn on iCloud sync to view usage from other Macs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义采集引擎路径无效或不可执行。请修正或清除自定义路径，或开启 iCloud 同步以查看其他 Mac 的用量。"
           }
         }
       }
@@ -3846,6 +4136,16 @@
         }
       }
     },
+    "Third-party notices" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第三方声明"
+          }
+        }
+      }
+    },
     "This Mac" : {
       "localizations" : {
         "en" : {
@@ -3920,6 +4220,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本周"
+          }
+        }
+      }
+    },
+    "This week · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本周 · %@"
           }
         }
       }
@@ -4000,6 +4310,26 @@
         }
       }
     },
+    "Token Taken could not find the collection engine on this Mac. Reinstall the app or use Scan now in Settings › Harnesses for native harnesses, or turn on iCloud sync." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken 未能在此 Mac 上找到采集引擎。请重新安装应用，或在“设置 › 工具”中使用“立即扫描”来采集原生工具，或开启 iCloud 同步。"
+          }
+        }
+      }
+    },
+    "Token Taken lacks permission to write to /Applications. Update manually from the download page." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken 没有写入 /Applications 的权限。请从下载页面手动更新。"
+          }
+        }
+      }
+    },
     "Token Taken reads supported agent logs on this Mac. Use Refresh now in Settings, or wait for the first collection to finish." : {
       "localizations" : {
         "en" : {
@@ -4012,6 +4342,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Token Taken 读取这台 Mac 上受支持的 Agent 日志。可以在设置中点击“立即刷新”，或等待首次采集完成。"
+          }
+        }
+      }
+    },
+    "Token Taken reads supported agent logs on this Mac. Use Scan now in Settings › Harnesses, or turn on iCloud sync to view usage from other Macs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token Taken 会读取此 Mac 上支持的代理日志。在“设置 › 工具”中使用“立即扫描”，或开启 iCloud 同步以查看其他 Mac 的用量。"
           }
         }
       }
@@ -4214,6 +4554,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不可用"
+          }
+        }
+      }
+    },
+    "Uncategorized" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未分类"
+          }
+        }
+      }
+    },
+    "Uninstall" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "卸载"
           }
         }
       }
@@ -4712,6 +5072,16 @@
         }
       }
     },
+    "Wheat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "麦田"
+          }
+        }
+      }
+    },
     "Year" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4958,6 +5328,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Token"
+          }
+        }
+      }
+    },
+    "tokscale path override" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "tokscale 路径覆盖"
           }
         }
       }

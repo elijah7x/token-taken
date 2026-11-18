@@ -698,13 +698,13 @@ private struct GeneralSettingsTab: View {
 
                     SettingsHairline()
 
-                    TimelineView(.everyMinute) { _ in
+                    TimelineView(.everyMinute) { context in
                         HStack(spacing: 16) {
                             Text("Last updated")
                                 .font(.system(size: 13, weight: .regular))
                                 .foregroundStyle(Palette.ink1)
                             Spacer(minLength: 12)
-                            lastUpdatedText
+                            lastUpdatedText(now: context.date)
                                 .font(.system(size: 13))
                                 .foregroundStyle(Palette.ink2)
                                 .monospacedDigit()
@@ -730,17 +730,17 @@ private struct GeneralSettingsTab: View {
         }
     }
 
-    private var lastUpdatedText: Text {
+    private func lastUpdatedText(now: Date) -> Text {
         if refreshCoordinator?.isRefreshing == true {
             return Text("Updating…")
         }
-        if let lastRefresh = refreshCoordinator?.lastRefresh {
-            if Date.now.timeIntervalSince(lastRefresh) < 60 {
+        if let lastScan = model.lastUpdated {
+            if now.timeIntervalSince(lastScan) < 60 {
                 return Text("Updated · just now")
             }
             let relative = SettingsFormatting.relativeString(
-                for: lastRefresh,
-                relativeTo: .now,
+                for: lastScan,
+                relativeTo: now,
                 locale: settings.language.locale ?? locale
             )
             return Text("Updated · \(relative)")
@@ -808,6 +808,8 @@ private struct SourcesSettingsTab: View {
     @State private var showsNotInstalled = false
     @State private var localMonthBySource: [String: Int64] = [:]
     @State private var detectedOnDiskSourceIDs: Set<String> = []
+    @State private var localMonthReloadTask: Task<Void, Never>?
+    @State private var localMonthReloadGeneration: UInt64 = 0
 
     /// Account-scoped sources have no local log folder, so they never enter the installed/not-installed ledger.
     private static let accountSourceIDs = SourceCatalog.accountSourceIDs
@@ -913,11 +915,15 @@ private struct SourcesSettingsTab: View {
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showsNotInstalled)
         }
         .onAppear(perform: reloadSourcesState)
-        .onChange(of: refreshCoordinator?.lastRefresh) { _, _ in reloadSourcesState() }
+        .onChange(of: model.lastUpdated) { _, _ in reloadSourcesState() }
         .onChange(of: refreshCoordinator?.isRefreshing) { _, refreshing in
             if refreshing == false {
                 reloadSourcesState()
             }
+        }
+        .onDisappear {
+            localMonthReloadTask?.cancel()
+            localMonthReloadTask = nil
         }
     }
 
@@ -940,12 +946,25 @@ private struct SourcesSettingsTab: View {
     }
 
     private func reloadLocalMonthUsage() {
-        if let store = refreshCoordinator?.store,
-           let summary = try? UsageAggregator(store: store).summary(for: .month) {
-            localMonthBySource = Dictionary(
-                summary.bySource.map { ($0.id, $0.counts.total) },
-                uniquingKeysWith: { first, _ in first }
-            )
+        localMonthReloadGeneration &+= 1
+        let generation = localMonthReloadGeneration
+        localMonthReloadTask?.cancel()
+        localMonthReloadTask = nil
+
+        if let store = refreshCoordinator?.store {
+            localMonthReloadTask = Task { @MainActor in
+                let nextMap = await Task.detached(priority: .userInitiated) { () -> [String: Int64]? in
+                    guard let summary = try? UsageAggregator(store: store).summary(for: .month) else {
+                        return nil
+                    }
+                    return Dictionary(
+                        summary.bySource.map { ($0.id, $0.counts.total) },
+                        uniquingKeysWith: { first, _ in first }
+                    )
+                }.value
+                guard !Task.isCancelled, localMonthReloadGeneration == generation else { return }
+                localMonthBySource = nextMap ?? [:]
+            }
             return
         }
         if refreshCoordinator == nil, model.storageError == nil, model.period == .month {
@@ -1385,13 +1404,13 @@ private struct SyncSettingsTab: View {
                         .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else {
-                        TimelineView(.everyMinute) { _ in
+                        TimelineView(.everyMinute) { context in
                             VStack(spacing: 0) {
                                 ForEach(Array(model.remoteDevices.enumerated()), id: \.element.deviceID) { entry in
                                     if entry.offset > 0 {
                                         SettingsHairline()
                                     }
-                                    remoteRow(entry.element)
+                                    remoteRow(entry.element, now: context.date)
                                 }
                             }
                         }
@@ -1407,7 +1426,7 @@ private struct SyncSettingsTab: View {
             }
         }
         .onAppear(perform: refreshICloudRootAvailability)
-        .onChange(of: refreshCoordinator?.lastRefresh) { _, _ in refreshICloudRootAvailability() }
+        .onChange(of: model.lastUpdated) { _, _ in refreshICloudRootAvailability() }
         .onChange(of: refreshCoordinator?.isRefreshing) { _, refreshing in
             if refreshing == false {
                 refreshICloudRootAvailability()
@@ -1420,7 +1439,7 @@ private struct SyncSettingsTab: View {
         iCloudRootAvailable = ICloudSync.defaultRoot != nil
     }
 
-    private func remoteRow(_ device: RemoteDeviceStatus) -> some View {
+    private func remoteRow(_ device: RemoteDeviceStatus, now: Date) -> some View {
         let isAccount = model.deviceKind(for: device.deviceID) == .account
         return HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
@@ -1436,7 +1455,7 @@ private struct SyncSettingsTab: View {
                 if let lastWrite = device.lastWrite {
                     let relative = SettingsFormatting.relativeString(
                         for: lastWrite,
-                        relativeTo: .now,
+                        relativeTo: now,
                         locale: settings.language.locale ?? locale
                     )
                     Text("Last synced \(relative)")
@@ -1446,9 +1465,7 @@ private struct SyncSettingsTab: View {
                 }
             }
             Spacer(minLength: 12)
-            // Same 24 h rule as source health: an `.ok` snapshot that has not been rewritten since reads as stale.
-            RemoteStatusLabel(state: device.state == .ok && device.lastWrite.map { Date.now.timeIntervalSince($0) > 86_400 } == true
-                ? .stale : device.state)
+            RemoteStatusLabel(state: device.effectiveState(now: now))
         }
         .padding(.vertical, 8)
         .frame(minHeight: 48)

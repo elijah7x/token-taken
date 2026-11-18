@@ -271,7 +271,7 @@ struct TrayDevices: View {
                     }
 
                     // A remote Mac whose snapshot could not be read adds no rows; keep it visible, not silently absent.
-                    ForEach(missingRemoteDevices, id: \.deviceID) { remote in
+                    ForEach(missingRemoteDevices(now: context.date), id: \.deviceID) { remote in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Image(systemName: "exclamationmark.triangle.fill")
@@ -284,7 +284,7 @@ struct TrayDevices: View {
                                     .foregroundStyle(Palette.healthWarn)
                                     .lineLimit(1)
                             }
-                            Text(remoteLabelKey(for: remote.state))
+                            Text(remoteLabelKey(for: remote.effectiveState(now: context.date)))
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundStyle(Palette.healthWarn)
                                 .lineLimit(1)
@@ -332,7 +332,7 @@ struct TrayDevices: View {
                                 .foregroundStyle(update.isWarning ? Palette.healthWarn : CosmosPalette.ink3)
                         }
                         Spacer(minLength: 6)
-                        if hidesDeviceShare {
+                        if hidesDeviceShare(now: now) {
                             Text("Included")
                         } else {
                             Text(Share.percent(device.counts.total, of: summary.total.total))
@@ -362,7 +362,7 @@ struct TrayDevices: View {
                     }
 
                     Group {
-                        if hidesDeviceShare {
+                        if hidesDeviceShare(now: now) {
                             Text(verbatim: "\(TokenFormat.short(device.counts.total)) · ") + Text("Included")
                         } else {
                             Text(verbatim: "\(TokenFormat.short(device.counts.total)) · \(Share.percent(device.counts.total, of: summary.total.total))")
@@ -402,7 +402,7 @@ struct TrayDevices: View {
 
     private func deviceAccessibilityValue(_ device: Breakdown, isLocal: Bool, now: Date) -> Text {
         var value = Text("\(TokenFormat.spoken(device.counts.total)) tokens")
-        if hidesDeviceShare {
+        if hidesDeviceShare(now: now) {
             value = value + Text(verbatim: ", ") + Text("Included")
         } else {
             value = value + Text(verbatim: ", \(Share.percent(device.counts.total, of: summary.total.total))")
@@ -438,11 +438,11 @@ struct TrayDevices: View {
             case .invalidOverride:
                 return (Text("Invalid engine override"), true)
             }
-            if let lastRefresh = refreshCoordinator.lastRefresh {
-                if now.timeIntervalSince(lastRefresh) < 60 {
+            if let lastScan = model.lastUpdated {
+                if now.timeIntervalSince(lastScan) < 60 {
                     return (Text("Updated just now"), false)
                 }
-                return (Text("Updated \(relativeTime(for: lastRefresh, now: now))"), false)
+                return (Text("Updated \(relativeTime(for: lastScan, now: now))"), false)
             }
             return (Text("Not updated yet"), false)
         }
@@ -453,10 +453,7 @@ struct TrayDevices: View {
             return nil
         }
 
-        let effectiveState: RemoteDeviceStatus.State =
-            remote.state == .ok && remote.lastWrite.map({ now.timeIntervalSince($0) > 86_400 }) == true
-            ? .stale
-            : remote.state
+        let effectiveState = remote.effectiveState(now: now)
 
         switch effectiveState {
         case .ok:
@@ -490,18 +487,21 @@ struct TrayDevices: View {
         return formatter.localizedString(for: date, relativeTo: now)
     }
 
-    private var missingRemoteDevices: [RemoteDeviceStatus] {
+    private func missingRemoteDevices(now: Date) -> [RemoteDeviceStatus] {
         model.remoteDevices.filter { remote in
-            remote.state != .ok && !summary.byDevice.contains { $0.id == remote.deviceID }
+            remote.isStaleOrIncomplete(now: now) && !summary.byDevice.contains { $0.id == remote.deviceID }
         }
     }
 
     /// Avoids showing local usage as 100.0% when another Mac is unavailable or incomplete.
-    private var hidesDeviceShare: Bool {
-        guard model.dataIssues.devices > 0 else { return false }
-        return !missingRemoteDevices.isEmpty
+    private func hidesDeviceShare(now: Date) -> Bool {
+        guard model.dataIssues(now: now).devices > 0 else { return false }
+        return !missingRemoteDevices(now: now).isEmpty
             || macDeviceCount == 1
-            || model.remoteDevices.contains { $0.state == .unavailable || $0.state == .partial }
+            || model.remoteDevices.contains {
+                let state = $0.effectiveState(now: now)
+                return state == .unavailable || state == .partial
+            }
     }
 
     /// Account devices carry one account's usage, so they never make the Mac share look like a single Mac.
@@ -566,13 +566,13 @@ private struct PartialDeviceBanner: View {
     }
 
     private var message: Text {
-        let issueDevices = remoteDevices.filter { $0.state != .ok }
+        let issueDevices = remoteDevices.filter { $0.isStaleOrIncomplete() }
         if issueDevices.count == 1, let remote = issueDevices.first {
             let name = remote.displayName == remote.deviceID ? String(localized: "Unknown Mac") : remote.displayName
             if !summary.byDevice.contains(where: { $0.id == remote.deviceID }) {
                 return Text("Does not include \(name)")
             }
-            let state: String = switch remote.state {
+            let state: String = switch remote.effectiveState() {
             case .stale: String(localized: "Stale")
             case .partial: String(localized: "Partial")
             case .unavailable, .ok: String(localized: "Unavailable")
