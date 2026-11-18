@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Added `--help` / `-h` usage output (globally and per subcommand) to the `token-taken` CLI, and added CLI installation status and an **Uninstall** action in Settings.
+- Bundled third-party notices (`THIRD_PARTY_NOTICES.md`) inside the macOS app and added a button to open them from Settings → About.
 - Added the Liquid Glass `Lens` share card graphic (`LensShareGraphic`): when **View** is set to `Lens`, share cards render a pure-`Canvas` stacked time-bar chart with a hand-drawn glass lens capsule frozen on the peak bucket, a single peak-value pill above the lens, `Peak · {time}` in the card header, portrait (`2:3`), square (`1:1`), and landscape (`3:2`) layouts, and a Tide vessel fallback for single-model day cards where hourly buckets have no model breakdown.
 - Added a **View** setting (`Confluence` or `Lens`) under the Liquid Glass theme with schematic thumbnail cards, an interactive `Lens` stacked time-bar chart and three-column glass readout card for single-bucket and contiguous-range slicing, and the theme's app icon logo on share card headers.
 - 为 Liquid Glass 主题新增「视图」设置（「汇流」与「透镜」缩略图切换，默认「汇流」），提供支持单桶与区间切片探查的「透镜」时间条与三栏玻璃读数卡，并将所有主题分享卡页头的品牌小图标替换为对应主题的产品 App 图标。
@@ -37,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- Updated `token-taken` CLI cost rounding to match the macOS app, and prevented the CLI from creating data directories or database files before the app's first launch.
+- Restricted Cursor account usage export to HTTPS-only redirects on `cursor.com` / `www.cursor.com`, and migrated legacy device-local Cursor rows to the account device so historical totals remain intact without double counting.
+- Tightened macOS update feed and package checks (HTTPS-only feed and download hosts, version/build validation, Developer ID team signature, and Gatekeeper assessment).
+- Refreshed `Today` automatically when crossing midnight so day rollovers update without waiting for the next scheduled collection.
 - Replaced the legacy double-T menu bar template glyph (`MenuBarGlyph`) with a solid coin and cut-out T glyph matching the coin app icon.
 - 将菜单栏默认模板图标（`MenuBarGlyph`）由早期“双 T”字形替换为与主图标一致的实心圆币镂空 T 图形。
 - Replaced the iOS discrete rank-band table with the shared `UsageRank` log-log interpolation curve (`rank-curve-2026-11`) over last-30-day tokens across all harnesses, adding extrapolated anchors below 350M down to 100k (top 99%), unified `top X%` formatting, and updated estimate footnote wording.
@@ -60,5 +66,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Preserved historical daily usage across system time-zone changes instead of shrinking stored days (schema v6 collection-zone tracking).
+- Cancelled refreshes no longer mark sources as failed, and missing or invalid collection-engine status is now surfaced in the UI.
+- Improved Cosmos menu bar readability on light macOS menu bars.
+- Included uncategorized tokens (such as DeepSeek CLI) in dashboard charts and share cards, stopped displaying unpriced tokens as `$0` on share cards, and surfaced share export errors instead of failing silently.
+- Fixed iPhone companion dates west of UTC, sped up iCloud report loading with local caching and faster discovery, and clarified downloading, unsupported-version, and error states.
 - Fresh installs now recover synced Macs within seconds instead of after a relaunch.
 - A refresh can no longer hang forever when the `tokscale` engine stops responding.

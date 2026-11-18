@@ -7,19 +7,19 @@ Reference checklist and App Store Connect answers for submitting **Token Taken**
 - **App Name:** Token Taken
 - **Bundle ID:** `io.github.elijah7x.TokenTaken.iOS`
 - **Platform:** iOS (`26.0`+, iPhone only, portrait orientation)
-- **Primary Category suggestion:** Developer Tools (matches `public.app-category.developer-tools` on macOS)
-- **Secondary Category suggestion:** Utilities or Productivity (`TODO (Elijah)`: choose preferred secondary category or leave unset)
-- **Pricing & Availability:** `TODO (Elijah)`: set price (Free expected, no In-App Purchases) and distribution territories in App Store Connect.
-- **Marketing Copy & Metadata:** `TODO (Elijah)`: finalize App Store subtitle, promotional text, description, keywords, and release notes in English (`en-US`) and Simplified Chinese (`zh-Hans`).
+- **Primary Category:** Developer Tools (matches `public.app-category.developer-tools` on macOS)
+- **Secondary Category:** Productivity
+- **Pricing & Availability:** Free, no In-App Purchases.
+  - **Territories:** All App Store territories except China mainland for the first release, because App Store distribution in China mainland requires an app ICP filing number (revisit when one exists).
+- **Marketing Copy & Metadata:** Finalized in Section 10 below (`en-US` and `zh-Hans`).
 
 ## 2. Required URLs
 
-- **Privacy Policy URL (required):** Must resolve to a live, publicly accessible web page before submission.
-  - The privacy policy text lives at [PRIVACY.md](../PRIVACY.md).
-  - **Important:** The repository (`elijah7x/token-taken`) is currently private, so a raw GitHub link to `PRIVACY.md` will fail App Store Review validation until the repository is made public or `PRIVACY.md` is hosted at a public URL.
-  - `TODO (Elijah)`: publish `PRIVACY.md` at a public URL (for example under `https://elijah.ac.cn/token-taken/...` or after making the repository public) and enter that URL in App Store Connect.
-- **Support URL (required):** `TODO (Elijah)`: provide a live public support page or `https://github.com/elijah7x/token-taken/issues` once the repository is public.
-- **Marketing URL (optional):** `TODO (Elijah)`: add if desired.
+- **Privacy Policy URL (required):** `https://github.com/elijah7x/token-taken/blob/main/PRIVACY.md`
+  - The repository (`github.com/elijah7x/token-taken`) is now public. This link points to [PRIVACY.md](../PRIVACY.md) and will be live once the `launch-fixes` branch is merged and pushed to `main`.
+  - **Note on `elijah.ac.cn`:** The iOS app makes no update-feed requests (and no requests to `elijah.ac.cn` or any developer-operated server). `elijah.ac.cn` is only one of two update sources used by release builds of the Mac app, and the Mac app works with GitHub Releases alone.
+- **Support URL (required):** `https://github.com/elijah7x/token-taken/issues`
+- **Marketing URL (optional):** `https://github.com/elijah7x/token-taken`
 
 ## 3. App Privacy ("Nutrition Label")
 
@@ -43,8 +43,7 @@ Reference checklist and App Store Connect answers for submitting **Token Taken**
 - **`Info.plist`:** `ITSAppUsesNonExemptEncryption` is set to `false` (`NO`).
 - **App Store Connect question ("Does your app use encryption?"):**
   - Answer **No** (or **Yes, using only standard OS/Apple encryption exempt from export compliance documentation**, depending on the current App Store Connect wording).
-  - **Reasoning:** The iOS app implements no custom cryptography and includes no third-party crypto libraries; it relies solely on Apple's iOS and iCloud system frameworks.
-  - `TODO (Elijah)`: verify whether any French encryption declaration prompt appears in App Store Connect for your distribution regions.
+  - **Reasoning:** The iOS app implements no custom cryptography and includes no third-party crypto libraries; it relies solely on Apple-provided HTTPS and iCloud system frameworks (`ITSAppUsesNonExemptEncryption = NO`), and no French encryption declaration is needed.
 
 ## 5. Age Rating Questionnaire
 
@@ -65,7 +64,7 @@ Recommended answers (all **No / None**, resulting in **4+**):
 - Gambling or Contests: No
 - User-Generated Content / Messaging / Social features: No
 
-`TODO (Elijah)`: verify against any newly added App Store Connect age-rating toggles at submission time.
+Confirm against any newly added App Store Connect age-rating toggles at submission time; all items above are **No / None** (**4+**).
 
 ## 6. App Review Notes
 
@@ -100,11 +99,11 @@ How to review without a paired Mac:
   - [ ] Confirm container `iCloud.io.github.elijah7x.TokenTaken` is registered and assigned to **both** `io.github.elijah7x.TokenTaken.iOS` (iOS) and `io.github.elijah7x.TokenTaken` (macOS).
   - [ ] Exercise an end-to-end real-device test where a signed macOS build with **Sync to iPhone** enabled writes a report and the iOS TestFlight/device build reads it (still unverified per `docs/contracts/mobile-report.md` and `ios/README.md`).
 
-## 8. `DEVELOPMENT_TEAM` Setup
+## 8. `DEVELOPMENT_TEAM` Setup (`TODO (Elijah)`)
 
 `ios/project.yml` intentionally keeps `DEVELOPMENT_TEAM: ""` in git so no personal Apple Developer Team ID is published in the repository.
 
-To configure signing locally before archiving for TestFlight / App Store Connect:
+To configure signing locally before archiving for TestFlight / App Store Connect (`TODO (Elijah)`):
 
 1. Generate the Xcode project:
    ```sh
@@ -118,7 +117,7 @@ To configure signing locally before archiving for TestFlight / App Store Connect
 
 ## 9. Screenshot & Asset Checklist
 
-- **App Icon:** `AppIcon-1024.png` is present in `ios/TokenTakenMobile/Resources/Assets.xcassets/AppIcon.appiconset/` (`TODO (Elijah)`: do a final visual check in Xcode Archive / TestFlight).
+- **App Icon:** `AppIcon-1024.png` is present in `ios/TokenTakenMobile/Resources/Assets.xcassets/AppIcon.appiconset/` (confirm visually in Xcode Archive / TestFlight when capturing screenshots).
 - **Screenshots (`TODO (Elijah)`):**
   - App is iPhone-only (`TARGETED_DEVICE_FAMILY = 1`, portrait-only), so iPad screenshots are not required.
   - Capture portrait iPhone screenshots at App Store Connect's required 6.9" display size (and 6.5" if requested by App Store Connect) in both **English** and **Simplified Chinese** (using Demo mode or a real Mac report):
@@ -126,3 +125,66 @@ To configure signing locally before archiving for TestFlight / App Store Connect
     2. Home screen lower section (Harnesses this month + Macs in this report coverage).
     3. Share sheet preview (`ShareSheetView` rendered card).
     4. Empty state or Settings view (optional, showing Demo mode & ranking methodology).
+
+## 10. App Store Metadata (`en-US` and `zh-Hans`)
+
+### English (`en-US`)
+
+- **App Name:** `Token Taken`
+- **Subtitle (25/30 chars):** `AI Coding Token Companion`
+- **Promotional Text (166/170 chars):**
+  `View AI coding-agent token totals published from your Mac via your own iCloud—today, this month, last 12 months, and shareable summary cards. Try sample data anytime.`
+- **Keywords (92/100 chars):**
+  `ai,coding,agent,usage,tracker,llm,developer,tools,icloud,companion,stats,metrics,summary,mac`
+- **Description (1092 chars):**
+
+```text
+Token Taken for iPhone is a display-only companion app for Token Taken on macOS. It shows the aggregate usage report that your Mac publishes to your own iCloud account—no Token Taken account, server, or manual import needed.
+
+Check your token totals for today, this month, the last 30 days, and all time. Review a 12-month bar chart, see which coding-agent harnesses contributed this month, and check which Macs are included in the report. An estimated 30-day usage rank based on public usage references is also shown.
+
+Export a Liquid Glass summary card as an image using the system share sheet. If you have not enabled Sync to iPhone on a Mac yet, tap View sample data to explore every screen with built-in demo data.
+
+Token Taken for iPhone does not collect local logs, calculate costs, or send data to developer servers. It reads only the aggregate report stored in your own iCloud container under the same Apple ID, with no prompts, responses, file paths, project names, or credentials. Requires Token Taken on macOS with Sync to iPhone enabled and the same Apple ID signed in to iCloud.
+```
+
+- **What's New (Version 1.0):**
+
+```text
+Initial release of Token Taken for iPhone. View aggregate AI coding-agent token totals synced from Token Taken on your Mac via your own iCloud, inspect your 12-month chart, monthly harness breakdown, and included Macs, share a Liquid Glass summary card, or explore with built-in sample data.
+```
+
+### Simplified Chinese (`zh-Hans`)
+
+- **App Name:** `Token Taken`
+- **Subtitle (14/30 chars):** `Mac Token 用量伴侣`
+- **Promotional Text (90/170 chars):**
+  `通过自己的 iCloud 随时查看 Mac 版 Token Taken 同步的 AI 编程 Token 用量：今日、本月、近 12 个月趋势与分享卡片，并支持内置示例数据直接体验。`
+- **Keywords (48/100 chars):**
+  `AI,编程,用量,统计,开发者,效率,iCloud,伴侣,工具,大模型,代码,助手,摘要,Mac`
+- **Description (501 chars):**
+
+```text
+Token Taken iPhone 版是 macOS 应用 Token Taken 的纯展示伴侣。它会直接读取你的 Mac 发布到个人 iCloud 的聚合用量报表，无需注册账号、无需第三方服务器，也无需手动导入文件。
+
+在手机上随时查看今日、本月、近 30 天与累计 Token 总量，浏览近 12 个月用量柱状图、本月各编程工具明细，以及这份报表当前包含哪些 Mac。应用也会结合公开用量参考数据展示近 30 天的估算排名。
+
+你可以将统计结果渲染为 Liquid Glass 分享卡片，并通过系统分享面板保存或发送。如果还没有在 Mac 上开启「同步到 iPhone」，也可以直接点击「查看示例数据」，用内置演示报表体验完整界面与分享卡功能。
+
+Token Taken iPhone 版不会在手机端采集日志、估算费用或向开发者服务器上传数据。它仅从同一 Apple ID 下的个人 iCloud 容器读取聚合后的用量摘要，不包含提示词、回复内容、文件路径、项目名称或任何凭据。使用真实数据需配合开启了「同步到 iPhone」且登录同一 Apple ID 的 Mac 版 Token Taken。
+```
+
+- **What's New (Version 1.0):**
+
+```text
+Token Taken iPhone 版首个正式版本发布。通过你自己的 iCloud 查看由 Mac 版 Token Taken 同步的聚合 Token 用量，浏览近 12 个月趋势柱状图、本月工具明细与已包含的 Mac 列表，生成 Liquid Glass 分享卡片，或使用内置示例数据直接体验。
+```
+
+## 11. Final Remaining Steps (In Order)
+
+Only these `TODO` items remain before submitting in App Store Connect:
+
+1. **Configure `DEVELOPMENT_TEAM` locally** in Xcode (**Signing & Capabilities**), via `xcodebuild DEVELOPMENT_TEAM=<YOUR_TEAM_ID>`, or an untracked `.xcconfig` (Section 8).
+2. **Verify Apple Developer Portal iCloud container & end-to-end sync** for `iCloud.io.github.elijah7x.TokenTaken` across `io.github.elijah7x.TokenTaken.iOS` and `io.github.elijah7x.TokenTaken` on real signed builds (Section 7).
+3. **Capture final App Store screenshots** in `en-US` and `zh-Hans` at the required iPhone portrait sizes (Section 9).
+4. **Fill in App Review contact name, phone number, and email** in App Store Connect (Section 6) and submit once `launch-fixes` is merged to `main` so the Privacy Policy URL resolves publicly.
