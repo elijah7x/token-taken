@@ -61,6 +61,22 @@
         }
       }
     },
+    "Data is more than a day old. Open Token Taken on your Mac to refresh.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Data is more than a day old. Open Token Taken on your Mac to refresh."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "数据已超过一天未更新，请在 Mac 上打开 Token Taken 刷新。"
+          }
+        }
+      }
+    },
     "Demo mode": {
       "localizations": {
         "zh-Hans": {
@@ -87,6 +103,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "完成"
+          }
+        }
+      }
+    },
+    "Downloading report": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading report"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在下载报表"
+          }
+        }
+      }
+    },
+    "Downloading the newest report from iCloud. Showing the last saved copy.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Downloading the newest report from iCloud. Showing the last saved copy."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在从 iCloud 下载最新报表，当前显示上次保存的副本。"
           }
         }
       }
@@ -301,6 +349,22 @@
         }
       }
     },
+    "The report in iCloud uses a newer format than this version of the app supports.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The report in iCloud uses a newer format than this version of the app supports."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iCloud 中的报表格式较新，当前版本的 App 暂不支持。"
+          }
+        }
+      }
+    },
     "This month": {
       "localizations": {
         "zh-Hans": {
@@ -381,6 +445,38 @@
         }
       }
     },
+    "Update Token Taken": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update Token Taken"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请更新 Token Taken"
+          }
+        }
+      }
+    },
+    "Update Token Taken to read the newest report. Showing the last saved copy.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update Token Taken to read the newest report. Showing the last saved copy."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请更新 Token Taken 以读取最新报表，当前显示上次保存的副本。"
+          }
+        }
+      }
+    },
     "Updated %@": {
       "localizations": {
         "zh-Hans": {
@@ -407,6 +503,22 @@
           "stringUnit": {
             "state": "translated",
             "value": "查看示例数据"
+          }
+        }
+      }
+    },
+    "Waiting for iCloud to finish downloading your report. Try again in a moment.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for iCloud to finish downloading your report. Try again in a moment."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在等待 iCloud 完成下载报表，请稍后重试。"
           }
         }
       }

@@ -292,7 +292,7 @@ struct FieldShareCard: View {
     }
 
     private var dateRange: String {
-        let style = Date.FormatStyle.dateTime.year().month().day()
+        let style = Date.FormatStyle.dateTime.locale(locale).year().month().day()
         let last = data.summary.end.addingTimeInterval(-1)
         let start = data.summary.start.formatted(style), end = last.formatted(style)
         return start == end ? start : "\(start) – \(end)"
@@ -300,12 +300,15 @@ struct FieldShareCard: View {
 
     private var header: some View {
         HStack(spacing: 22) {
-            if let icon = ThemeAppIcon.image(for: .field) {
-                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 84, height: 84)
-            }
+            ShareBrandLogo(theme: .field, size: 84)
+                .accessibilityHidden(true)
             Text(verbatim: "Token Taken").font(FieldFont.serif(36)).foregroundStyle(FieldPalette.ink)
             Spacer()
-            Text(verbatim: dateRange).font(FieldFont.serif(28)).foregroundStyle(FieldPalette.muted)
+            Text(verbatim: dateRange)
+                .font(FieldFont.serif(28))
+                .foregroundStyle(FieldPalette.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.80)
         }
     }
 
@@ -331,9 +334,27 @@ struct FieldShareCard: View {
                     .fixedSize()
             }
             if showCost {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(verbatim: TokenFormat.usd(data.estimatedUSD)).font(FieldFont.serif(32)).foregroundStyle(FieldPalette.accent)
-                    Text("estimate, not a bill").font(FieldFont.serif(28)).foregroundStyle(FieldPalette.accent)
+                if data.unpricedTokens > 0, data.unpricedTokens >= data.counts.total {
+                    Text("No prices for these models")
+                        .font(FieldFont.serif(30))
+                        .foregroundStyle(FieldPalette.accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(verbatim: TokenFormat.usd(data.estimatedUSD)).font(FieldFont.serif(32)).foregroundStyle(FieldPalette.accent)
+                        Text("estimate, not a bill").font(FieldFont.serif(28)).foregroundStyle(FieldPalette.accent)
+                        if data.unpricedTokens > 0 {
+                            Text(verbatim: "· ")
+                                .font(FieldFont.serif(26))
+                                .foregroundStyle(FieldPalette.muted)
+                            Text("\(TokenFormat.short(data.unpricedTokens)) unpriced")
+                                .font(FieldFont.serif(26))
+                                .foregroundStyle(FieldPalette.muted)
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 }
             }
         }
@@ -395,29 +416,58 @@ struct FieldShareCard: View {
         FieldLandscapeView(items: items, highlight: .constant(focusID), interactive: false)
     }
 
+    private struct CompositionPart: Identifiable {
+        let id: String
+        let label: LocalizedStringKey
+        let tokens: Int64
+        let color: Color
+    }
+
+    @ViewBuilder
     private var composition: some View {
-        let total = max(data.counts.total, 1)
-        let parts = TokenCategory.allCases.map { ($0, data.counts[$0]) }.filter { $0.1 > 0 }
-        return VStack(alignment: .leading, spacing: 14) {
-            GeometryReader { proxy in
-                HStack(spacing: 3) {
-                    ForEach(parts, id: \.0) { category, value in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Palette.color(for: category))
-                            .frame(width: max(2, (proxy.size.width - CGFloat(parts.count - 1) * 3) * CGFloat(value) / CGFloat(total)))
+        let total = data.counts.total
+        let divisor = max(total, 1)
+        let parts: [CompositionPart] = TokenCategory.allCases.compactMap { category in
+            let value = data.counts[category]
+            return value > 0
+                ? CompositionPart(id: category.rawValue, label: category.title, tokens: value, color: Palette.color(for: category))
+                : nil
+        } + (data.counts.uncategorized > 0
+            ? [CompositionPart(id: "uncategorized", label: "Uncategorized", tokens: data.counts.uncategorized, color: Palette.ink3.opacity(0.45))]
+            : [])
+        if !parts.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                GeometryReader { proxy in
+                    let gap: CGFloat = 3
+                    let usable = max(0, proxy.size.width - CGFloat(max(0, parts.count - 1)) * gap)
+                    HStack(spacing: gap) {
+                        ForEach(Array(parts.enumerated()), id: \.element.id) { index, part in
+                            let isLast = index == parts.count - 1
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(part.color)
+                                .frame(
+                                    width: isLast ? nil : max(2, usable * CGFloat(part.tokens) / CGFloat(divisor)),
+                                    height: 18
+                                )
+                                .frame(maxWidth: isLast ? .infinity : nil, alignment: .leading)
+                        }
                     }
+                    .frame(width: proxy.size.width, height: 18, alignment: .leading)
+                    .background(FieldPalette.rule.opacity(0.35))
+                    .clipShape(Capsule())
                 }
-            }
-            .frame(height: 18)
-            HStack(spacing: 22) {
-                ForEach(parts, id: \.0) { category, value in
-                    HStack(spacing: 6) {
-                        Text(category.title)
-                        Text(verbatim: Share.percent(value, of: total))
+                .frame(height: 18)
+                HStack(spacing: 18) {
+                    ForEach(parts) { part in
+                        HStack(spacing: 6) {
+                            Text(part.label)
+                            Text(verbatim: Share.percent(part.tokens, of: total))
+                        }
+                        .font(FieldFont.serif(22))
+                        .foregroundStyle(FieldPalette.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                     }
-                    .font(FieldFont.serif(22))
-                    .foregroundStyle(FieldPalette.ink)
-                    .lineLimit(1)
                 }
             }
         }

@@ -268,6 +268,7 @@ final class AppSettings {
         defaults.register(defaults: [
             Keys.theme: AppTheme.liquidGlass.rawValue,
             Keys.liquidView: LiquidView.confluence.rawValue,
+            Keys.appearance: AppAppearance.system.rawValue,
             Keys.interfaceTransparency: Self.defaultInterfaceTransparency,
             Keys.language: AppLanguage.system.rawValue,
             Keys.numberUnits: NumberUnits.automatic.rawValue,

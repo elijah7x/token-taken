@@ -437,4 +437,42 @@ final class DevinCollectorTests: XCTestCase {
         XCTAssertEqual(badRowOnlyBatch.skippedRecords, 1)
         XCTAssertEqual(badRowOnlyBatch.stateCommits.count, 1)
     }
+
+    func testMillisecondRowCreatedAtIsDatedWithoutOverflow() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-01-02T12:30:00Z")!
+        let createdAtMs = seconds("2026-01-02T06:00:00Z") * 1_000
+        try makeDatabase(
+            sessions: [Session(id: "session-a", title: nil, model: "swe-2")],
+            rows: [
+                Row(rowID: 1, session: "session-a", createdAt: createdAtMs,
+                    message: chatMessage(requestID: "ms-row", generationModel: "swe-2", input: 30)),
+            ]
+        )
+
+        let batch = try await collector(now: now).collect()
+
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.day, "2026-01-02")
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 30))
+        XCTAssertEqual(batch.skippedRecords, 0)
+    }
+
+    func testFutureTimestampIsSkipped() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-01-02T12:30:00Z")!
+        try makeDatabase(
+            sessions: [Session(id: "session-a", title: nil, model: "swe-2")],
+            rows: [
+                Row(rowID: 1, session: "session-a", createdAt: seconds("2026-01-02T06:00:00Z"),
+                    message: chatMessage(
+                        requestID: "future-row", generationModel: "swe-2",
+                        startedGenerationAt: "2026-01-05T00:00:00.000Z", input: 30
+                    )),
+            ]
+        )
+
+        let batch = try await collector(now: now).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
+    }
 }

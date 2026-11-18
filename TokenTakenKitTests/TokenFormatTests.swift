@@ -71,6 +71,15 @@ final class TokenFormatTests: XCTestCase {
         XCTAssertEqual(TokenFormat.usd(999_999.995), "$1,000,000.00")
     }
 
+    func testRoundedUSDHalfCentBoundary() {
+        XCTAssertEqual(TokenFormat.roundedUSD(10705.755), Decimal(string: "10705.76"))
+        XCTAssertEqual(TokenFormat.roundedUSD(10705.754), Decimal(string: "10705.75"))
+        XCTAssertEqual(TokenFormat.roundedUSD(-10705.755), Decimal(string: "-10705.76"))
+        XCTAssertEqual(TokenFormat.roundedUSD(0.005), Decimal(string: "0.01"))
+        XCTAssertEqual(TokenFormat.roundedUSD(-0.001), 0)
+        XCTAssertEqual(TokenFormat.roundedUSD(.nan), 0)
+    }
+
     func testUSDZeroAndNegatives() {
         XCTAssertEqual(TokenFormat.usd(0), "$0.00")
         XCTAssertEqual(TokenFormat.usd(-4.2), "-$4.20")

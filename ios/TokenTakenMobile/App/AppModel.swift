@@ -17,6 +17,8 @@ final class AppModel {
     @ObservationIgnored private let demoSource = DemoReportSource()
     @ObservationIgnored private let comparisons = ComparisonCatalog.load()
     @ObservationIgnored private var identityTask: Task<Void, Never>?
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
+    @ObservationIgnored private var loadGeneration: UInt64 = 0
     @ObservationIgnored private var hasStarted = false
 
     private static let demoModeKey = "TokenTakenDemoMode"
@@ -39,23 +41,23 @@ final class AppModel {
     }
 
     func reload() async {
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
-
+        loadTask?.cancel()
+        loadGeneration &+= 1
+        let generation = loadGeneration
         let usingDemo = demoMode
         let source: any ReportSource = usingDemo ? demoSource : iCloudSource
-        let load = await source.load()
-        if let loaded = load.report {
-            report = loaded
-            state = load.state
-            if !usingDemo { cache.write(loaded) }
-        } else {
-            // Keep the last good copy on screen; the state tells the UI why it may be old.
-            state = load.state
+        isLoading = true
+
+        let task = Task { @MainActor [weak self] in
+            let load = await source.load()
+            guard let self, self.loadGeneration == generation else { return }
+            self.isLoading = false
+            self.loadTask = nil
+            guard !Task.isCancelled else { return }
+            self.apply(load, usingDemo: usingDemo)
         }
-        comparison = makeComparison()
-        lastLoadedAt = .now
+        loadTask = task
+        await task.value
     }
 
     func setDemoMode(_ enabled: Bool) async {
@@ -71,8 +73,27 @@ final class AppModel {
                 report = nil
                 state = .noReport
             }
+            comparison = makeComparison()
         }
         await reload()
+    }
+
+    private func apply(_ load: ReportLoad, usingDemo: Bool) {
+        if let loaded = load.report {
+            report = loaded
+            state = load.state
+            if !usingDemo { cache.write(loaded) }
+        } else if !usingDemo, load.state == .noReport {
+            // iCloud is reachable and holds no report files (e.g. Sync to iPhone was turned off).
+            cache.clear()
+            report = nil
+            state = .noReport
+        } else {
+            // Keep the last good copy on screen; the state tells the UI why it may be old.
+            state = load.state
+        }
+        comparison = makeComparison()
+        lastLoadedAt = .now
     }
 
     private func makeComparison() -> ComparisonLine? {
@@ -85,8 +106,9 @@ final class AppModel {
         guard identityTask == nil else { return }
         identityTask = Task { [weak self] in
             for await _ in ICloudReportSource.identityChangeStream() {
-                guard let self, !self.demoMode else { continue }
+                guard let self else { continue }
                 self.cache.clear()
+                guard !self.demoMode else { continue }
                 self.report = nil
                 self.comparison = nil
                 self.state = .iCloudUnavailable

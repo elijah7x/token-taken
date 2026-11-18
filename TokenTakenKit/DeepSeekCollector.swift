@@ -14,6 +14,7 @@ public struct DeepSeekCollector: UsageCollector {
     private let root: URL
     private let deviceID: String
     private let timeZone: TimeZone
+    private let now: Date
     private let stateFile: CollectorStateFile<SavedState>?
 
     public init(deviceID: String, stateDirectory: URL? = nil) {
@@ -24,11 +25,12 @@ public struct DeepSeekCollector: UsageCollector {
         )
     }
 
-    /// Pins the session root and the day time zone; used by tests.
-    public init(deviceID: String, home: URL, timeZone: TimeZone = .current, stateDirectory: URL? = nil) {
+    /// Pins the session root, day time zone, and clock; used by tests.
+    public init(deviceID: String, home: URL, timeZone: TimeZone = .current, now: Date = .now, stateDirectory: URL? = nil) {
         root = home.appendingPathComponent(".deepseek/sessions", isDirectory: true)
         self.deviceID = deviceID
         self.timeZone = timeZone
+        self.now = now
         self.stateFile = stateDirectory.map { CollectorStateFile(directory: $0, name: "deepseek-cli") }
     }
 
@@ -47,7 +49,7 @@ public struct DeepSeekCollector: UsageCollector {
             return CollectionBatch(unchangedSourceIDs: Set(sourceIDs))
         }
 
-        var aggregator = Aggregator(deviceID: deviceID, timeZone: timeZone)
+        var aggregator = Aggregator(deviceID: deviceID, timeZone: timeZone, maxDate: now.addingTimeInterval(86_400))
         for file in files {
             let data: Data
             do {
@@ -117,6 +119,7 @@ public struct DeepSeekCollector: UsageCollector {
     private struct Aggregator {
         let deviceID: String
         let timeZone: TimeZone
+        let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
         var skipped = 0
@@ -127,9 +130,14 @@ public struct DeepSeekCollector: UsageCollector {
         }
 
         mutating func scan(_ metadata: Metadata, fallbackID: String) {
-            guard let total = metadata.totalTokens?.value, total > 0,
-                  let createdAt = metadata.createdAt,
-                  let date = DeepSeekCollector.createdDate(createdAt) else {
+            guard let total = metadata.totalTokens?.value else {
+                skipped += 1
+                return
+            }
+            guard total > 0 else { return }
+            guard let createdAt = metadata.createdAt,
+                  let date = DeepSeekCollector.createdDate(createdAt),
+                  date <= maxDate else {
                 skipped += 1
                 return
             }
@@ -160,21 +168,30 @@ public struct DeepSeekCollector: UsageCollector {
         }
     }
 
+    // `ISO8601DateFormatter` is documented as thread-safe, so collectors running in parallel may share it.
+    private nonisolated(unsafe) static let fractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private nonisolated(unsafe) static let plainFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
     /// `created_at` is ISO 8601 with microsecond precision, which `ISO8601DateFormatter` rejects on
     /// some systems, so the fractional part is dropped and the rest reparsed as a fallback.
     static func createdDate(_ string: String) -> Date? {
         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: trimmed) { return date }
-        let plain = ISO8601DateFormatter()
-        plain.formatOptions = [.withInternetDateTime]
-        if let date = plain.date(from: trimmed) { return date }
+        if let date = fractionalFormatter.date(from: trimmed) { return date }
+        if let date = plainFormatter.date(from: trimmed) { return date }
         guard let dot = trimmed.firstIndex(of: ".") else { return nil }
         let remainder = trimmed[trimmed.index(after: dot)...]
         guard let zone = remainder.firstIndex(where: { $0 == "Z" || $0 == "+" || $0 == "-" }) else { return nil }
-        return plain.date(from: String(trimmed[..<dot]) + String(remainder[zone...]))
+        return plainFormatter.date(from: String(trimmed[..<dot]) + String(remainder[zone...]))
     }
 
     private struct Session: Decodable {

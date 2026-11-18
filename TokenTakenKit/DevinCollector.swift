@@ -79,11 +79,12 @@ public struct DevinCollector: UsageCollector {
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
-        let earliestHour = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -2, to: now)!)
+        let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
+        let earliestHour = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -2, to: now) ?? now)
         var aggregator = Aggregator(
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, earliestHour: earliestHour
+            currentHour: currentHour, earliestHour: earliestHour,
+            maxDate: now.addingTimeInterval(86_400)
         )
         var seen: Set<String> = []
         var cliSessions: Set<String> = []
@@ -341,7 +342,10 @@ public struct DevinCollector: UsageCollector {
     private static func turnTimestamp(metadata: Metadata?, rowCreatedAt: Int64) -> Int64? {
         if let value = metadata?.startedGenerationAt, let ms = milliseconds(value), ms > 0 { return ms }
         if let value = metadata?.createdAt, let ms = milliseconds(value), ms > 0 { return ms }
-        return rowCreatedAt > 0 ? rowCreatedAt * 1_000 : nil
+        guard rowCreatedAt > 0 else { return nil }
+        if rowCreatedAt >= 1_000_000_000_000 { return rowCreatedAt }
+        let (ms, overflow) = rowCreatedAt.multipliedReportingOverflow(by: 1_000)
+        return overflow ? nil : ms
     }
 
     // MARK: - Devin Desktop
@@ -789,6 +793,7 @@ public struct DevinCollector: UsageCollector {
         let calendar: Calendar
         let currentHour: Date
         let earliestHour: Date
+        let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
         var hourly: [Date: HourlyUsage] = [:]
@@ -805,6 +810,11 @@ public struct DevinCollector: UsageCollector {
                 return
             }
             let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
+            guard date <= maxDate,
+                  let hour = calendar.dateInterval(of: .hour, for: date)?.start else {
+                skipped += 1
+                return
+            }
             let day = UsageDay.string(from: date, in: timeZone)
             let key = Key(day: day, modelID: model)
             var record = daily[key] ?? UsageRecord(
@@ -815,7 +825,6 @@ public struct DevinCollector: UsageCollector {
             record.counts += counts
             record.eventCount += 1
             daily[key] = record
-            let hour = calendar.dateInterval(of: .hour, for: date)!.start
             if hour >= earliestHour, hour <= currentHour {
                 var row = hourly[hour] ?? HourlyUsage(
                     hourStart: hour, deviceID: deviceID, sourceID: "devin",

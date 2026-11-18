@@ -217,7 +217,7 @@ final class AccountSyncTests: XCTestCase {
         XCTAssertEqual(corrupted.status.state, .ok)
     }
 
-    func testUndownloadedAccountFileOmitsThePublication() throws {
+    func testUndownloadedAccountFileOmitsThePublicationAndMarksDevicePartial() throws {
         let health = [SourceHealth(sourceID: "cursor", lastSuccess: now, state: .ok)]
         try publish(daily: [record(deviceID: accountID)], hourly: [hour(deviceID: accountID)], health: health)
         let name = "account-\(shortID)-hourly.json"
@@ -225,12 +225,67 @@ final class AccountSyncTests: XCTestCase {
         try SyncBackend(root: directory).write(Data(), to: "v1/devices/\(publisher.id)/.\(name).icloud")
         let remote = try XCTUnwrap(read().first)
         XCTAssertTrue(remote.accounts.isEmpty)
-        XCTAssertEqual(remote.status.state, .ok)
+        XCTAssertEqual(remote.status.state, .partial)
 
         let noDownload = ICloudSync.readRemote(
             root: directory, excludingDeviceID: "device-z", now: now, requestDownloads: false
         )
         XCTAssertTrue(noDownload.first?.accounts.isEmpty ?? false)
+        XCTAssertEqual(noDownload.first?.status.state, .partial)
+    }
+
+    func testAccountHourlyRowsAcceptClockSkewTolerance() throws {
+        let health = [SourceHealth(sourceID: "cursor", lastSuccess: now, state: .ok)]
+        try publish(daily: [record(deviceID: accountID)], hourly: [hour(deviceID: accountID)], health: health)
+
+        let withinSkew = HourlyUsage(
+            hourStart: now.addingTimeInterval(300),
+            deviceID: accountID,
+            sourceID: "cursor",
+            counts: TokenCounts(input: 4, output: 5, uncategorized: 1),
+            eventCount: 1,
+            reasoningKnown: false
+        )
+        let beyondSkew = HourlyUsage(
+            hourStart: now.addingTimeInterval(301),
+            deviceID: accountID,
+            sourceID: "cursor",
+            counts: TokenCounts(input: 8, output: 9, uncategorized: 1),
+            eventCount: 1,
+            reasoningKnown: false
+        )
+        let backend = SyncBackend(root: directory)
+        let hourlyName = "account-\(shortID)-hourly.json"
+        let hourlyData = try SyncSnapshot.encode(HourlySyncSnapshot(records: [hour(deviceID: accountID), withinSkew, beyondSkew]))
+        try backend.write(hourlyData, to: "v1/devices/\(publisher.id)/\(hourlyName)")
+
+        let path = identityPath(publisher.id)
+        let manifest = try SyncSnapshot.decode(DeviceSyncSnapshot.self, from: backend.read(path))
+        let published = try XCTUnwrap(manifest.accounts.first)
+        var files = published.files
+        files[hourlyName] = SHA256.hash(data: hourlyData).map { String(format: "%02x", $0) }.joined()
+        let updatedAccount = AccountPublication(
+            deviceId: published.deviceId,
+            displayName: published.displayName,
+            kind: published.kind,
+            sources: published.sources,
+            collectedAtUTC: published.collectedAtUTC,
+            files: files
+        )
+        let updatedManifest = DeviceSyncSnapshot(
+            device: publisher,
+            appVersion: manifest.appVersion,
+            lastWriteUTC: manifest.lastWriteUTC,
+            tombstone: manifest.tombstone,
+            files: manifest.files,
+            sources: manifest.sources,
+            accounts: [updatedAccount]
+        )
+        try backend.write(SyncSnapshot.encode(updatedManifest), to: path)
+
+        let remote = try XCTUnwrap(read().first)
+        XCTAssertEqual(remote.status.state, .ok)
+        XCTAssertEqual(Set(try XCTUnwrap(remote.accounts.first).hourly), Set([hour(deviceID: accountID), withinSkew]))
     }
 
     // MARK: - Merge

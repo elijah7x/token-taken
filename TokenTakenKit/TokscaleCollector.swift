@@ -39,7 +39,7 @@ public struct TokscaleCollector: UsageCollector {
     private let fingerprint: @Sendable (String) -> ClientFingerprint
 
     /// Bump when the per-client fingerprint or output mapping changes.
-    static let stateFormatVersion = 3
+    static let stateFormatVersion = 4
     /// Must match engine/engine.lock.json; a new engine forces a full collection.
     static let engineVersion = "4.21.0"
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
@@ -127,6 +127,7 @@ public struct TokscaleCollector: UsageCollector {
     }
 
     public func collect() async throws -> CollectionBatch {
+        try Task.checkCancellation()
         let zone = TimeZone.current
         let now = Date.now
         let mappedClients = clients.filter { Self.sourceMap[$0] != nil }
@@ -166,7 +167,6 @@ public struct TokscaleCollector: UsageCollector {
         let succeeded = changedClients.filter { client in
             guard let sourceID = Self.sourceMap[client] else { return false }
             return batch.failedSourceIDs[sourceID] == nil
-                && (batch.daily.contains { $0.sourceID == sourceID } || batch.hourly.contains { $0.sourceID == sourceID })
         }
         Self.logger.info("source=tokscale changed=\(changedClients.joined(separator: ","), privacy: .public) unchanged=\(unchangedSourceIDs.count, privacy: .public) duration_ms=\(Self.milliseconds(since: started), privacy: .public)")
         return CollectionBatch(
@@ -184,12 +184,17 @@ public struct TokscaleCollector: UsageCollector {
         return elapsed.components.seconds * 1_000 + elapsed.components.attoseconds / 1_000_000_000_000_000
     }
 
+    private enum GroupOutcome: Sendable {
+        case graph([UsageRecord])
+        case hourly(clients: [String], rows: [HourlyUsage], errorMessage: String?)
+    }
+
     private func collect(clients availableClients: [String], zone: TimeZone, now: Date) async throws -> CollectionBatch {
+        try await verifyEngineVersionIfNeeded()
         try ensureSettings(timeZone: zone)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = zone
         let since = UsageDay.string(from: calendar.date(byAdding: .day, value: -2, to: now)!, in: zone)
-        async let graphData = run(arguments: ["graph", "-c", availableClients.joined(separator: ",")], timeZone: zone, graph: true)
         // One hourly run per source, with all of its clients, so the engine deduplicates within the source.
         var sourceGroups: [[String]] = []
         var groupIndex: [String: Int] = [:]
@@ -203,28 +208,64 @@ public struct TokscaleCollector: UsageCollector {
             }
         }
         let maxConcurrent = 3
-        let hourly = await withTaskGroup(of: (clients: [String], rows: [HourlyUsage], errorMessage: String?).self) { group in
+        let result = try await withThrowingTaskGroup(of: GroupOutcome.self) { group in
+            group.addTask {
+                let data = try await run(
+                    arguments: ["graph", "-c", availableClients.joined(separator: ",")],
+                    timeZone: zone,
+                    graph: true
+                )
+                let daily = try Self.parse(
+                    data: data, clients: availableClients, deviceID: deviceID, timeZone: zone
+                )
+                return .graph(daily)
+            }
             var iterator = sourceGroups.makeIterator()
             for _ in 0..<min(maxConcurrent, sourceGroups.count) {
                 if let clients = iterator.next() {
-                    group.addTask { await hourlyOutcome(clients: clients, since: since, timeZone: zone, now: now) }
+                    group.addTask {
+                        let outcome = try await hourlyOutcome(
+                            clients: clients, since: since, timeZone: zone, now: now
+                        )
+                        return .hourly(clients: outcome.clients, rows: outcome.rows, errorMessage: outcome.errorMessage)
+                    }
                 }
             }
-            var rows: [HourlyUsage] = []
+            var daily: [UsageRecord] = []
+            var hourlyRows: [HourlyUsage] = []
             var failedSourceIDs: [String: String] = [:]
-            while let result = await group.next() {
-                rows += result.rows
-                if let message = result.errorMessage, let sourceID = result.clients.first.flatMap({ Self.sourceMap[$0] }) {
-                    failedSourceIDs[sourceID] = message
+            do {
+                while let outcome = try await group.next() {
+                    switch outcome {
+                    case .graph(let records):
+                        daily = records
+                    case .hourly(let clients, let rows, let errorMessage):
+                        hourlyRows += rows
+                        if let message = errorMessage, let sourceID = clients.first.flatMap({ Self.sourceMap[$0] }) {
+                            failedSourceIDs[sourceID] = message
+                        }
+                        if let clients = iterator.next() {
+                            group.addTask {
+                                let outcome = try await hourlyOutcome(
+                                    clients: clients, since: since, timeZone: zone, now: now
+                                )
+                                return .hourly(
+                                    clients: outcome.clients, rows: outcome.rows, errorMessage: outcome.errorMessage
+                                )
+                            }
+                        }
+                    }
                 }
-                if let clients = iterator.next() {
-                    group.addTask { await hourlyOutcome(clients: clients, since: since, timeZone: zone, now: now) }
-                }
+            } catch {
+                group.cancelAll()
+                throw error
             }
-            return (rows: rows, failedSourceIDs: failedSourceIDs)
+            return (daily: daily, hourly: hourlyRows, failedSourceIDs: failedSourceIDs)
         }
-        let daily = try await Self.parse(data: graphData, clients: availableClients, deviceID: deviceID, timeZone: zone)
-        return CollectionBatch(daily: daily, hourly: hourly.rows, failedSourceIDs: hourly.failedSourceIDs)
+        try Task.checkCancellation()
+        return CollectionBatch(
+            daily: result.daily, hourly: result.hourly, failedSourceIDs: result.failedSourceIDs
+        )
     }
 
     /// `clients` all map to one source.
@@ -233,13 +274,18 @@ public struct TokscaleCollector: UsageCollector {
         since: String,
         timeZone: TimeZone,
         now: Date
-    ) async -> (clients: [String], rows: [HourlyUsage], errorMessage: String?) {
+    ) async throws -> (clients: [String], rows: [HourlyUsage], errorMessage: String?) {
+        try Task.checkCancellation()
         do {
             let data = try await run(arguments: ["hourly", "--json", "-c", clients.joined(separator: ","), "--since", since],
                                      timeZone: timeZone)
+            try Task.checkCancellation()
             let rows = try Self.parseHourly(data: data, client: clients[0], deviceID: deviceID, timeZone: timeZone, now: now)
             return (clients, rows, nil)
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
+            if Task.isCancelled { throw CancellationError() }
             let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
             return (clients, [], CollectionRunner.sanitizeErrorMessage(message))
         }
@@ -262,10 +308,11 @@ public struct TokscaleCollector: UsageCollector {
             }
             for usage in contribution.clients {
                 guard requested.contains(usage.client), let sourceID = sourceMap[usage.client] else { continue }
-                let model = usage.modelId.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let rawModel = usage.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+                let model = rawModel.lowercased()
                 guard !model.isEmpty, (usage.messages ?? 0) >= 0 else { throw CollectorError.invalidOutput("tokscale output was invalid") }
                 let key = Key(day: contribution.date, sourceID: sourceID, modelID: model)
-                rawModels[key] = min(rawModels[key] ?? usage.modelId, usage.modelId)
+                rawModels[key] = min(rawModels[key] ?? rawModel, rawModel)
                 guard Self.valid(usage.tokens) else { throw CollectorError.invalidOutput("tokscale output was invalid") }
                 totals[key, default: .zero] += usage.tokens
                 events[key, default: 0] += usage.messages ?? 0
@@ -476,7 +523,66 @@ public struct TokscaleCollector: UsageCollector {
         return environment
     }
 
+    static var bundledExecutableURL: URL {
+        Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/tokscale")
+    }
+
+    static func isBundledExecutable(_ url: URL) -> Bool {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+            == bundledExecutableURL.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    static func parseSemanticVersion(from output: String) -> String? {
+        guard let range = output.range(
+            of: #"(?<![0-9.])[0-9]+\.[0-9]+\.[0-9]+(?![0-9.])"#,
+            options: .regularExpression
+        ) else {
+            return nil
+        }
+        return String(output[range])
+    }
+
+    private func verifyEngineVersionIfNeeded() async throws {
+        guard !Self.isBundledExecutable(executableURL) else { return }
+        let checkTimeout = min(timeoutSeconds, 5)
+        let output: String?
+        do {
+            let data = try await executeSubprocess(
+                arguments: ["--version"],
+                environment: Self.childEnvironment(configDirectory: configDirectory, timeZone: .current),
+                timeout: checkTimeout,
+                usesOutputFlag: false
+            )
+            output = String(data: data, encoding: .utf8)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Unparseable or unsupported `--version` proceeds to the actual engine invocation.
+            return
+        }
+        guard let output, let found = Self.parseSemanticVersion(from: output) else { return }
+        if found != Self.engineVersion {
+            throw CollectorError.engineUnavailable(
+                "tokscale \(found) does not match pinned \(Self.engineVersion)"
+            )
+        }
+    }
+
     private func run(arguments: [String], timeZone: TimeZone, graph: Bool = false) async throws -> Data {
+        try await executeSubprocess(
+            arguments: arguments + ["--offline", "--no-spinner"],
+            environment: Self.childEnvironment(configDirectory: configDirectory, timeZone: timeZone),
+            timeout: timeoutSeconds,
+            usesOutputFlag: graph
+        )
+    }
+
+    private func executeSubprocess(
+        arguments: [String],
+        environment: [String: String],
+        timeout: TimeInterval,
+        usesOutputFlag: Bool
+    ) async throws -> Data {
         let manager = FileManager.default
         let temporaryDirectory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         do {
@@ -488,47 +594,40 @@ public struct TokscaleCollector: UsageCollector {
 
         let process = Process()
         process.executableURL = executableURL
-        process.arguments = arguments + ["--offline", "--no-spinner"] + (graph ? ["--output", outputURL.path] : [])
-        process.environment = Self.childEnvironment(configDirectory: configDirectory, timeZone: timeZone)
+        process.arguments = arguments + (usesOutputFlag ? ["--output", outputURL.path] : [])
+        process.environment = environment
         guard manager.createFile(atPath: outputURL.path, contents: nil),
               let stdoutHandle = try? FileHandle(forWritingTo: outputURL) else {
             try? manager.removeItem(at: temporaryDirectory)
             throw CollectorError.process("Could not create tokscale output")
         }
-        process.standardOutput = graph ? FileHandle.nullDevice : stdoutHandle
+        process.standardOutput = usesOutputFlag ? FileHandle.nullDevice : stdoutHandle
         process.standardError = FileHandle.nullDevice
         let sendableProcess = SendableProcess(value: process, stdoutHandle: stdoutHandle)
-        let timeoutSeconds = timeoutSeconds
 
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                 DispatchQueue.global(qos: .utility).async {
-                    let process = sendableProcess.value
                     defer {
                         try? sendableProcess.stdoutHandle.close()
                         try? FileManager.default.removeItem(at: temporaryDirectory)
                     }
                     do {
-                        guard !sendableProcess.wasCancelled else { throw CancellationError() }
-                        do {
-                            try process.run()
-                        } catch {
-                            throw CollectorError.process("Could not run tokscale")
-                        }
-                        // A timeout or cancellation that arrived before the child existed stops it here.
-                        sendableProcess.stopIfRequested()
+                        try sendableProcess.start()
                         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-                        timer.schedule(deadline: .now() + timeoutSeconds)
+                        timer.schedule(deadline: .now() + timeout)
                         timer.setEventHandler { sendableProcess.timeOut() }
                         timer.resume()
-                        process.waitUntilExit()
+                        sendableProcess.value.waitUntilExit()
                         timer.cancel()
-                        if sendableProcess.didTimeOut {
+                        sendableProcess.finish()
+                        let state = sendableProcess.outcomeState()
+                        if state.timedOut {
                             throw CollectorError.process("tokscale timed out")
                         }
-                        if sendableProcess.wasCancelled { throw CancellationError() }
-                        guard process.terminationStatus == 0 else {
-                            throw CollectorError.process("tokscale exited with status \(process.terminationStatus)")
+                        if state.cancelled { throw CancellationError() }
+                        guard sendableProcess.value.terminationStatus == 0 else {
+                            throw CollectorError.process("tokscale exited with status \(sendableProcess.value.terminationStatus)")
                         }
                         guard let output = try? Data(contentsOf: outputURL) else {
                             throw CollectorError.invalidOutput("tokscale output was invalid")
@@ -549,62 +648,84 @@ public struct TokscaleCollector: UsageCollector {
         /// resumes, `isRefreshing` stays true, and every later refresh becomes a no-op.
         private static let killGrace: TimeInterval = 5
 
+        private enum Phase {
+            case pending
+            case running
+            case exited
+        }
+
         let value: Process
         let stdoutHandle: FileHandle
         private let lock = NSLock()
+        private var phase: Phase = .pending
         private var timedOut = false
         private var cancelled = false
+        private var terminating = false
+        private var killWorkItem: DispatchWorkItem?
 
         init(value: Process, stdoutHandle: FileHandle) {
             self.value = value
             self.stdoutHandle = stdoutHandle
         }
 
-        var didTimeOut: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return timedOut
+        func start() throws {
+            try lock.withLock {
+                guard !cancelled else { throw CancellationError() }
+                do {
+                    try value.run()
+                } catch {
+                    throw CollectorError.process("Could not run tokscale")
+                }
+                phase = .running
+                if timedOut || cancelled {
+                    terminateLocked()
+                }
+            }
         }
 
-        var wasCancelled: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return cancelled
+        func finish() {
+            lock.withLock {
+                phase = .exited
+                killWorkItem?.cancel()
+                killWorkItem = nil
+            }
         }
 
-        func markTimedOut() {
-            lock.lock()
-            timedOut = true
-            lock.unlock()
+        func outcomeState() -> (timedOut: Bool, cancelled: Bool) {
+            lock.withLock { (timedOut, cancelled) }
         }
 
         func timeOut() {
-            markTimedOut()
-            terminate()
+            lock.withLock {
+                guard phase == .running else { return }
+                timedOut = true
+                terminateLocked()
+            }
         }
 
         func cancel() {
-            lock.lock()
-            cancelled = true
-            lock.unlock()
-            terminate()
-        }
-
-        /// Stops a child that the timeout or cancellation requested before it was running.
-        func stopIfRequested() {
-            guard didTimeOut || wasCancelled else { return }
-            terminate()
+            lock.withLock {
+                cancelled = true
+                terminateLocked()
+            }
         }
 
         /// SIGTERM, then SIGKILL once the grace period passes with the child still alive. SIGKILL cannot be
         /// ignored, so `waitUntilExit` always returns and the continuation always resumes.
-        private func terminate() {
+        private func terminateLocked() {
+            guard phase == .running, !terminating else { return }
+            terminating = true
             guard value.isRunning else { return }
             value.terminate()
-            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.killGrace) { [self] in
-                guard value.isRunning else { return }
-                _ = kill(value.processIdentifier, SIGKILL)
+            let pid = value.processIdentifier
+            let workItem = DispatchWorkItem { [weak self] in
+                self?.lock.withLock {
+                    guard let self, self.phase == .running, self.value.isRunning, pid > 0 else { return }
+                    _ = kill(pid, SIGKILL)
+                }
             }
+            killWorkItem = workItem
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + Self.killGrace, execute: workItem)
         }
     }
 

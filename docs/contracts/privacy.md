@@ -31,6 +31,7 @@ Status: Implemented v1 (2026-11-14)
 ## Credentials and output
 
 - Any credential required by a source MUST be stored in Keychain. Credentials MUST NOT enter the local usage store, sync files, logs, CLI output, exports, or fixtures.
+- Where an opt-in account source reads a supported client's existing session (such as Cursor), Token Taken reads it read-only in memory only and MUST NOT store, sync, or log it (see [ADR-0010](../decisions/0010-cursor-account-usage.md)).
 - App logs, CLI output, and exports MUST NOT contain prompts, responses, or file paths.
 - Errors shown to users should identify the affected source and operation without echoing sensitive record contents.
 - Source-reported cost may be stored locally where supported, but MUST NOT be synced; sync restrictions are defined in [sync.md](sync.md).

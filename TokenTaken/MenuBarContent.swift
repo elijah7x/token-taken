@@ -34,6 +34,7 @@ struct MenuBarContent: View {
                 FieldLandscapeView(items: activeSources, highlight: .constant(nil), interactive: false, compact: true)
             } else if settings.theme == .cosmos, !activeSources.isEmpty {
                 CosmosSceneView(summary: today, dimension: .sources, highlight: .constant(nil), style: .menuBar)
+                    .aspectRatio(FieldSceneModel.size.width / FieldSceneModel.size.height, contentMode: .fit)
             }
 
             topSourcesSection
@@ -318,7 +319,7 @@ struct MenuBarContent: View {
             return Text(model.statusText) + Text(verbatim: " · ") + Text(note)
         }
         if settings.syncEnabled {
-            let syncedRemotes = model.remoteDevices.filter { $0.state == .ok }.count
+            let syncedRemotes = model.remoteDevices.filter { !$0.isStaleOrIncomplete() }.count
             if syncedRemotes > 0 {
                 return Text("\(syncedRemotes + 1) Macs synced") + Text(verbatim: " · ") + Text(model.statusText)
             }

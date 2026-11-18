@@ -114,7 +114,92 @@ final class SQLiteUsageStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
         defer { sqlite3_finalize(version) }
         XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
-        XCTAssertEqual(sqlite3_column_int(version, 0), 5)
+        XCTAssertEqual(sqlite3_column_int(version, 0), 6)
+    }
+
+    func testMigrationFromVersion5AddsEpochTimeZoneWithoutRebaselining() throws {
+        let epoch = HistoryEpochs.epoch(for: "claude")
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        let sql = """
+            CREATE TABLE devices (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'mac'
+            );
+            INSERT INTO devices VALUES ('device-a', 'Test Mac', 1000, 'mac');
+            CREATE TABLE health (
+                source_id TEXT PRIMARY KEY, last_attempt REAL, last_success REAL,
+                record_count INTEGER NOT NULL, error TEXT,
+                skipped_records INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'stale'
+            );
+            CREATE TABLE daily_usage (
+                device_id TEXT NOT NULL, source_id TEXT NOT NULL, model_id TEXT NOT NULL,
+                raw_model_id TEXT NOT NULL, day TEXT NOT NULL, time_zone TEXT NOT NULL,
+                input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                event_count INTEGER NOT NULL, cache_write_1h INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (device_id, source_id, model_id, day)
+            );
+            INSERT INTO daily_usage VALUES
+                ('device-a', 'claude', 'model-a', 'raw-model-a', '2026-11-05', 'Asia/Shanghai', 100, 0, 0, 0, 0, 0, 1, 0),
+                ('device-a', 'claude', 'model-a', 'raw-model-a', '2026-11-06', 'Asia/Shanghai', 200, 0, 0, 0, 0, 0, 1, 0),
+                ('device-a', 'claude', 'model-a', 'raw-model-a', '2026-11-07', 'Asia/Shanghai', 30, 0, 0, 0, 0, 0, 1, 0);
+            CREATE TABLE hourly_usage (
+                device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
+                input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
+                PRIMARY KEY (device_id, source_id, hour_start)
+            );
+            CREATE TABLE history_epochs (
+                device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+                PRIMARY KEY (device_id, source_id)
+            );
+            INSERT INTO history_epochs VALUES ('device-a', 'claude', '\(epoch)');
+            PRAGMA user_version = 5;
+            """
+        XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+
+        XCTAssertThrowsError(try SQLiteUsageStore(url: databaseURL, readOnly: true))
+        let store = try SQLiteUsageStore(url: databaseURL)
+
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        do {
+            defer { sqlite3_close(handle) }
+            var version: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
+            defer { sqlite3_finalize(version) }
+            XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
+            XCTAssertEqual(sqlite3_column_int(version, 0), 6)
+
+            var zoneStmt: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(handle, "SELECT time_zone FROM history_epochs WHERE device_id = 'device-a' AND source_id = 'claude';", -1, &zoneStmt, nil), SQLITE_OK)
+            defer { sqlite3_finalize(zoneStmt) }
+            XCTAssertEqual(sqlite3_step(zoneStmt), SQLITE_ROW)
+            XCTAssertEqual(sqlite3_column_type(zoneStmt, 0), SQLITE_NULL)
+        }
+
+        // First collection after migration has NULL time_zone: use floor rule even if batch zone differs,
+        // and record the new zone key.
+        func makeRecord(_ day: String, input: Int64, zone: String) -> UsageRecord {
+            UsageRecord(day: day, timeZoneID: zone, deviceID: "device-a", sourceID: "claude",
+                modelID: "model-a", rawModelID: "raw-model-a", counts: TokenCounts(input: input), eventCount: 1)
+        }
+        try store.replace(batch: CollectionBatch(daily: [
+            makeRecord("2026-11-05", input: 100, zone: "America/New_York"),
+            makeRecord("2026-11-06", input: 50, zone: "America/New_York"),
+        ]), sourceID: "claude", deviceID: "device-a")
+        let afterFirst = Dictionary(uniqueKeysWithValues: try store.records().map { ($0.day, $0.counts.total) })
+        XCTAssertEqual(afterFirst, ["2026-11-05": 100, "2026-11-06": 200, "2026-11-07": 30])
+
+        // Now that America/New_York is recorded, switching to Europe/London triggers a zone rebaseline.
+        try store.replace(batch: CollectionBatch(daily: [
+            makeRecord("2026-11-05", input: 100, zone: "Europe/London"),
+            makeRecord("2026-11-06", input: 20, zone: "Europe/London"),
+        ]), sourceID: "claude", deviceID: "device-a")
+        let afterSecond = Dictionary(uniqueKeysWithValues: try store.records().map { ($0.day, $0.counts.total) })
+        XCTAssertEqual(afterSecond, ["2026-11-05": 100, "2026-11-06": 20])
     }
 
     func testFailedAndUnavailableCollectorsPreserveBothCaches() async throws {

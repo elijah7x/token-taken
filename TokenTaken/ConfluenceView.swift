@@ -20,6 +20,7 @@ struct ConfluenceView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // Closed or background windows keep their views alive; animate only while the window is active.
     @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.controlActiveState) private var controlActiveState
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
     @State private var hover: ConfluenceHover?
@@ -70,7 +71,7 @@ struct ConfluenceView: View {
                 if !reduceMotion && !reduceTransparency {
                     ConfluenceParticleLayer(
                         tracks: particleTracks,
-                        isActive: appearsActive
+                        isActive: appearsActive && controlActiveState == .key
                     )
                     .opacity(particlesSettled ? 1 : 0)
                     .animation(.easeInOut(duration: 0.2), value: particlesSettled)
@@ -150,12 +151,14 @@ private enum ConfluenceTarget: Hashable {
     case source(String)
     case model(String)
     case category(TokenCategory)
+    case uncategorized
 
     var id: String {
         switch self {
         case .source(let id): "source:\(id)"
         case .model(let id): "model:\(id)"
         case .category(let category): "category:\(category.rawValue)"
+        case .uncategorized: "category:uncategorized"
         }
     }
 }
@@ -624,6 +627,7 @@ private struct ConfluenceStreamLabel: View {
 
 private func confluenceName(_ stream: ConfluenceLayout.Stream) -> Text {
     if let category = stream.category { return Text(category.title) }
+    if stream.isUncategorized { return Text("Uncategorized") }
     if stream.isOther {
         if stream.dimension == .models, stream.otherCount > 0 {
             return Text("Other \(stream.otherCount)")
@@ -687,6 +691,7 @@ private struct ConfluenceLayout {
         let category: TokenCategory?
         let isOther: Bool
         let otherCount: Int
+        let isUncategorized: Bool
     }
 
     struct Stream: Identifiable {
@@ -701,6 +706,7 @@ private struct ConfluenceLayout {
         let category: TokenCategory?
         let isOther: Bool
         let otherCount: Int
+        let isUncategorized: Bool
         let outerFrame: CGRect
         let innerTop: CGFloat
         let innerHeight: CGFloat
@@ -788,7 +794,8 @@ private struct ConfluenceLayout {
                     color: Palette.color(forSource: source.id),
                     category: nil,
                     isOther: false,
-                    otherCount: 0
+                    otherCount: 0,
+                    isUncategorized: false
                 )
             } + (otherTokens > 0 ? [Descriptor(
                 target: .source(Self.otherID),
@@ -800,7 +807,8 @@ private struct ConfluenceLayout {
                 color: Palette.ink3,
                 category: nil,
                 isOther: true,
-                otherCount: otherCount
+                otherCount: otherCount,
+                isUncategorized: false
             )] : [])
 
         case .models:
@@ -829,7 +837,8 @@ private struct ConfluenceLayout {
                     color: modelColors[model.id] ?? Palette.color(for: .output),
                     category: nil,
                     isOther: false,
-                    otherCount: 0
+                    otherCount: 0,
+                    isUncategorized: false
                 )
             } + (otherTokens > 0 ? [Descriptor(
                 target: .model(Self.otherID),
@@ -841,7 +850,8 @@ private struct ConfluenceLayout {
                 color: Palette.ink3.opacity(0.5),
                 category: nil,
                 isOther: true,
-                otherCount: otherCount
+                otherCount: otherCount,
+                isUncategorized: false
             )] : [])
         }
 
@@ -849,7 +859,7 @@ private struct ConfluenceLayout {
             .reduce(TokenCounts.zero) { $0 + $1.counts }
         let categoryTotals = breakdownTotals.total > 0 ? breakdownTotals : summary.total
 
-        let categoryDescriptors = TokenCategory.allCases.compactMap { category -> Descriptor? in
+        var categoryDescriptors = TokenCategory.allCases.compactMap { category -> Descriptor? in
             let tokens = categoryTotals[category]
             guard tokens > 0 else { return nil }
             return Descriptor(
@@ -862,8 +872,24 @@ private struct ConfluenceLayout {
                 color: Palette.color(for: category),
                 category: category,
                 isOther: false,
-                otherCount: 0
+                otherCount: 0,
+                isUncategorized: false
             )
+        }
+        if categoryTotals.uncategorized > 0 {
+            categoryDescriptors.append(Descriptor(
+                target: .uncategorized,
+                side: .category,
+                dimension: dimension,
+                sourceID: nil,
+                name: "uncategorized",
+                tokens: categoryTotals.uncategorized,
+                color: Palette.ink3.opacity(0.45),
+                category: nil,
+                isOther: false,
+                otherCount: 0,
+                isUncategorized: true
+            ))
         }
 
         self.init(
@@ -1267,6 +1293,7 @@ private struct ConfluenceLayout {
                 category: descriptor.category,
                 isOther: descriptor.isOther,
                 otherCount: descriptor.otherCount,
+                isUncategorized: descriptor.isUncategorized,
                 outerFrame: outerFrame,
                 innerTop: innerY,
                 innerHeight: height,
@@ -1319,29 +1346,8 @@ private struct ConfluenceLayout {
 
     private static func monogram(for descriptor: Descriptor) -> String {
         if descriptor.isOther { return "OT" }
-        switch descriptor.sourceID {
-        case "claude": return "CC"
-        case "pi": return "PI"
-        case "codex": return "CX"
-        case "kimi": return "KM"
-        case "zcode": return "ZC"
-        case "grok": return "GK"
-        case "omp": return "OM"
-        case "opencode": return "OC"
-        case "gemini": return "GM"
-        case "factory": return "FD"
-        case "deepseek": return "DS"
-        default: break
-        }
-        let words = descriptor.name
-            .split { !$0.isLetter && !$0.isNumber }
-            .filter { !$0.isEmpty }
-        if words.count >= 2, let first = words[0].first, let second = words[1].first {
-            return "\(first)\(second)".uppercased()
-        }
-        let chars = descriptor.name.filter { $0.isLetter || $0.isNumber }
-        let prefix = String(chars.prefix(2)).uppercased()
-        return prefix.isEmpty ? "••" : prefix
+        guard let sourceID = descriptor.sourceID else { return "" }
+        return SourceMonogramBadge.monogram(for: sourceID, name: descriptor.name)
     }
 
     private static func spread(

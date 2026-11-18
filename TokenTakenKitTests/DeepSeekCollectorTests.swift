@@ -51,10 +51,11 @@ final class DeepSeekCollectorTests: XCTestCase {
     private func collector(
         home: URL,
         timeZone: TimeZone? = nil,
+        now: Date = .now,
         stateDirectory: URL? = nil
     ) -> DeepSeekCollector {
         DeepSeekCollector(
-            deviceID: "device-a", home: home, timeZone: timeZone ?? utc, stateDirectory: stateDirectory
+            deviceID: "device-a", home: home, timeZone: timeZone ?? utc, now: now, stateDirectory: stateDirectory
         )
     }
 
@@ -107,7 +108,7 @@ final class DeepSeekCollectorTests: XCTestCase {
         XCTAssertEqual(batch.daily[0].counts, TokenCounts(uncategorized: 100))
     }
 
-    func testUnparsableZeroAndUndatedSessionsAreSkipped() async throws {
+    func testZeroSessionIsIgnoredWhileUnparsableAndUndatedAreSkipped() async throws {
         try write(session(id: "session-zero", total: 0, createdAt: "2026-06-01T00:00:00Z"), named: "zero.json")
         try write(session(id: "session-undated", total: 50, createdAt: nil), named: "undated.json")
         try write(data: Data("{ not json".utf8), named: "broken.json")
@@ -115,9 +116,28 @@ final class DeepSeekCollectorTests: XCTestCase {
 
         let batch = try await collector(home: directory).collect()
 
-        XCTAssertEqual(batch.skippedRecords, 3)
+        XCTAssertEqual(batch.skippedRecords, 2)
         XCTAssertEqual(batch.daily.count, 1)
         XCTAssertEqual(batch.daily[0].counts, TokenCounts(uncategorized: 40))
+    }
+
+    func testZeroSessionOnlyIsNotSkipped() async throws {
+        try write(session(id: "session-zero", total: 0, createdAt: "2026-06-01T00:00:00Z"), named: "zero.json")
+
+        let batch = try await collector(home: directory).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 0)
+    }
+
+    func testFutureCreatedAtIsSkipped() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-06-01T00:00:00Z")!
+        try write(session(id: "session-future", total: 40, createdAt: "2026-06-03T00:00:00Z"), named: "future.json")
+
+        let batch = try await collector(home: directory, now: now).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
     }
 
     func testOnlySessionFilesDirectlyInTheRootAreRead() async throws {

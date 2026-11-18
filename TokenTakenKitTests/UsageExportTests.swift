@@ -227,4 +227,38 @@ final class UsageExportTests: XCTestCase {
             input: 10, cacheRead: 20, cacheWrite: 30, output: 40, reasoning: 5, uncategorized: 1
         ))
     }
+
+    func testSummaryWithFutureUntilIncludesCrossZoneTomorrowRow() throws {
+        let zone = TimeZone(identifier: "America/Los_Angeles")!
+        let now = UsageDay.date(from: "2026-11-09", in: zone)!.addingTimeInterval(20 * 3_600)
+        let todayRow = record(day: "2026-11-09", model: "claude-sonnet-4-5", device: "device-a", zone: zone.identifier)
+        let tomorrowRow = record(day: "2026-11-10", model: "gpt-5", device: "device-b", zone: "Asia/Shanghai")
+        let store = FakeStore(
+            daily: [todayRow, tomorrowRow],
+            devices: [Device(id: "device-a", name: "A"), Device(id: "device-b", name: "B")]
+        )
+
+        let filter = UsageFilter(until: "2026-11-10")
+        let result = try UsageExport.summary(
+            from: store, period: .all, filter: filter, timeZone: zone,
+            priceTable: .synthetic, now: now
+        )
+        let rows = try UsageExport.rows(from: store, filter: filter, timeZone: zone)
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(result.to, "2026-11-10")
+        XCTAssertEqual(UsageDay.string(from: result.summary.end, in: zone), "2026-11-11")
+        XCTAssertEqual(result.summary.total, TokenCounts(
+            input: 20, cacheRead: 40, cacheWrite: 60, output: 80, reasoning: 10, uncategorized: 2
+        ))
+        XCTAssertEqual(Set(result.summary.byModel.map(\.id)), Set(["claude-sonnet-4-5", "gpt-5"]))
+        XCTAssertEqual(Set(result.summary.byDevice.map(\.id)), Set(["device-a", "device-b"]))
+
+        let futureOnly = try UsageExport.summary(
+            from: store, period: .all, filter: UsageFilter(since: "2026-11-10", until: "2026-11-10"),
+            timeZone: zone, priceTable: .synthetic, now: now
+        )
+        XCTAssertEqual(futureOnly.summary.total, tomorrowRow.counts)
+        XCTAssertEqual(futureOnly.summary.byModel.map(\.id), ["gpt-5"])
+        XCTAssertEqual(futureOnly.summary.byDevice.map(\.id), ["device-b"])
+    }
 }

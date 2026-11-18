@@ -100,19 +100,29 @@ public enum TokenFormat {
         return result
     }
 
-    /// `$10,705.76`. Grouped and rounded in a fixed POSIX form, so the text is the same in
-    /// every locale.
-    public static func usd(_ v: Double) -> String {
+    /// Rounds a USD amount to two decimal places from its decimal spelling using `.plain`
+    /// (half away from zero), matching `usd(_:)` so CLI JSON and UI agree on half-cent boundaries.
+    public static func roundedUSD(_ value: Double) -> Decimal {
         // A binary double puts 10705.755 a hair below the half cent, so round the decimal
         // spelling instead of the double. `.plain` is half away from zero, matching how the
         // price table's estimates are quoted.
-        guard v.isFinite, var value = Decimal(string: String(v), locale: nil) else {
-            return String(format: "$%.2f", v)
+        guard value.isFinite, var decimal = Decimal(string: String(value), locale: nil) else {
+            return 0
         }
         var rounded = Decimal()
-        NSDecimalRound(&rounded, &value, 2, .plain)
-        // Rounding a tiny negative amount must not leave `-$0.00`.
+        NSDecimalRound(&rounded, &decimal, 2, .plain)
+        // Rounding a tiny negative amount must not leave `-0.00`.
         if rounded == 0 { rounded = 0 }
+        return rounded
+    }
+
+    /// `$10,705.76`. Grouped and rounded in a fixed POSIX form, so the text is the same in
+    /// every locale.
+    public static func usd(_ v: Double) -> String {
+        guard v.isFinite else {
+            return String(format: "$%.2f", v)
+        }
+        let rounded = roundedUSD(v)
 
         let formatter = NumberFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

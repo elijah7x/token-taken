@@ -62,6 +62,7 @@ struct LensView: View {
     @State private var isSettling = false
     @State private var lastStepDate: Date?
     @State private var windowVisible = true
+    @State private var layoutCache = LensBarLayoutCache()
 
     @FocusState private var isChartFocused: Bool
 
@@ -206,7 +207,7 @@ struct LensView: View {
 
     private var timeBarStage: some View {
         GeometryReader { proxy in
-            let layout = LensBarLayout(
+            let layout = layoutCache.layout(
                 buckets: buckets,
                 dimension: dimension,
                 period: period,
@@ -1182,6 +1183,99 @@ struct LensView: View {
 
 // MARK: - Pure-Value Bar Layout
 
+/// Keeps the stacked bar layout and model palette between body passes so hover and spring frames
+/// do not rebuild segment geometry or model colors when `buckets`, `dimension`, and `size` stay fixed.
+private final class LensBarLayoutCache {
+    private var buckets: [LensBucket] = []
+    private var dimension: BreakdownDimension = .sources
+    private var period: Period = .day
+    private var size: CGSize = .zero
+    private var sourceOrder: [String] = []
+    private var modelOrder: [String] = []
+    private var valid = false
+    private var cached: LensBarLayout?
+
+    private var cachedColorBuckets: [LensBucket] = []
+    private var cachedColorDimension: BreakdownDimension = .sources
+    private var cachedModelOrder: [String] = []
+    private var cachedModelColors: [String: Color] = [:]
+    private var modelColorsValid = false
+
+    func layout(
+        buckets: [LensBucket],
+        dimension: BreakdownDimension,
+        period: Period,
+        size: CGSize,
+        sourceOrder: [String],
+        modelOrder: [String]
+    ) -> LensBarLayout {
+        if valid,
+           let cached,
+           self.buckets == buckets,
+           self.dimension == dimension,
+           self.period == period,
+           self.size == size,
+           self.sourceOrder == sourceOrder,
+           self.modelOrder == modelOrder {
+            return cached
+        }
+
+        let degraded = period == .day && dimension == .models
+        let resolvedModelPalette: [String: Color]
+        if dimension == .models && !degraded {
+            if modelColorsValid,
+               cachedColorBuckets == buckets,
+               cachedColorDimension == dimension,
+               cachedModelOrder == modelOrder {
+                resolvedModelPalette = cachedModelColors
+            } else {
+                resolvedModelPalette = Palette.modelColors(for: modelOrder)
+                cachedColorBuckets = buckets
+                cachedColorDimension = dimension
+                cachedModelOrder = modelOrder
+                cachedModelColors = resolvedModelPalette
+                modelColorsValid = true
+            }
+        } else {
+            resolvedModelPalette = [:]
+        }
+
+        let built = LensBarLayout(
+            buckets: buckets,
+            dimension: dimension,
+            period: period,
+            size: size,
+            sourceOrder: sourceOrder,
+            modelOrder: modelOrder,
+            modelPalette: resolvedModelPalette
+        )
+        self.buckets = buckets
+        self.dimension = dimension
+        self.period = period
+        self.size = size
+        self.sourceOrder = sourceOrder
+        self.modelOrder = modelOrder
+        self.cached = built
+        self.valid = true
+        return built
+    }
+}
+
+private final class LensModelColorCache {
+    private var idSet: Set<String> = []
+    private var valid = false
+    private var cached: [String: Color] = [:]
+
+    func colors(for ids: [String]) -> [String: Color] {
+        let key = Set(ids)
+        if valid, key == idSet { return cached }
+        idSet = key
+        valid = true
+        cached = Palette.modelColors(for: ids)
+        return cached
+    }
+}
+
 struct LensBarLayout {
     static let singleMagnification: CGFloat = 1.35
     static let rangeMagnification: CGFloat = 1.20
@@ -1230,7 +1324,8 @@ struct LensBarLayout {
         period: Period,
         size: CGSize,
         sourceOrder: [String],
-        modelOrder: [String]
+        modelOrder: [String],
+        modelPalette precomputedModelPalette: [String: Color]? = nil
     ) {
         self.size = size
         let leftPad: CGFloat = 46
@@ -1260,7 +1355,7 @@ struct LensBarLayout {
         let computedBarW = min(44, max(2, bw * (1 - padRatio * 2)))
 
         let modelPalette = dimension == .models && !degraded
-            ? Palette.modelColors(for: modelOrder)
+            ? (precomputedModelPalette ?? Palette.modelColors(for: modelOrder))
             : [:]
         let sourceRank = Dictionary(uniqueKeysWithValues: sourceOrder.enumerated().map { ($0.element, $0.offset) })
         let modelRank = Dictionary(uniqueKeysWithValues: modelOrder.enumerated().map { ($0.element, $0.offset) })
@@ -1467,6 +1562,7 @@ private struct LensReadoutCard: View {
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var modelColorCache = LensModelColorCache()
 
     private var displayCounts: TokenCounts {
         activeSlice?.counts ?? summary.total
@@ -1668,6 +1764,9 @@ private struct LensReadoutCard: View {
             return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
         case .week:
             let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
+            if Calendar.current.isDate(start, inSameDayAs: today) || today <= start {
+                return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+            }
             return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
         case .month:
             return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
@@ -1684,7 +1783,7 @@ private struct LensReadoutCard: View {
         let topThree = Array(rankedItems.prefix(3))
         let maxTokens = max(topThree.first?.counts.total ?? 1, 1)
         let modelColors = dimension == .models
-            ? Palette.modelColors(for: summary.byModel.map(\.id) + topThree.map(\.id))
+            ? modelColorCache.colors(for: summary.byModel.map(\.id) + topThree.map(\.id))
             : [:]
 
         return VStack(alignment: .leading, spacing: 5) {
@@ -1820,26 +1919,31 @@ private struct LensReadoutCard: View {
             .frame(height: 6)
             .accessibilityHidden(true)
 
-            // Compact 2x2 + reasoning legend for the 5 categories.
+            // Compact 2x2 + reasoning legend for the 5 categories (+ uncategorized when present).
             let gridCategories: [TokenCategory] = [.input, .cacheRead, .cacheWrite, .output]
+            let legendItems: [(id: String, title: LocalizedStringKey, color: Color, value: Int64)] =
+                gridCategories.map { category in
+                    (category.rawValue, category.title, Palette.color(for: category), displayCounts[category])
+                } + (total > 0 && displayCounts.uncategorized > 0
+                    ? [("uncategorized", LocalizedStringKey("Uncategorized"), Palette.ink3.opacity(0.45), displayCounts.uncategorized)]
+                    : [])
             LazyVGrid(
                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
                 alignment: .leading,
                 spacing: 4
             ) {
-                ForEach(gridCategories) { category in
-                    let value = displayCounts[category]
+                ForEach(legendItems, id: \.id) { item in
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(Palette.color(for: category))
+                            .fill(item.color)
                             .frame(width: 5.5, height: 5.5)
                             .accessibilityHidden(true)
-                        Text(category.title)
+                        Text(item.title)
                             .font(.system(size: 10.5))
                             .foregroundStyle(Palette.ink2)
                             .lineLimit(1)
                         Spacer(minLength: 2)
-                        Text(Share.percent(value, of: total))
+                        Text(Share.percent(item.value, of: total))
                             .font(.system(size: 10.5, weight: .semibold))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()

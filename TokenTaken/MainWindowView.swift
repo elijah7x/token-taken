@@ -125,8 +125,11 @@ struct MainWindowView: View {
             FirstLaunchCollectingCard()
                 .padding(28)
         } else if model.isEmpty {
-            DashboardEmptyStateCard { router.openSettings() }
-                .padding(28)
+            DashboardEmptyStateCard {
+                router.settingsSection = (model.storageError == nil && model.readError == nil) ? .sources : .general
+                router.openSettings()
+            }
+            .padding(28)
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 if settings.theme == .field {
@@ -484,12 +487,10 @@ private struct TrayFooter: View {
         if refreshCoordinator?.iCloudAvailable == false || refreshCoordinator?.syncFailed == true || ICloudSync.defaultRoot == nil {
             return true
         }
-        if model.dataIssues.devices > 0 {
+        if model.dataIssues(now: now).devices > 0 {
             return true
         }
-        return model.remoteDevices.contains { device in
-            device.state != .ok || (device.lastWrite.map { now.timeIntervalSince($0) > 86_400 } == true)
-        }
+        return model.remoteDevices.contains { $0.isStaleOrIncomplete(now: now) }
     }
 
     private var syncWarningTooltip: String {
@@ -503,10 +504,10 @@ private struct TrayFooter: View {
         if refreshCoordinator?.iCloudAvailable == false
             || ICloudSync.defaultRoot == nil
             || refreshCoordinator?.syncFailed == true
-            || model.remoteDevices.contains(where: { $0.state == .unavailable }) {
+            || model.remoteDevices.contains(where: { $0.effectiveState() == .unavailable }) {
             return "Unavailable"
         }
-        if model.remoteDevices.contains(where: { $0.state == .partial }) {
+        if model.remoteDevices.contains(where: { $0.effectiveState() == .partial }) {
             return "Partial"
         }
         return "Stale"
@@ -619,8 +620,16 @@ private struct RoundGlassControlSurface: ViewModifier {
 // MARK: - First-launch collecting & empty states
 
 private struct FirstLaunchCollectingCard: View {
+    @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
+
+    private var collectingSubtitle: LocalizedStringKey {
+        if settings.theme == .liquidGlass && settings.liquidView == .confluence {
+            return "Reading supported agent logs in read-only mode. Your Confluence chart will appear automatically when finished."
+        }
+        return "Reading supported agent logs in read-only mode. Your usage overview will appear automatically when finished."
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -634,7 +643,7 @@ private struct FirstLaunchCollectingCard: View {
                     .foregroundStyle(Palette.ink1)
                     .multilineTextAlignment(.center)
 
-                Text("Reading supported agent logs in read-only mode. Your Confluence chart will appear automatically when finished.")
+                Text(collectingSubtitle)
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink2)
                     .multilineTextAlignment(.center)
@@ -749,14 +758,54 @@ private struct CollectingVesselGlyph: View {
 private struct DashboardEmptyStateCard: View {
     let openSettings: () -> Void
 
+    @Environment(AppModel.self) private var model
+    @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
 
+    private var emptyContent: (symbol: String, color: Color, title: LocalizedStringKey, detail: Text) {
+        if let error = model.storageError ?? model.readError {
+            return (
+                "exclamationmark.triangle",
+                Palette.healthWarn,
+                "Storage unavailable",
+                Text(error)
+            )
+        }
+        if let refreshCoordinator {
+            switch refreshCoordinator.engineStatus {
+            case .found:
+                break
+            case .missing:
+                return (
+                    "exclamationmark.triangle",
+                    Palette.healthWarn,
+                    "Collection engine not found",
+                    Text("Token Taken could not find the collection engine on this Mac. Reinstall the app or use Scan now in Settings › Harnesses for native harnesses, or turn on iCloud sync.")
+                )
+            case .invalidOverride:
+                return (
+                    "exclamationmark.triangle",
+                    Palette.healthWarn,
+                    "Invalid engine override",
+                    Text("The custom collection engine path is invalid or not executable. Fix or clear the override, or turn on iCloud sync to view usage from other Macs.")
+                )
+            }
+        }
+        return (
+            ThemeRuntime.isCosmos ? "circle.circle" : "drop",
+            ThemeRuntime.isCosmos ? CosmosPalette.accent : Palette.ink2,
+            "No usage collected yet",
+            Text("Token Taken reads supported agent logs on this Mac. Use Scan now in Settings › Harnesses, or turn on iCloud sync to view usage from other Macs.")
+        )
+    }
+
     var body: some View {
+        let content = emptyContent
         VStack(spacing: 16) {
-            Image(systemName: ThemeRuntime.isCosmos ? "circle.circle" : "drop")
+            Image(systemName: content.symbol)
                 .font(.system(size: 22, weight: .medium))
-                .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.accent : Palette.ink2)
+                .foregroundStyle(content.color)
                 .frame(width: 48, height: 48)
                 .background {
                     RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.inner, style: .continuous)
@@ -765,12 +814,12 @@ private struct DashboardEmptyStateCard: View {
                 .accessibilityHidden(true)
 
             VStack(spacing: 8) {
-                Text("No usage collected yet")
+                Text(content.title)
                     .font(.system(size: 17, weight: .semibold))
                     .foregroundStyle(Palette.ink1)
                     .multilineTextAlignment(.center)
 
-                Text("Token Taken reads supported agent logs on this Mac. Use Refresh now in Settings, or wait for the first collection to finish.")
+                content.detail
                     .font(.system(size: 13))
                     .foregroundStyle(Palette.ink2)
                     .multilineTextAlignment(.center)
@@ -800,12 +849,12 @@ extension AppModel {
     static let statusIssueTextColor = Palette.healthWarn
 
     var hasStatusIssue: Bool {
-        dataIssues.isPartial || remoteDevices.contains { $0.state != .ok }
+        hasEngineIssue || dataIssues.isPartial || remoteDevices.contains { $0.isStaleOrIncomplete() }
     }
 
     var statusIssueNote: LocalizedStringKey? {
         let issues = dataIssues
-        guard issues.isPartial || remoteDevices.contains(where: { $0.state != .ok }) else {
+        guard issues.isPartial || remoteDevices.contains(where: { $0.isStaleOrIncomplete() }) else {
             return nil
         }
         if issues.stale > 0, issues.failed == 0, issues.unavailable == 0 {
@@ -823,6 +872,16 @@ extension AppModel {
     func statusTooltip(refreshCoordinator: RefreshCoordinator?) -> String {
         guard hasStatusIssue else { return "" }
         var lines: [String] = []
+        if let refreshCoordinator {
+            switch refreshCoordinator.engineStatus {
+            case .found:
+                break
+            case .missing:
+                lines.append(String(localized: "Collection engine not found"))
+            case .invalidOverride:
+                lines.append(String(localized: "Invalid engine override"))
+            }
+        }
         let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
         for entry in health {
             let state: String? = switch entry.state {
@@ -843,7 +902,7 @@ extension AppModel {
             }
         }
         for device in remoteDevices {
-            let state: String? = switch device.state {
+            let state: String? = switch device.effectiveState() {
             case .ok:
                 nil
             case .stale:

@@ -66,21 +66,22 @@ public struct CursorCollector: UsageCollector {
         let export = try Self.parse(data)
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
+        let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
         var aggregator = Aggregator(
             deviceID: accountDevice.id, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, cutoff: currentHour.addingTimeInterval(-47 * 3_600)
+            currentHour: currentHour, cutoff: currentHour.addingTimeInterval(-47 * 3_600),
+            maxDate: now.addingTimeInterval(86_400)
         )
         aggregator.add(export.rows)
         var batch = aggregator.batch()
         batch.accountDevice = accountDevice
-        batch.skippedRecords = export.skipped
+        batch.skippedRecords = export.skipped + aggregator.skipped
         // A complete export is authoritative: every day it reports is adopted exactly (smaller values too). A
         // partial or empty export must leave stored history alone, so it is not authoritative.
-        if export.skipped == 0, !export.rows.isEmpty {
+        if batch.skippedRecords == 0, !export.rows.isEmpty {
             batch.authoritativeSourceIDs = Set(sourceIDs)
         }
-        log(detail: "export rows=\(export.rows.count) skipped=\(export.skipped)", since: started)
+        log(detail: "export rows=\(export.rows.count) skipped=\(batch.skippedRecords)", since: started)
         return batch
     }
 
@@ -128,17 +129,21 @@ public struct CursorCollector: UsageCollector {
         }
     }
 
-    /// Cursor's own account id, most stable source first. Host names and random ids are never substitutes: either
-    /// would split one account into several devices.
+    /// Cursor's own account id, preferring the active session token's `sub` claim and falling back to
+    /// `cli-config.json`. Host names and random ids are never substitutes: either would split one account
+    /// into several devices.
     private func identity(token: String) -> String? {
+        if let subject = Self.jwtSubject(token) {
+            return Self.normalizeSubject(subject)
+        }
         let url = home.appendingPathComponent(".cursor/cli-config.json")
         if let data = try? Data(contentsOf: url),
            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let authInfo = object["authInfo"] as? [String: Any] {
-            if let userId = Self.text(authInfo["userId"]) { return userId }
+            if let userId = Self.text(authInfo["userId"]) { return Self.normalizeSubject(userId) }
             if let authId = Self.text(authInfo["authId"]) { return Self.normalizeSubject(authId) }
         }
-        return Self.jwtSubject(token).map(Self.normalizeSubject)
+        return nil
     }
 
     private static func text(_ value: Any?) -> String? {
@@ -194,7 +199,10 @@ public struct CursorCollector: UsageCollector {
 
     public static func liveFetch(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         let delegate = CursorRedirectPolicy()
-        let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 90
+        configuration.timeoutIntervalForResource = 120
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -367,12 +375,19 @@ public struct CursorCollector: UsageCollector {
         let calendar: Calendar
         let currentHour: Date
         let cutoff: Date
+        let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
         var hourly: [Date: HourlyUsage] = [:]
+        var skipped = 0
 
         mutating func add(_ rows: [Row]) {
             for row in rows {
+                guard row.date <= maxDate,
+                      let hour = calendar.dateInterval(of: .hour, for: row.date)?.start else {
+                    skipped += 1
+                    continue
+                }
                 let rawModelID = row.model.isEmpty ? "unknown" : row.model
                 let model = rawModelID.lowercased()
                 let day = UsageDay.string(from: row.date, in: timeZone)
@@ -385,7 +400,6 @@ public struct CursorCollector: UsageCollector {
                 record.eventCount += 1
                 daily[key] = record
 
-                let hour = calendar.dateInterval(of: .hour, for: row.date)!.start
                 guard hour >= cutoff, hour <= currentHour else { continue }
                 var hourRow = hourly[hour] ?? HourlyUsage(
                     hourStart: hour, deviceID: deviceID, sourceID: "cursor",
@@ -410,13 +424,16 @@ public struct CursorCollector: UsageCollector {
 }
 
 /// The export URL redirects to a signed location, and the redirect still carries the session cookie, so it may
-/// follow exactly one hop and only to Cursor's own site.
+/// follow exactly one hop and only to Cursor's own site over HTTPS.
 final class CursorRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var followedRedirect = false
 
     static func allows(_ url: URL?) -> Bool {
-        guard let host = url?.host?.lowercased() else { return false }
+        guard let url,
+              url.scheme?.lowercased() == "https",
+              url.port == nil || url.port == 443,
+              let host = url.host?.lowercased() else { return false }
         return host == "cursor.com" || host == "www.cursor.com"
     }
 

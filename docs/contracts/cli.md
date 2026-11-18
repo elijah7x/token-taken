@@ -7,6 +7,7 @@ Status: Draft v1 (2026-11-10)
 - The executable is named `token-taken` and built from the `TokenTakenCLI` target. Aggregation MUST use the shared `TokenTakenKit` core.
 - App settings installs the command as a symlink into a user-chosen directory on `PATH`; the app remains the owner of the symlink target.
 - The CLI reads the local store at `~/Library/Application Support/Token Taken/` read-only, plus synced-device snapshots when they are readable.
+- The CLI MUST resolve the store and support directory paths without creating directories or files on disk. Running the CLI before the app has ever launched MUST create nothing and exit with code `3`.
 - The CLI MUST NOT perform network access, modify the store, collect agent logs, or write agent configuration. It MUST NOT request iCloud downloads itself.
 - `--synthetic` reads the bundled deterministic fixture instead of the store and MUST add a `synthetic-data` warning so consumers never mistake it for real usage.
 - Synced devices are read through `ICloudSync.readRemote` and `MergedUsageStore`. `--local-only` disables that read for every command. When the iCloud root or `v1/devices` is absent, the store is the local SQLite store alone; absence is not an error.
@@ -21,12 +22,14 @@ token-taken devices  [options]
 token-taken export   [--format json|csv] [--output FILE] [options]
 token-taken --version
 token-taken --schema [VERSION]
+token-taken --help
 ```
 
-Every command accepts the same range and filter options. `--format` and `--output` are valid only for `export`; any other command rejects them as a usage error. Unknown options and missing values are usage errors.
+Every command accepts `--help`/`-h` (which prints that subcommand's usage and exits `0`) and the same range and filter options. `--format` and `--output` are valid only for `export`; any other command rejects them as a usage error. Unknown options and missing values are usage errors.
 
 | Option | Meaning |
 | --- | --- |
+| `-h`, `--help` | Prints top-level or subcommand usage and exits 0. |
 | `--period day\|week\|month\|year\|all` | Named range ending today (`week` starts on Monday). Default: `month`. `day`/`today` and `week`/`this-week` are accepted aliases. |
 | `--since YYYY-MM-DD` | Inclusive local start date. Overrides `--period`. |
 | `--until YYYY-MM-DD` | Inclusive local end date. Overrides `--period`. May be combined with `--since`. |
@@ -143,7 +146,7 @@ All JSON output, including `export --format json`, uses one envelope:
 { "rows": [{ "day": "2026-11-09", "timeZoneID": "Asia/Shanghai", "deviceID": "…",
              "sourceID": "claude", "modelID": "claude-sonnet-4-5", "rawModelID": "claude-sonnet-4-5",
              "input": 0, "cacheRead": 0, "cacheWrite": 0, "output": 0, "reasoning": 0,
-             "uncategorized": 0, "total": 0, "eventCount": 0 }] }
+             "uncategorized": 0, "total": 0, "eventCount": 0, "cacheWrite1h": 0 }] }
 ```
 
 ## CSV export
@@ -151,11 +154,11 @@ All JSON output, including `export --format json`, uses one envelope:
 RFC 4180 CSV with a header row. The line terminator is CRLF, the field separator is a comma, and a field is quoted only when it contains a comma, quote, CR, or LF; embedded quotes are doubled. Text fields beginning with `=`, `+`, `-`, `@`, tab, or CR are prefixed with one apostrophe before escaping; numeric fields are unchanged.
 
 ```text
-day,timeZoneID,deviceID,sourceID,modelID,rawModelID,input,cacheRead,cacheWrite,output,reasoning,uncategorized,total,eventCount
+day,timeZoneID,deviceID,sourceID,modelID,rawModelID,input,cacheRead,cacheWrite,output,reasoning,uncategorized,total,eventCount,cacheWrite1h
 ```
 
 - One line per exported daily record, in `day`, `deviceID`, `sourceID`, `modelID`, `rawModelID` order.
-- `total` is `input + cacheRead + cacheWrite + output + reasoning + uncategorized`.
+- `total` is `input + cacheRead + cacheWrite + output + reasoning + uncategorized`. `cacheWrite1h` is a subset of `cacheWrite` and is excluded from `total`.
 - CSV is an export interface, not a stable reporting API: columns are fixed by this contract and new columns are added at the end.
 
 ## Warnings

@@ -75,18 +75,18 @@ enum FieldPalette {
 enum FieldCrop: Int, CaseIterable {
     case wheat, lavender, pumpkin, cabbage, tea, rapeseed, orchard, buckwheat, flax, corn
 
-    func label(chinese: Bool) -> String {
+    func label(locale: Locale = .current) -> String {
         switch self {
-        case .wheat: chinese ? "麦田" : "Wheat"
-        case .lavender: chinese ? "薰衣草" : "Lavender"
-        case .pumpkin: chinese ? "南瓜地" : "Pumpkins"
-        case .cabbage: chinese ? "卷心菜" : "Cabbages"
-        case .tea: chinese ? "茶垄" : "Tea rows"
-        case .rapeseed: chinese ? "油菜花" : "Rapeseed"
-        case .orchard: chinese ? "果园" : "Orchard"
-        case .buckwheat: chinese ? "荞麦" : "Buckwheat"
-        case .flax: chinese ? "亚麻" : "Flax"
-        case .corn: chinese ? "玉米" : "Corn"
+        case .wheat: String(localized: "Wheat", locale: locale)
+        case .lavender: String(localized: "Lavender", locale: locale)
+        case .pumpkin: String(localized: "Pumpkins", locale: locale)
+        case .cabbage: String(localized: "Cabbages", locale: locale)
+        case .tea: String(localized: "Tea rows", locale: locale)
+        case .rapeseed: String(localized: "Rapeseed", locale: locale)
+        case .orchard: String(localized: "Orchard", locale: locale)
+        case .buckwheat: String(localized: "Buckwheat", locale: locale)
+        case .flax: String(localized: "Flax", locale: locale)
+        case .corn: String(localized: "Corn", locale: locale)
         }
     }
 
@@ -165,35 +165,48 @@ enum FieldTreemap {
     struct Plot { let index: Int; let rect: CGRect }
 
     static func layout(_ values: [Double], in size: CGSize) -> [Plot] {
-        let total = values.reduce(0, +)
-        guard total > 0 else { return [] }
-        var nodes = values.enumerated().filter { $0.element > 0 }
+        guard size.width > 0, size.height > 0, size.width.isFinite, size.height.isFinite else { return [] }
+        let valid = values.enumerated().filter { $0.element > 0 && $0.element.isFinite }
+        let total = valid.reduce(0.0) { $0 + $1.element }
+        guard total > 0, total.isFinite else { return [] }
+        var nodes = valid
             .sorted { $0.element > $1.element }
             .map { (index: $0.offset, area: $0.element / total * size.width * size.height) }
         var rect = CGRect(origin: .zero, size: size), row: [(index: Int, area: Double)] = [], out: [Plot] = []
 
         func worst(_ r: [(index: Int, area: Double)], _ side: Double) -> Double {
-            guard !r.isEmpty else { return .infinity }
+            guard !r.isEmpty, side > 0, side.isFinite else { return .infinity }
             let sum = r.reduce(0) { $0 + $1.area }, mx = r.map(\.area).max()!, mn = r.map(\.area).min()!
+            guard sum > 0, mn > 0 else { return .infinity }
             return max(side * side * mx / (sum * sum), sum * sum / (side * side * mn))
         }
         func place(_ r: [(index: Int, area: Double)]) {
+            guard !r.isEmpty, rect.width > 0, rect.height > 0 else { return }
             let sum = r.reduce(0) { $0 + $1.area }
+            guard sum > 0 else { return }
             if rect.width >= rect.height {
-                let cw = sum / rect.height
+                let cw = min(rect.width, sum / rect.height)
+                guard cw > 0 else { return }
                 var y = rect.minY
                 for n in r { let h = n.area / cw; out.append(Plot(index: n.index, rect: CGRect(x: rect.minX, y: y, width: cw, height: h))); y += h }
-                rect = CGRect(x: rect.minX + cw, y: rect.minY, width: rect.width - cw, height: rect.height)
+                rect = CGRect(x: rect.minX + cw, y: rect.minY, width: max(0, rect.width - cw), height: max(0, rect.height))
             } else {
-                let rh = sum / rect.width
+                let rh = min(rect.height, sum / rect.width)
+                guard rh > 0 else { return }
                 var x = rect.minX
                 for n in r { let w = n.area / rh; out.append(Plot(index: n.index, rect: CGRect(x: x, y: rect.minY, width: w, height: rh))); x += w }
-                rect = CGRect(x: rect.minX, y: rect.minY + rh, width: rect.width, height: rect.height - rh)
+                rect = CGRect(x: rect.minX, y: rect.minY + rh, width: max(0, rect.width), height: max(0, rect.height - rh))
             }
         }
         while !nodes.isEmpty {
             let side = min(rect.width, rect.height)
-            if worst(row + [nodes[0]], side) <= worst(row, side) { row.append(nodes.removeFirst()) } else { place(row); row = [] }
+            guard side > 0, side.isFinite else { break }
+            if row.isEmpty || worst(row + [nodes[0]], side) <= worst(row, side) {
+                row.append(nodes.removeFirst())
+            } else {
+                place(row)
+                row = []
+            }
         }
         if !row.isEmpty { place(row) }
         return out

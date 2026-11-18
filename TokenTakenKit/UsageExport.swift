@@ -211,7 +211,11 @@ public enum UsageExport {
         calendar.timeZone = timeZone
         let filtered = FilteredUsageStore(store: store, filter: filter, timeZone: timeZone)
         var effectiveNow = now
-        if filter.hasDateRange, filter.until == nil {
+        if let until = filter.until {
+            if let untilDay = UsageDay.date(from: until, in: timeZone) {
+                effectiveNow = max(now, untilDay)
+            }
+        } else if filter.hasDateRange {
             // An open-ended range must include records dated after today.
             effectiveNow = try filtered.records().reduce(now) { latest, record in
                 guard let day = UsageDay.date(from: record.day, in: timeZone) else { return latest }
@@ -231,11 +235,14 @@ public enum UsageExport {
         }
 
         let all = try aggregator.summary(for: .all)
-        let nextDay = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: effectiveNow))!
+        let nextDay = calendar.startOfDay(
+            for: calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: effectiveNow))!
+        )
         let start = filter.since.flatMap { UsageDay.date(from: $0, in: timeZone) } ?? all.start
         // `until` is inclusive, so the aggregator's exclusive end is the following day.
         let end = filter.until.flatMap { UsageDay.date(from: $0, in: timeZone) }
-            .flatMap { calendar.date(byAdding: .day, value: 1, to: $0) } ?? nextDay
+            .flatMap { calendar.date(byAdding: .day, value: 1, to: $0) }
+            .map { calendar.startOfDay(for: $0) } ?? nextDay
         let summary = UsageSummary(
             period: .all, start: min(start, end), end: end, total: all.total,
             bySource: all.bySource, byModel: all.byModel, byDevice: all.byDevice,

@@ -132,7 +132,7 @@ struct FieldLandscapeView: View {
             }
             .overlay(alignment: .topLeading) {
                 if interactive, let point = hoverPoint, let id = highlight, let plot = model.plots.first(where: { $0.id == id }) {
-                    FieldTooltip(plot: plot, total: model.total, chinese: chinese)
+                    FieldTooltip(plot: plot, total: model.total)
                         .offset(x: min(point.x + 14, proxy.size.width - 230), y: point.y + 64 > proxy.size.height ? point.y - 54 : point.y + 16)
                         .allowsHitTesting(false)
                 }
@@ -142,7 +142,11 @@ struct FieldLandscapeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(model.plots.map { "\($0.name), \($0.crop.label(chinese: chinese)), \(TokenFormat.short($0.value))" }.joined(separator: "; ")))
+        .accessibilityLabel(
+            model.plots.isEmpty
+                ? Text("No usage in this period")
+                : Text(verbatim: model.plots.map { "\($0.name), \($0.crop.label(locale: locale)), \(TokenFormat.spoken($0.value))" }.joined(separator: "; "))
+        )
     }
 }
 
@@ -205,12 +209,12 @@ private struct FieldAmbience: View {
 private struct FieldTooltip: View {
     let plot: FieldPlot
     let total: Int64
-    let chinese: Bool
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(verbatim: "\(plot.name) · \(plot.crop.label(chinese: chinese))")
-            Text(verbatim: "\(plot.value.formatted()) Token · \(FieldFormat.percent(plot.value, of: total))")
+            Text(verbatim: "\(plot.name) · \(plot.crop.label(locale: locale))")
+            Text("\(plot.value.formatted(.number.locale(locale))) Token · \(FieldFormat.percent(plot.value, of: total))")
         }
         .font(FieldFont.serif(12.5))
         .foregroundStyle(FieldPalette.paper)
@@ -1108,7 +1112,6 @@ struct FieldBreakdownList: View {
     var body: some View {
         let active = items.filter { $0.counts.total > 0 }
         let crops = FieldCrop.assign(active)
-        let chinese = locale.language.languageCode == .chinese
         let colors = FieldColors.cached(isDark: scheme == .dark)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24), count: 3), alignment: .leading, spacing: 0) {
             ForEach(active) { item in
@@ -1120,7 +1123,7 @@ struct FieldBreakdownList: View {
                         .frame(width: 26, height: 26)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(verbatim: item.name).font(FieldFont.serif(16)).foregroundStyle(FieldPalette.ink).lineLimit(1)
-                        Text(verbatim: crop.label(chinese: chinese)).font(FieldFont.serif(12.5)).foregroundStyle(FieldPalette.muted)
+                        Text(verbatim: crop.label(locale: locale)).font(FieldFont.serif(12.5)).foregroundStyle(FieldPalette.muted)
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 1) {

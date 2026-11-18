@@ -12,13 +12,16 @@ xcodegen generate --spec project.yml
 open TokenTakenMobile.xcodeproj
 ```
 
-Signing is automatic with an empty `DEVELOPMENT_TEAM`. Set your team in Xcode (Signing &
-Capabilities) or in `project.yml` before building on a device. The simulator has no iCloud
-container, so use **View sample data** there, or the bundled demo report.
+Signing is automatic with an empty `DEVELOPMENT_TEAM` in `project.yml` so no team identifier is committed. Set your team locally in Xcode (**Signing & Capabilities**), pass `DEVELOPMENT_TEAM=<YOUR_TEAM_ID>` to `xcodebuild`, or override it in an untracked local config before building on a device. The simulator has no iCloud container, so use **View sample data** there, or the bundled demo report.
 
 - Target: `TokenTakenMobile` (iOS 26.0, Swift 6, iPhone only)
 - Bundle id: `io.github.elijah7x.TokenTaken.iOS`
 - iCloud container: `iCloud.io.github.elijah7x.TokenTaken` (shared with the Mac app)
+
+## Privacy and App Store
+
+- Public privacy policy: [PRIVACY.md](../PRIVACY.md)
+- App Store submission checklist & App Store Connect answers: [docs/app-store.md](../docs/app-store.md)
 
 ## Layout
 
@@ -39,7 +42,8 @@ TokenTakenMobile/
               Palette.swift              colors + UIColor mixing
               ShareCardRenderer.swift    ImageRenderer at scale 2 -> PNG
               ShareSheetView.swift       preview + ShareLink
-  Resources/  demo-report.json, comparisons.json, Localizable.xcstrings, Assets.xcassets
+  Resources/  demo-report.json, comparisons.json, Localizable.xcstrings,
+              PrivacyInfo.xcprivacy, Assets.xcassets
   Info.plist, TokenTakenMobile.entitlements
 ```
 
@@ -61,11 +65,14 @@ Schema v1 (`token-taken.mobile-report`) is defined in `docs/contracts/mobile-rep
 repository, and its model is `Shared/MobileReport.swift` at the repository root. Reading rules
 implemented here:
 
-- Unknown keys are ignored; a different `schemaVersion` or `kind` is rejected as `decodeFailed`.
+- Unknown keys are ignored; an unsupported `schemaVersion` returns `unsupportedVersion`, and
+  an unexpected `kind` or corrupt payload returns `decodeFailed`.
 - Dates are ISO 8601 with or without fractional seconds.
 - A report whose `generatedAt` is more than 24 hours old loads as `stale` (still shown).
-- A load result is one of `ok`, `stale`, `noReport`, `iCloudUnavailable`, `decodeFailed`.
-  A failed refresh keeps the last good report on screen and only changes the state.
+- A load result is one of `ok`, `stale`, `noReport`, `downloading`, `unsupportedVersion`,
+  `iCloudUnavailable`, `decodeFailed`. A failed or pending refresh keeps the last good report
+  on screen and only changes the state; `noReport` with iCloud available clears the cached report
+  and shows the empty state.
 - The last good report is cached in `Application Support/TokenTakenMobile/mobile-report-v1.json`
   and shown immediately on launch, before iCloud answers.
 - Reload happens on launch, whenever the scene becomes active, and on pull to refresh.
@@ -91,10 +98,10 @@ no photo-library permission is requested.
   Developer ID provisioning profile embedded in the Mac bundle (TN3125). Both apps still need
   the same container provisioned in the developer account. Until a report written by a signed
   Mac app is read on a device, `ICloudReportSource` may return `iCloudUnavailable`.
-- `NSMetadataQuery` on `NSMetadataQueryUbiquitousDocumentsScope`, the 10s per-file download
-  wait, and the `Documents/mobile/v1` path filter are written from the API contract but have
-  not been exercised against a real Mac-written report.
+- `NSMetadataQuery` on `NSMetadataQueryUbiquitousDocumentsScope`, the 10s overall download wait,
+  and the `Documents/mobile/v1` path filter are written from the API contract but have not been
+  exercised against a real Mac-written report.
 - `demo-report.json` is a synthetic fixed snapshot ending 2026-11-12; the demo source skips
   the 24h staleness rule so sample data never looks broken.
-- No app icon artwork yet (the catalog has an empty 1024 slot), and there are no automated
-  tests in this target.
+- `AppIcon-1024.png` is included in `Assets.xcassets/AppIcon.appiconset/`; there are no automated
+  tests in this target yet.

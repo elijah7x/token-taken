@@ -43,6 +43,8 @@ Status: Implemented v1 (2026-11-11)
 
 The tokscale v4.21.0 distribution (tag commit `b26c433d03f23a2255ad9f212512ce83ede83da3`) is pinned in `engine/engine.lock.json`. `scripts/fetch-engine.sh` verifies the `darwin-arm64` archive and installs its `bin/tokscale` under `Vendor/engine/`.
 
+The bundled helper at `Contents/Helpers/tokscale` is checksum-pinned at build/fetch time and skips any runtime version check. For non-bundled executables (an explicit path override or fallback binary on disk), `TokscaleCollector` runs `<exe> --version` once per collection with a short timeout, extracts the first `x.y.z` semantic version, and fails with `CollectorError.engineUnavailable` if a different version is reported; unparseable output proceeds.
+
 ## Open questions
 
 - None.

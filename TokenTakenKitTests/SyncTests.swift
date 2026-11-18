@@ -909,6 +909,76 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(ICloudSync.root(environment: [:], fileManager: manager), expected)
         XCTAssertEqual(ICloudSync.root(environment: [key: ""], fileManager: manager), expected)
     }
+
+    func testReaderAcceptsHourlyRowsWithinClockSkewTolerance() throws {
+        try publish(other)
+        let withinSkew = HourlyUsage(
+            hourStart: now.addingTimeInterval(300),
+            deviceID: other.id,
+            sourceID: "claude",
+            counts: TokenCounts(input: 4, output: 5, uncategorized: 1),
+            eventCount: 1,
+            reasoningKnown: false
+        )
+        let beyondSkew = HourlyUsage(
+            hourStart: now.addingTimeInterval(301),
+            deviceID: other.id,
+            sourceID: "claude",
+            counts: TokenCounts(input: 8, output: 9, uncategorized: 1),
+            eventCount: 1,
+            reasoningKnown: false
+        )
+        let backend = SyncBackend(root: directory)
+        let rows = [hour(device: other), withinSkew, beyondSkew]
+        let hourlyData = try SyncSnapshot.encode(HourlySyncSnapshot(records: rows))
+        try backend.write(hourlyData, to: "v1/devices/device-b/hourly.json")
+
+        let metadataPath = "v1/devices/device-b/device.json"
+        let metadata = try SyncSnapshot.decode(DeviceSyncSnapshot.self, from: backend.read(metadataPath))
+        var files = metadata.files
+        files["hourly.json"] = SHA256.hash(data: hourlyData).map { String(format: "%02x", $0) }.joined()
+        let updated = DeviceSyncSnapshot(
+            device: other,
+            appVersion: metadata.appVersion,
+            lastWriteUTC: metadata.lastWriteUTC,
+            tombstone: metadata.tombstone,
+            files: files,
+            sources: metadata.sources
+        )
+        try backend.write(SyncSnapshot.encode(updated), to: metadataPath)
+
+        let remote = try XCTUnwrap(read().first)
+        XCTAssertEqual(Set(remote.hourly), Set([hour(device: other), withinSkew]))
+        XCTAssertEqual(remote.status.state, .ok)
+    }
+
+    func testUnknownSourceHealthStateDecodesAsFailedWithoutDroppingRemoteDevice() throws {
+        let decoded = try JSONDecoder().decode(SourceHealth.State.self, from: Data(#""futureState""#.utf8))
+        XCTAssertEqual(decoded, .failed)
+        XCTAssertEqual(String(data: try JSONEncoder().encode(SourceHealth.State.failed), encoding: .utf8), #""failed""#)
+
+        try ICloudSync.write(
+            local: store(device: other),
+            device: other,
+            root: directory,
+            appVersion: "1.0",
+            health: [SourceHealth(sourceID: "claude", lastSuccess: now, state: .ok)],
+            now: now
+        )
+        let backend = SyncBackend(root: directory)
+        let metadataPath = "v1/devices/device-b/device.json"
+        let original = String(decoding: try backend.read(metadataPath), as: UTF8.self)
+        XCTAssertTrue(original.contains(#""state":"ok""#))
+        let future = original.replacingOccurrences(of: #""state":"ok""#, with: #""state":"rateLimited""#)
+        try backend.write(Data(future.utf8), to: metadataPath)
+
+        let remote = try XCTUnwrap(read().first)
+        XCTAssertEqual(remote.status.state, .partial)
+        XCTAssertEqual(remote.status.displayName, other.name)
+        XCTAssertEqual(remote.status.lastWrite, now)
+        XCTAssertEqual(remote.daily, [record(device: other)])
+        XCTAssertEqual(remote.hourly, [hour(device: other)])
+    }
 }
 
 private struct FixtureStore: UsageStore {

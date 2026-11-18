@@ -71,6 +71,21 @@ final class HistoryRetentionTests: XCTestCase {
         return epoch
     }
 
+    private func storedTimeZone() -> String? {
+        var zone: String?
+        withHandle { handle in
+            var statement: OpaquePointer?
+            let sql = "SELECT time_zone FROM history_epochs WHERE device_id = 'device-a' AND source_id = 'claude';"
+            XCTAssertEqual(sqlite3_prepare_v2(handle, sql, -1, &statement, nil), SQLITE_OK)
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return }
+            if sqlite3_column_type(statement, 0) != SQLITE_NULL {
+                zone = sqlite3_column_text(statement, 0).map { String(cString: $0) }
+            }
+        }
+        return zone
+    }
+
     /// A store as schema version 2 left it: rows present, no `history_epochs` table.
     private func seedVersion2(_ rows: [(day: String, model: String, input: Int64)]) {
         withHandle { handle in
@@ -257,6 +272,60 @@ final class HistoryRetentionTests: XCTestCase {
         XCTAssertEqual(totals(records), ["2026-11-05": 100, "2026-11-06": 220])
         XCTAssertEqual(records.first { $0.day == "2026-11-05" }?.timeZoneID, "Asia/Shanghai")
         XCTAssertEqual(records.first { $0.day == "2026-11-06" }?.timeZoneID, "America/New_York")
+    }
+
+    func testSubsequentCollectionInNewZoneUsesFloorRule() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-05", input: 100),
+            record(day: "2026-11-06", input: 200),
+            record(day: "2026-11-07", input: 30),
+        ]), sourceID: "claude", deviceID: "device-a")
+        // Switch zone once: rebaselines days after 2026-11-06 while 2026-11-05 keeps its old zone.
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-06", input: 220, zone: "America/New_York"),
+            record(day: "2026-11-07", input: 40, zone: "America/New_York"),
+            record(day: "2026-11-08", input: 50, zone: "America/New_York"),
+        ]), sourceID: "claude", deviceID: "device-a")
+        XCTAssertEqual(storedTimeZone(), "America/New_York")
+
+        // A second run in the new zone with a smaller recent day and a missing day must use the floor rule.
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-06", input: 220, zone: "America/New_York"),
+            record(day: "2026-11-07", input: 10, zone: "America/New_York"),
+        ]), sourceID: "claude", deviceID: "device-a")
+        XCTAssertEqual(totals(try store.records()), [
+            "2026-11-05": 100,
+            "2026-11-06": 220,
+            "2026-11-07": 40,
+            "2026-11-08": 50,
+        ])
+    }
+
+    func testEmptyDailyBatchWithHourlyRowsDoesNotConsumePendingEpoch() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-05", input: 200),
+            record(day: "2026-11-06", input: 100),
+        ]), sourceID: "claude", deviceID: "device-a")
+        setEpoch("0+tokscale-4.21.0")
+
+        let hour = Date(timeIntervalSince1970: 1_762_000_000)
+        let hourly = HourlyUsage(hourStart: hour, deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 8), eventCount: 1, reasoningKnown: false)
+        try store.replace(batch: CollectionBatch(daily: [], hourly: [hourly]),
+            sourceID: "claude", deviceID: "device-a")
+        XCTAssertEqual(try store.hourly(), [hourly])
+        XCTAssertEqual(storedEpoch(), "0+tokscale-4.21.0")
+        XCTAssertEqual(totals(try store.records()), ["2026-11-05": 200, "2026-11-06": 100])
+
+        // The pending epoch is still applied on the next non-empty daily batch.
+        try store.replace(batch: CollectionBatch(daily: [
+            record(day: "2026-11-05", input: 200),
+            record(day: "2026-11-06", input: 40),
+        ]), sourceID: "claude", deviceID: "device-a")
+        XCTAssertEqual(totals(try store.records()), ["2026-11-05": 200, "2026-11-06": 40])
+        XCTAssertEqual(storedEpoch(), HistoryEpochs.epoch(for: "claude"))
     }
 
     func testMigrationFromVersion2PreservesRows() throws {

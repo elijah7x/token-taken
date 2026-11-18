@@ -1,13 +1,22 @@
 import Foundation
 
 public enum AppPaths {
-    public static var supportDirectory: URL {
-        let url = if let override = ProcessInfo.processInfo.environment["TOKEN_TAKEN_SUPPORT_DIR"], !override.isEmpty {
-            URL(fileURLWithPath: override, isDirectory: true)
-        } else {
-            FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support/Token Taken", isDirectory: true)
+    /// Resolves the support directory path without creating it on disk.
+    public static var supportDirectoryLocation: URL {
+        if let override = ProcessInfo.processInfo.environment["TOKEN_TAKEN_SUPPORT_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
         }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Token Taken", isDirectory: true)
+    }
+
+    /// Resolves the SQLite store URL without creating the support directory on disk.
+    public static var databaseLocation: URL {
+        supportDirectoryLocation.appendingPathComponent("usage.sqlite")
+    }
+
+    public static var supportDirectory: URL {
+        let url = supportDirectoryLocation
         createDirectory(at: url)
         return url
     }

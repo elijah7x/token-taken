@@ -273,6 +273,94 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertEqual(TokenFormat.short(999_960), "1.0M")
         XCTAssertEqual(TokenFormat.usd(132.26), "$132.26")
     }
+
+    func testDefaultCalendarIsGregorianWithCurrentZoneLocaleAndFirstWeekday() {
+        let defaultCalendar = UsageAggregator.defaultCalendar
+        XCTAssertEqual(defaultCalendar.identifier, .gregorian)
+        XCTAssertEqual(defaultCalendar.timeZone, .current)
+        XCTAssertEqual(defaultCalendar.locale, .current)
+        XCTAssertEqual(defaultCalendar.firstWeekday, Calendar.current.firstWeekday)
+    }
+
+    func testHavanaMidnightDSTMonthBucketsDoNotDriftOrMarkTodayFuture() throws {
+        let viewer = calendar("America/Havana")
+        let store = GranularityStore(daily: [
+            UsageRecord(day: "2026-03-07", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 10)),
+            UsageRecord(day: "2026-03-08", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 20)),
+            UsageRecord(day: "2026-03-09", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 30)),
+            UsageRecord(day: "2026-03-10", timeZoneID: viewer.timeZone.identifier, deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 40)),
+        ])
+
+        let march10 = UsageDay.date(from: "2026-03-10", in: viewer.timeZone)!.addingTimeInterval(12 * 3_600)
+        let agg = UsageAggregator(store: store, calendar: viewer, now: march10)
+        let summary = try agg.summary(for: .month)
+        let buckets = try agg.lensBuckets(for: .month)
+
+        XCTAssertEqual(summary.series.count, 31)
+        XCTAssertEqual(buckets.count, 31)
+        XCTAssertFalse(summary.series[9].isFuture)
+        XCTAssertFalse(buckets[9].isFuture)
+        XCTAssertTrue(summary.series[10].isFuture)
+        XCTAssertTrue(buckets[10].isFuture)
+        XCTAssertEqual(summary.total.input, 100)
+        XCTAssertEqual(agg.lensSlice(buckets, range: 0...30, period: .month).counts, summary.total)
+        for dayIndex in 8..<31 {
+            XCTAssertEqual(viewer.component(.hour, from: buckets[dayIndex].start), 0)
+            let expectedDay = UsageDay.date(from: String(format: "2026-03-%02d", dayIndex + 1), in: viewer.timeZone)
+            XCTAssertEqual(buckets[dayIndex].start, expectedDay)
+        }
+
+        let march8 = UsageDay.date(from: "2026-03-08", in: viewer.timeZone)!.addingTimeInterval(12 * 3_600)
+        let onDST = UsageAggregator(store: store, calendar: viewer, now: march8)
+        let dstMonth = try onDST.summary(for: .month)
+        XCTAssertEqual(dstMonth.end, UsageDay.date(from: "2026-03-09", in: viewer.timeZone))
+        XCTAssertEqual(dstMonth.total.input, 30)
+        XCTAssertFalse(dstMonth.series[7].isFuture)
+        XCTAssertTrue(dstMonth.series[8].isFuture)
+        XCTAssertEqual(try onDST.summary(for: .day).series.count, 23)
+    }
+
+    func testFutureOnlyDataForAllPeriodProducesValidNonEmptyWindow() throws {
+        let viewer = calendar("America/Los_Angeles")
+        let now = UsageDay.date(from: "2026-11-09", in: viewer.timeZone)!.addingTimeInterval(12 * 3_600)
+        let store = GranularityStore(daily: [
+            UsageRecord(day: "2026-12-05", timeZoneID: "Asia/Shanghai", deviceID: "test", sourceID: "claude",
+                modelID: "fixture", counts: TokenCounts(input: 50)),
+        ])
+        let agg = UsageAggregator(store: store, calendar: viewer, now: now)
+        let summary = try agg.summary(for: .all)
+        let buckets = try agg.lensBuckets(for: .all)
+
+        XCTAssertLessThan(summary.start, summary.end)
+        XCTAssertEqual(summary.start, viewer.startOfDay(for: now))
+        XCTAssertEqual(summary.total, .zero)
+        XCTAssertEqual(summary.series.count, 1)
+        XCTAssertEqual(summary.series.first?.label, "11")
+        XCTAssertEqual(buckets.count, 1)
+    }
+
+    func testEmptyHourlyBucketMarksReasoningKnownFalse() throws {
+        let viewer = calendar("UTC")
+        let dayStart = UsageDay.date(from: "2026-11-09", in: viewer.timeZone)!
+        let now = dayStart.addingTimeInterval(10 * 3_600 + 1_800)
+        let row = HourlyUsage(hourStart: dayStart.addingTimeInterval(8 * 3_600), deviceID: "test", sourceID: "claude",
+            counts: TokenCounts(input: 10, reasoning: 2), eventCount: 1, reasoningKnown: true)
+        let daily = UsageRecord(day: "2026-11-09", timeZoneID: "UTC", deviceID: "test", sourceID: "claude",
+            modelID: "fixture", counts: TokenCounts(input: 10, reasoning: 2))
+        let agg = UsageAggregator(store: GranularityStore(daily: [daily], hours: [row]), calendar: viewer, now: now)
+        let buckets = try agg.lensBuckets(for: .day)
+
+        XCTAssertEqual(buckets.count, 24)
+        XCTAssertTrue(buckets[8].isKnown)
+        XCTAssertTrue(buckets[8].reasoningKnown)
+        XCTAssertFalse(buckets[7].isKnown)
+        XCTAssertFalse(buckets[7].reasoningKnown)
+        XCTAssertFalse(agg.lensSlice(buckets, range: 7...7, period: .day).reasoningKnown)
+    }
 }
 
 private struct GranularityStore: UsageStore {

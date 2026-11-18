@@ -114,23 +114,23 @@ public enum MobileReportBuilder {
         localStatus: MobileReport.Coverage.Status,
         remotes: [RemoteDeviceStatus]
     ) -> [MobileReport.Coverage.Device] {
-        var entries = [MobileReport.Coverage.Device(
-            displayName: device.name, lastWriteUTC: generatedAt, status: localStatus)]
-        for remote in remotes {
+        let local = MobileReport.Coverage.Device(
+            displayName: device.name, lastWriteUTC: generatedAt, status: localStatus)
+        let others = remotes.compactMap { remote -> MobileReport.Coverage.Device? in
             // v1 `lastWriteUTC` is a required date, so a device with no readable identity is left out
             // instead of publishing a fabricated timestamp.
-            guard let lastWrite = remote.lastWrite else { continue }
-            entries.append(.init(
+            guard let lastWrite = remote.lastWrite else { return nil }
+            return .init(
                 displayName: remote.displayName,
                 lastWriteUTC: wholeSecond(lastWrite),
                 status: .init(remote.state)
-            ))
-        }
-        return entries.sorted {
+            )
+        }.sorted {
             $0.displayName != $1.displayName
                 ? $0.displayName < $1.displayName
                 : $0.lastWriteUTC < $1.lastWriteUTC
         }
+        return [local] + others
     }
 
     private static func slices(_ totals: [String: Int64]) -> [MobileReport.Slice] {

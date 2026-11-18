@@ -135,17 +135,35 @@ public enum MobileReportPublisher {
     public static func remove(deviceId: String, from container: URL) throws {
         let destination = try fileURL(deviceId: deviceId, in: container)
         let manager = FileManager.default
-        guard manager.fileExists(atPath: destination.path) else { return }
+        let placeholder = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).icloud")
+        guard manager.fileExists(atPath: destination.path) || manager.fileExists(atPath: placeholder.path) else {
+            return
+        }
         var coordinationError: NSError?
         var result: Result<Void, any Error> = .failure(MobileReportPublishError.writeFailed)
         NSFileCoordinator().coordinate(writingItemAt: destination, options: [.forDeleting], error: &coordinationError) { coordinatedURL in
-            result = Result { try manager.removeItem(at: coordinatedURL) }
+            result = Result {
+                do {
+                    try manager.removeItem(at: coordinatedURL)
+                } catch where isNoSuchFileError(error) {
+                    // Evicted placeholders or already-removed items may have no materialized file at coordinatedURL.
+                }
+            }
         }
-        if let coordinationError { throw coordinationError }
+        if let coordinationError {
+            if isNoSuchFileError(coordinationError) { return }
+            throw coordinationError
+        }
         try result.get()
     }
 
     // MARK: - Helpers
+
+    private static func isNoSuchFileError(_ error: any Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileNoSuchFileError
+    }
 
     private static func message(for error: any Error) -> String {
         guard let error = error as? MobileReportPublishError else { return "Could not write the report" }

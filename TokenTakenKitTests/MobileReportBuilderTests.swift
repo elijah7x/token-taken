@@ -113,13 +113,22 @@ final class MobileReportBuilderTests: XCTestCase {
         XCTAssertEqual(built.months.first?.sources.map(\.id), ["pi", "claude"])
     }
 
-    func testCoverageListsThisMacAndReadableRemotesByName() {
-        let remote = RemoteDeviceStatus(deviceID: "device-b", displayName: "Alpha Mac",
+    func testCoverageListsThisMacFirstAndSortsRemainingRemotesByNameThenLastWrite() {
+        let alpha = RemoteDeviceStatus(deviceID: "device-b", displayName: "Alpha Mac",
             lastWrite: now.addingTimeInterval(-86_500), state: .stale)
+        let betaLater = RemoteDeviceStatus(deviceID: "device-d", displayName: "Beta Mac",
+            lastWrite: now.addingTimeInterval(-10), state: .ok)
+        let betaEarlier = RemoteDeviceStatus(deviceID: "device-e", displayName: "Beta Mac",
+            lastWrite: now.addingTimeInterval(-60), state: .partial)
+        let zeta = RemoteDeviceStatus(deviceID: "device-f", displayName: "Zeta Mac",
+            lastWrite: now, state: .ok)
         let unknown = RemoteDeviceStatus(deviceID: "device-c", displayName: "device-c", lastWrite: nil, state: .unavailable)
-        let built = report([record(day: "2026-11-12", input: 1)], remotes: [remote, unknown])
-        XCTAssertEqual(built.coverage.devices.map(\.displayName), ["Alpha Mac", "Desk Mac"])
-        XCTAssertEqual(built.coverage.devices.map(\.status), [.stale, .ok])
+        let built = report([record(day: "2026-11-12", input: 1)], remotes: [zeta, betaLater, unknown, alpha, betaEarlier])
+        XCTAssertEqual(built.coverage.devices.map(\.displayName), ["Desk Mac", "Alpha Mac", "Beta Mac", "Beta Mac", "Zeta Mac"])
+        XCTAssertEqual(built.coverage.devices.map(\.status), [.ok, .stale, .partial, .ok, .ok])
+        XCTAssertEqual(built.coverage.devices.first?.lastWriteUTC, built.generatedAt)
+        XCTAssertEqual(built.coverage.devices[2].lastWriteUTC, now.addingTimeInterval(-60))
+        XCTAssertEqual(built.coverage.devices[3].lastWriteUTC, now.addingTimeInterval(-10))
         XCTAssertEqual(built.generator.deviceId, device.id)
         XCTAssertEqual(built.timeZoneID, zone.identifier)
         XCTAssertEqual(built.schemaVersion, 1)
@@ -166,6 +175,21 @@ final class MobileReportBuilderTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: expected.path))
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: directory.appendingPathComponent("Documents/mobile/v1/report-device-b.json").path))
+    }
+
+    func testPublisherRemoveHandlesEvictedPlaceholderWithoutThrowing() throws {
+        let other = MobileReportBuilder.build(
+            records: [], device: Device(id: "device-b", name: "Travel Mac"),
+            appVersion: "0.1.0 (12)", generatedAt: now, timeZone: zone)
+        try MobileReportPublisher.write(other, into: directory)
+        let mobileDir = MobileReportPublisher.directory(in: directory)
+        let placeholder = mobileDir.appendingPathComponent(".report-\(device.id).json.icloud")
+        try Data().write(to: placeholder)
+
+        try MobileReportPublisher.remove(deviceId: device.id, from: directory)
+        try MobileReportPublisher.remove(deviceId: "device-missing", from: directory)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: mobileDir.appendingPathComponent("report-device-b.json").path))
     }
 
     func testPublisherRefusesUnsafeDeviceId() {

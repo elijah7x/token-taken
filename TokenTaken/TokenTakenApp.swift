@@ -35,7 +35,7 @@ struct TokenTakenApp: App {
             _refreshCoordinator = State(initialValue: nil)
             coordinator = nil
         }
-        appDelegate.configure(settings: settings, refreshCoordinator: coordinator)
+        appDelegate.configure(settings: settings, model: model, refreshCoordinator: coordinator)
     }
 
     var body: some Scene {
@@ -74,9 +74,9 @@ struct TokenTakenApp: App {
                     Label {
                         Text(TokenFormat.short(model.todaySummary.total.total))
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .foregroundStyle(CosmosPalette.ink)
                     } icon: {
-                        CosmosMenuBarGlyph()
+                        Image(nsImage: CosmosMenuBarGlyph.templateImage)
+                            .accessibilityHidden(true)
                     }
                 } else {
                     Label(TokenFormat.short(model.todaySummary.total.total), image: "MenuBarGlyph")
@@ -114,13 +114,25 @@ struct TokenTakenApp: App {
 }
 
 private struct CosmosMenuBarGlyph: View {
+    @MainActor
+    static let templateImage: NSImage = {
+        let renderer = ImageRenderer(
+            content: CosmosMenuBarGlyph()
+                .environment(\.colorScheme, .light)
+        )
+        renderer.scale = 2
+        let image = renderer.nsImage ?? NSImage(size: NSSize(width: 18, height: 18))
+        image.isTemplate = true
+        return image
+    }()
+
     var body: some View {
         ZStack {
             Circle()
-                .stroke(CosmosPalette.ink2, lineWidth: 1)
+                .stroke(.primary, lineWidth: 1)
                 .frame(width: 7, height: 7)
             Ellipse()
-                .stroke(CosmosPalette.accent, lineWidth: 1)
+                .stroke(.primary, lineWidth: 1)
                 .frame(width: 17, height: 6)
                 .rotationEffect(.degrees(-12))
         }
@@ -158,15 +170,35 @@ private struct CheckForUpdatesCommand: View {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: AppSettings?
+    private weak var model: AppModel?
     private var refreshCoordinator: RefreshCoordinator?
     private var didStartUpdater = false
+    private nonisolated(unsafe) var dayChangedObserver: NSObjectProtocol?
 
-    func configure(settings: AppSettings, refreshCoordinator: RefreshCoordinator?) {
+    deinit {
+        if let dayChangedObserver {
+            NotificationCenter.default.removeObserver(dayChangedObserver)
+        }
+    }
+
+    func configure(settings: AppSettings, model: AppModel, refreshCoordinator: RefreshCoordinator?) {
         self.settings = settings
+        self.model = model
         self.refreshCoordinator = refreshCoordinator
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if dayChangedObserver == nil {
+            dayChangedObserver = NotificationCenter.default.addObserver(
+                forName: .NSCalendarDayChanged,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.model?.refresh()
+                }
+            }
+        }
         guard !didStartUpdater, let settings else { return }
         didStartUpdater = true
 

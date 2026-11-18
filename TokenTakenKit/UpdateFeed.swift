@@ -132,29 +132,35 @@ public enum UpdateFeedSelection {
             systemVersion.patchVersion,
         ]
 
-        var groupedByVersion: [AppVersion: [UpdateFeed]] = [:]
+        var groupedByVersion: [AppVersion: [(feed: UpdateFeed, minimumSystem: [Int])]] = [:]
 
         for feed in feeds {
             guard feed.schemaVersion == 1,
                   let version = feed.appVersion,
                   feed.downloadURL.scheme?.lowercased() == "https",
+                  feed.downloadURL.port == nil || feed.downloadURL.port == 443,
                   let host = feed.downloadURL.host?.lowercased(),
                   allowedHosts.contains(host),
                   isLowercaseSHA256Hex(feed.sha256),
                   feed.size > 0,
-                  let minimumSystem = parseSystemVersion(feed.minimumSystemVersion),
-                  compareVersionComponents(minimumSystem, currentSystem) != .orderedDescending else {
+                  let minimumSystem = parseSystemVersion(feed.minimumSystemVersion) else {
                 continue
             }
-            groupedByVersion[version, default: []].append(feed)
+            groupedByVersion[version, default: []].append((feed, minimumSystem))
         }
 
         var best: (version: AppVersion, feed: UpdateFeed)?
         for (version, candidates) in groupedByVersion {
             guard version > current else { continue }
-            let hashes = Set(candidates.map(\.sha256))
+            guard let highestMinimumSystem = candidates.map(\.minimumSystem).max(by: {
+                compareVersionComponents($0, $1) == .orderedAscending
+            }),
+                  compareVersionComponents(highestMinimumSystem, currentSystem) != .orderedDescending else {
+                continue
+            }
+            let hashes = Set(candidates.map(\.feed.sha256))
             // Conflicting checksums for the same version cannot be trusted from either source.
-            guard hashes.count == 1, let chosen = candidates.first else { continue }
+            guard hashes.count == 1, let chosen = candidates.first?.feed else { continue }
             if let existing = best, existing.version >= version { continue }
             best = (version, chosen)
         }

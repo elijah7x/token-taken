@@ -1,10 +1,20 @@
 import Foundation
 
 public enum LocalDevice {
+    /// The Mac's current display name; read dynamically so renames take effect without changing the device id.
+    public static var currentDisplayName: String {
+        Host.current().localizedName ?? "Mac"
+    }
+
+    /// Returns a `Device` with the given fixed `id` and the Mac's current display name.
+    public static func device(withID id: String) -> Device {
+        Device(id: id, name: currentDisplayName)
+    }
+
     /// The id lives in the shared support folder so the app and the CLI (separate defaults domains) agree on it.
     /// Earlier builds kept it in the app's defaults; that value is adopted once.
     public static func current(defaults: UserDefaults = .standard, supportDirectory: URL = AppPaths.supportDirectory) -> Device {
-        let name = Host.current().localizedName ?? "Mac"
+        let name = currentDisplayName
         let file = supportDirectory.appendingPathComponent("device-id")
         if let stored = try? String(contentsOf: file, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
            UUID(uuidString: stored) != nil {

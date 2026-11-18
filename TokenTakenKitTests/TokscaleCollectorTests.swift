@@ -654,6 +654,293 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertNil(childEnv["OPENCODE_DB"])
         XCTAssertNil(childEnv["UNRELATED_SECRET"])
     }
+
+    func testZeroUsageAvailableClientIsFingerprintedAsUnchanged() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let invocationsURL = dir.appendingPathComponent("invocations.log")
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-zero.sh")
+        let script = """
+            #!/bin/sh
+            echo "$*" >> "\(invocationsURL.path)"
+            if [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; out="$1"; fi
+                shift
+              done
+              printf '%s' '{"contributions":[]}' > "$out"
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let sizes = FingerprintBox()
+        let stateDir = dir.appendingPathComponent("state", isDirectory: true)
+        func makeCollector() -> TokscaleCollector {
+            TokscaleCollector(
+                executableURL: scriptURL,
+                configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+                clients: ["fx"],
+                deviceID: "device-a",
+                isClientAvailable: { _ in true },
+                stateDirectory: stateDir,
+                fingerprint: { sizes.fingerprint(for: $0) }
+            )
+        }
+
+        let first = try await makeCollector().collect()
+        XCTAssertTrue(first.daily.isEmpty)
+        XCTAssertTrue(first.failedSourceIDs.isEmpty)
+        for commit in first.stateCommits { try commit() }
+        try FileManager.default.removeItem(at: invocationsURL)
+
+        let second = try await makeCollector().collect()
+        XCTAssertEqual(second.unchangedSourceIDs, ["fx"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: invocationsURL.path))
+    }
+
+    func testGraphTrimsModelIdWhitespaceBeforeSelection() throws {
+        let data = Data(#"{"contributions":[{"date":"2026-11-09","clients":[{"client":"claude","modelId":"  Z-Model  ","messages":1,"tokens":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":0}},{"client":"claude","modelId":"z-model","messages":1,"tokens":{"input":2,"output":2,"cacheRead":0,"cacheWrite":0,"reasoning":0}}]}]}"#.utf8)
+        let records = try TokscaleCollector.parse(data: data, clients: ["claude"], deviceID: "test")
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records.first?.modelID, "z-model")
+        XCTAssertEqual(records.first?.rawModelID, "Z-Model")
+    }
+
+    func testNonBundledVersionMismatchThrowsEngineUnavailable() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-version.sh")
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then
+              echo "tokscale 4.99.0"
+              exit 0
+            fi
+            exit 1
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude"],
+            deviceID: "device-a",
+            isClientAvailable: { _ in true }
+        )
+        do {
+            _ = try await collector.collect()
+            XCTFail("Expected engineUnavailable")
+        } catch CollectorError.engineUnavailable(let message) {
+            XCTAssertEqual(message, "tokscale 4.99.0 does not match pinned \(TokscaleCollector.engineVersion)")
+        }
+    }
+
+    func testNonBundledUnparseableVersionProceeds() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-unparseable.sh")
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then
+              echo "tokscale dev-build"
+              exit 0
+            elif [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; out="$1"; fi
+                shift
+              done
+              printf '%s' '{"contributions":[]}' > "$out"
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude"],
+            deviceID: "device-a",
+            isClientAvailable: { _ in true }
+        )
+        let batch = try await collector.collect()
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertTrue(batch.failedSourceIDs.isEmpty)
+    }
+
+    func testGraphFailureCancelsHourlySubprocessesImmediately() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-graph-fail.sh")
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then
+              echo "tokscale \(TokscaleCollector.engineVersion)"
+              exit 0
+            elif [ "$1" = "graph" ]; then
+              exit 7
+            else
+              sleep 30
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude", "codex"],
+            deviceID: "device-a",
+            timeoutSeconds: 30,
+            isClientAvailable: { _ in true }
+        )
+        let started = Date.now
+        do {
+            _ = try await collector.collect()
+            XCTFail("Expected graph failure")
+        } catch CollectorError.process(let message) {
+            XCTAssertEqual(message, "tokscale exited with status 7")
+        }
+        XCTAssertLessThan(Date.now.timeIntervalSince(started), 10)
+    }
+
+    func testRunnerCancellationWritesNothingAndDoesNotRecordFailedHealth() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = try SQLiteUsageStore(url: dir.appendingPathComponent("usage.sqlite"))
+        let device = Device(id: "device-a", name: "Test Mac")
+        let task = Task {
+            await CollectionRunner(store: store, device: device, collectors: [SuspendingCollector()]).runAll()
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        task.cancel()
+        let results = await task.value
+        XCTAssertTrue(results.isEmpty)
+        XCTAssertTrue(try store.health().isEmpty)
+        XCTAssertTrue(try store.records().isEmpty)
+        XCTAssertTrue(try store.hourly().isEmpty)
+        XCTAssertTrue(store.devices.isEmpty)
+    }
+
+    func testTokscaleCancellationThrowsInsteadOfFailingHourlySource() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-cancel.sh")
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then
+              echo "tokscale \(TokscaleCollector.engineVersion)"
+              exit 0
+            elif [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; out="$1"; fi
+                shift
+              done
+              printf '%s' '{"contributions":[]}' > "$out"
+            else
+              sleep 30
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["claude"],
+            deviceID: "device-a",
+            timeoutSeconds: 30,
+            isClientAvailable: { _ in true }
+        )
+        let task = Task { try await collector.collect() }
+        try await Task.sleep(for: .milliseconds(150))
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+        }
+    }
+
+    func testAccountSourceWithCachedHistoryBecomesUnavailableWhenCollectorThrows() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let now = ISO8601DateFormatter().date(from: "2026-11-09T10:30:00Z")!
+        let store = try SQLiteUsageStore(url: dir.appendingPathComponent("usage.sqlite"))
+        let accountDevice = Device(id: "account-cursor-test", name: "Cursor", kind: .account)
+        try store.upsert(device: accountDevice)
+        let cached = UsageRecord(
+            day: "2026-11-08", timeZoneID: "UTC", deviceID: accountDevice.id, sourceID: "cursor",
+            modelID: "composer-1", counts: TokenCounts(input: 100, output: 10), eventCount: 1
+        )
+        try store.replace(batch: CollectionBatch(daily: [cached]), sourceID: "cursor", deviceID: accountDevice.id)
+
+        let results = await CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [ThrowingCollector(sourceIDs: ["cursor"], error: CollectorError.sourceUnavailable)]
+        ).runAll(now: now)
+        XCTAssertEqual(results.first?.state, .unavailable)
+        XCTAssertEqual(results.first?.recordCount, 1)
+        XCTAssertEqual(try store.health().first?.state, .unavailable)
+    }
+
+    func testEngineUnavailableMapsToFailedHealth() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let now = ISO8601DateFormatter().date(from: "2026-11-09T10:30:00Z")!
+        let store = try SQLiteUsageStore(url: dir.appendingPathComponent("usage.sqlite"))
+        let results = await CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [ThrowingCollector(
+                sourceIDs: ["claude"],
+                error: CollectorError.engineUnavailable("tokscale 4.99.0 does not match pinned 4.21.0")
+            )]
+        ).runAll(now: now)
+        XCTAssertEqual(results.first?.state, .failed)
+        XCTAssertEqual(results.first?.errorMessage, "tokscale 4.99.0 does not match pinned 4.21.0")
+    }
+}
+
+private struct SuspendingCollector: UsageCollector {
+    let sourceIDs = ["claude"]
+    func collect() async throws -> CollectionBatch {
+        try await Task.sleep(for: .seconds(30))
+        return CollectionBatch()
+    }
+}
+
+private struct ThrowingCollector: UsageCollector {
+    let sourceIDs: [String]
+    let error: Error
+    func collect() async throws -> CollectionBatch {
+        throw error
+    }
 }
 
 private final class AvailabilityProbe: @unchecked Sendable {

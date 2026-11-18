@@ -347,6 +347,65 @@ final class PiCollectorTests: XCTestCase {
             XCTAssertFalse(message.contains("/"))
         }
     }
+
+    func testHourlyBucketsAlignToHalfHourTimeZone() async throws {
+        let kolkata = try XCTUnwrap(TimeZone(identifier: "Asia/Kolkata"))
+        let root = directory.appendingPathComponent("kolkata", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // `now` is 2026-11-11T06:00:00Z (11:30 IST): currentHour is 05:30Z, cutoff is 47h earlier (2026-11-09T06:30:00Z).
+        let lines = [
+            #"{"type":"message","id":"k-old","timestamp":"2026-11-09T06:29:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":1,"output":1}}}"#,
+            #"{"type":"message","id":"k-edge","timestamp":"2026-11-09T06:30:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":2,"output":1}}}"#,
+            #"{"type":"message","id":"k-prev","timestamp":"2026-11-11T05:15:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":3,"output":1}}}"#,
+            #"{"type":"message","id":"k-curr","timestamp":"2026-11-11T05:45:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":4,"output":1}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root, timeZone: kolkata).collect()
+        let formatter = ISO8601DateFormatter()
+        XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, [
+            "2026-11-09T06:30:00Z",
+            "2026-11-11T04:30:00Z",
+            "2026-11-11T05:30:00Z",
+        ])
+        XCTAssertEqual(batch.daily.reduce(Int64(0)) { $0 + $1.counts.input }, 10)
+    }
+
+    func testWrongTypeUsageAndJSONIntegerFieldsAreSkipped() async throws {
+        let root = directory.appendingPathComponent("wrong-types", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"usage","id":"bad-usage","timestamp":"2026-11-10T10:00:00Z","usage":"oops"}"#,
+            #"{"type":"message","id":"bad-input","timestamp":"2026-11-10T10:01:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":"bad","output":5}}}"#,
+            #"{"type":"message","id":"bad-overflow","timestamp":"2026-11-10T10:02:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":99999999999999999999,"output":5}}}"#,
+            #"{"type":"message","id":"null-ok","timestamp":"2026-11-10T10:03:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":12,"cacheRead":null,"output":3}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 3)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 12, output: 3))
+    }
+
+    func testHugeAndFutureTimestampsAreSkippedWithoutTrapping() async throws {
+        let root = directory.appendingPathComponent("future-ts", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let futureMs = Int64((PiCollectorTests.now.addingTimeInterval(2 * 86_400).timeIntervalSince1970 * 1_000).rounded())
+        let lines = [
+            #"{"type":"message","id":"huge-ms","message":{"role":"assistant","model":"claude-sonnet-4-5","timestamp":9000000000000000000,"usage":{"input":10,"output":2}}}"#,
+            #"{"type":"message","id":"huge-double","message":{"role":"assistant","model":"claude-sonnet-4-5","timestamp":1e25,"usage":{"input":10,"output":2}}}"#,
+            #"{"type":"message","id":"future-iso","timestamp":"2099-01-01T00:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":10,"output":2}}}"#,
+            #"{"type":"message","id":"future-ms","message":{"role":"assistant","model":"claude-sonnet-4-5","timestamp":\#(futureMs),"usage":{"input":10,"output":2}}}"#,
+            incrementalAssistantClaude,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 4)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 100, output: 30, reasoning: 10))
+    }
 }
 
 // MARK: - Incremental collection
@@ -456,13 +515,61 @@ extension PiCollectorTests {
         let incremental = incrementalCollector(root: root, timeZone: utc)
         let full = fullCollector(root: root, timeZone: utc)
         let first = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(first.skippedRecords, 1)
         let file = root.appendingPathComponent("cwd-a/a.jsonl")
         let handle = try FileHandle(forWritingTo: file)
         try handle.seekToEnd()
         try handle.write(contentsOf: Data((incrementalAssistantKimi + "\n").utf8))
         try handle.close()
         let second = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(second.skippedRecords, 1)
         XCTAssertEqual(second.skippedRecords, first.skippedRecords)
+    }
+
+    func testOverlongLineFollowedByAppendKeepsSkippedRecords() async throws {
+        var overlong = Data(repeating: 0x20, count: PiFormatScan.maximumLineBytes + (1 << 20) + 1_024)
+        overlong[0] = 0x7B
+        overlong[overlong.count - 1] = 0x7D
+        var contents = overlong
+        contents.append(0x0A)
+        contents.append(contentsOf: (incrementalAssistantClaude + "\n").utf8)
+
+        let root = directory.appendingPathComponent("overlong-\(UUID().uuidString)", isDirectory: true)
+        let file = root.appendingPathComponent("cwd-a/a.jsonl")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try contents.write(to: file)
+
+        let incremental = incrementalCollector(root: root, timeZone: utc)
+        let full = fullCollector(root: root, timeZone: utc)
+        let first = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(first.skippedRecords, 1)
+
+        let handle = try FileHandle(forWritingTo: file)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data((incrementalAssistantKimi + "\n").utf8))
+        try handle.close()
+
+        let second = try await assertMatchesFullScan(incremental, full)
+        XCTAssertEqual(second.skippedRecords, 1)
+        XCTAssertEqual(second.daily.map(\.modelID), ["claude-sonnet-4-5", "kimi-k2"])
+    }
+
+    func testDisappearingFileBetweenListingAndScanIsSkipped() throws {
+        let root = try makeIncrementalRoot(files: [
+            ("cwd-a/keep.jsonl", incrementalAssistantClaude + "\n"),
+            ("cwd-b/vanish.jsonl", incrementalAssistantKimi + "\n"),
+        ])
+        let vanishFile = root.appendingPathComponent("cwd-b/vanish.jsonl")
+        let batch = try PiFormatScan(
+            roots: [root],
+            sourceID: "pi",
+            deviceID: "device-a",
+            timeZone: utc,
+            stateDirectory: stateDirectory,
+            now: PiCollectorTests.now,
+            beforeScan: { try? FileManager.default.removeItem(at: vanishFile) }
+        ).run()
+        XCTAssertEqual(batch.daily.map(\.modelID), ["claude-sonnet-4-5"])
     }
 
     func testTruncatedOrReplacedFileIsReparsed() async throws {

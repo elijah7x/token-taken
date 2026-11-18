@@ -124,6 +124,27 @@ struct CosmosScene: Equatable {
         reduceMotion: Bool,
         hoverCategory: Int = -1
     ) -> CosmosFrame {
+        guard size.width > 1, size.height > 1 else {
+            let safeSize = CGSize(
+                width: max(size.width.isFinite ? size.width : 1, 1),
+                height: max(size.height.isFinite ? size.height : 1, 1)
+            )
+            let cameraSetup = Self.camera(at: motionTime, size: safeSize, compact: compact, reduceMotion: true)
+            return CosmosFrame(
+                scene: self,
+                target: self,
+                size: size,
+                center: cameraSetup.center,
+                focal: cameraSetup.focal,
+                camera: cameraSetup.camera,
+                time: 0,
+                clock: 0,
+                reveal: reduceMotion ? 1 : reveal,
+                disk: total > 0 ? 1 : 0,
+                hoverCategory: hoverCategory,
+                placements: []
+            )
+        }
         let progress = reduceMotion ? 1 : Self.clamp((timestamp - transitionStart) / 0.9, 0, 1)
         let eased = 1 - pow(1 - progress, 3)
         let current = interpolated(from: previous, progress: eased, orbitTime: orbitTime)
@@ -171,7 +192,22 @@ struct CosmosScene: Equatable {
     }
 
     func stillFrame(size: CGSize, compact: Bool = false, hoverCategory: Int = -1) -> CosmosFrame {
-        frame(
+        guard size.width > 1, size.height > 1 else {
+            return frame(
+                from: self,
+                transitionStart: 0,
+                timestamp: 0,
+                orbitTime: 0,
+                flowTime: 0,
+                motionTime: 0,
+                reveal: 1,
+                size: size,
+                compact: compact,
+                reduceMotion: true,
+                hoverCategory: hoverCategory
+            )
+        }
+        return frame(
             from: self,
             transitionStart: 0,
             timestamp: 0,
@@ -216,15 +252,15 @@ struct CosmosScene: Equatable {
     }
 
     private static func elapsedHours(for summary: UsageSummary) -> Int {
-        let now = Date()
         var calendar = Calendar.current
         calendar.timeZone = .current
-        let todayStart = calendar.startOfDay(for: now)
+        let lastInstant = max(summary.start, summary.end.addingTimeInterval(-1))
+        let todayStart = calendar.startOfDay(for: lastInstant)
         let dayHours: Int
         if summary.period == .day {
             dayHours = summary.series.filter { !$0.isFuture }.count
         } else {
-            dayHours = max(1, (calendar.dateComponents([.hour], from: todayStart, to: now).hour ?? 22) + 1)
+            dayHours = max(1, (calendar.dateComponents([.hour], from: todayStart, to: lastInstant).hour ?? 22) + 1)
         }
         let effectiveDayHours = dayHours == 0 ? 23 : dayHours
         switch summary.period {
@@ -259,10 +295,12 @@ struct CosmosScene: Equatable {
         let forward = normalize(-position)
         let right = normalize(cross(forward, SIMD3<Double>(0, 1, 0)))
         let up = cross(right, forward)
-        let scale = min(Double(size.width) / referenceSize.width, Double(size.height) / referenceSize.height)
+        let width = size.width.isFinite ? Double(size.width) : 1
+        let height = size.height.isFinite ? Double(size.height) : 1
+        let scale = max(0.01, min(width / referenceSize.width, height / referenceSize.height))
         let center = compact
-            ? CGPoint(x: Double(size.width) * 0.52, y: Double(size.height) * 0.48)
-            : CGPoint(x: Double(size.width) * 0.60, y: Double(size.height) * 0.46)
+            ? CGPoint(x: width * 0.52, y: height * 0.48)
+            : CGPoint(x: width * 0.60, y: height * 0.46)
         return (CosmosCamera(position: position, forward: forward, right: right, up: up), center, referenceFocal * scale)
     }
 
@@ -357,7 +395,7 @@ struct CosmosScene: Equatable {
     ) -> CosmosBodyPlacement {
         var world = initialWorld
         var direct = project(world, camera: camera, center: center, focal: focal)
-        let radius = max(body.radius, 13 / (direct?.scale ?? focal / cameraDistance))
+        let radius = max(body.radius, 13 / max(0.001, direct?.scale ?? focal / cameraDistance))
         guard direct != nil else {
             return CosmosBodyPlacement(body: body, world: world, point: nil, radius: radius, screenRadius: 0, outer: 0)
         }
@@ -401,7 +439,7 @@ struct CosmosScene: Equatable {
 
     /// SwiftUI asks for the scene several times per displayed frame (hover, focus, label layout),
     /// and building it sorts breakdowns, hashes ids and reads the calendar. Rebuild only when the
-    /// summary, the dimension or the current hour (which drives `elapsedHours`) changes.
+    /// summary, the dimension or `summary.end` (which drives `elapsedHours`) changes.
     @MainActor
     static func cached(summary: UsageSummary, dimension: BreakdownDimension) -> CosmosScene {
         CosmosSceneCache.scene(summary: summary, dimension: dimension)
@@ -414,34 +452,27 @@ private enum CosmosSceneCache {
         let dimension: BreakdownDimension
         let period: Period
         let start: Date
+        let end: Date
         let total: TokenCounts
         let bySource: [Breakdown]
         let byModel: [Breakdown]
         let bucketCount: Int
         let elapsedBuckets: Int
-        let hourStamp: Int
     }
 
     private static var entries: [(key: Key, scene: CosmosScene)] = []
-
-    /// Local hour bucket; `elapsedHours` reads the wall clock at that granularity.
-    private static func hourStamp(for now: Date) -> Int {
-        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour], from: now)
-        let day = (parts.year ?? 0) * 10_000 + (parts.month ?? 0) * 100 + (parts.day ?? 0)
-        return day * 100 + (parts.hour ?? 0)
-    }
 
     static func scene(summary: UsageSummary, dimension: BreakdownDimension) -> CosmosScene {
         let key = Key(
             dimension: dimension,
             period: summary.period,
             start: summary.start,
+            end: summary.end,
             total: summary.total,
             bySource: summary.bySource,
             byModel: summary.byModel,
             bucketCount: summary.series.count,
-            elapsedBuckets: summary.series.lazy.filter { !$0.isFuture }.count,
-            hourStamp: hourStamp(for: Date())
+            elapsedBuckets: summary.series.lazy.filter { !$0.isFuture }.count
         )
         if let index = entries.firstIndex(where: { $0.key == key }) {
             let hit = entries.remove(at: index)
@@ -567,9 +598,13 @@ struct CosmosFrame {
         for index in result.placements.indices {
             result.placements[index].labelFrame = nil
             let item = original[index]
-            guard item.isVisible, let point = item.point else { continue }
+            guard item.isVisible,
+                  let point = item.point,
+                  point.x.isFinite, point.y.isFinite,
+                  item.extent.isFinite else { continue }
             let labelSize = sizes[item.id] ?? CGSize(width: 80, height: 29)
             let width = Double(labelSize.width), height = Double(labelSize.height)
+            guard width.isFinite, height.isFinite, width > 0, height > 0 else { continue }
             let clear = item.extent + 10
 
             func base(_ side: Int) -> CGRect {
@@ -615,7 +650,9 @@ struct CosmosFrame {
                 }
                 if chosen != nil { break }
             }
-            if let chosen {
+            if let chosen,
+               chosen.origin.x.isFinite, chosen.origin.y.isFinite,
+               chosen.size.width.isFinite, chosen.size.height.isFinite {
                 result.placements[index].labelFrame = chosen
                 result.placements[index].labelSide = chosenSide
                 labels.append(chosen)

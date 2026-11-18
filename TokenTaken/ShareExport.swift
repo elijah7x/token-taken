@@ -35,6 +35,9 @@ enum ShareAspect: String, CaseIterable, Identifiable {
 
 private struct CosmosShareSnapshotKey: Hashable {
     let scope: ShareScope
+    let period: Period
+    let start: Date
+    let end: Date
     let aspect: ShareAspect
     let dimension: BreakdownDimension
     let periodTotal: Int64
@@ -67,6 +70,8 @@ struct ShareExportSheet: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+    @State private var previewPeriod: Period?
+    @State private var capturedNow = Date.now
     @State private var scope: ShareScope = .overall
     @State private var aspect: ShareAspect = .portrait
     @State private var showCost = false
@@ -77,31 +82,39 @@ struct ShareExportSheet: View {
     // Field share cards only; kept for this sheet, never saved or synced.
     @State private var inscription: String?
     @State private var signature = ""
+    @State private var previewSummary: UsageSummary?
     @State private var scopedSummary: UsageSummary?
-    @State private var loadedScopeKey: ScopeQueryKey?
+    @State private var previewLensBuckets: [LensBucket] = []
+    @State private var loadedScopeKey: SnapshotQueryKey?
     @State private var rankTopPercent: Double?
     @State private var cosmosSnapshot: NSImage?
     @State private var renderedCosmosSnapshotKey: CosmosShareSnapshotKey?
     @State private var didCopy = false
     @State private var copyResetTask: Task<Void, Never>?
     @State private var shareAnchor = SharePickerAnchor()
+    @State private var exportError: String?
 
     @Namespace private var periodNamespace
     @Namespace private var aspectNamespace
     @FocusState private var focusedPeriod: Period?
     @FocusState private var focusedAspect: ShareAspect?
 
-    private struct ScopeQueryKey: Equatable {
-        let scope: ShareScope
+    private struct SnapshotQueryKey: Equatable {
         let period: Period
-        let start: Date
-        let end: Date
-        let totalTokens: Int64
+        let scope: ShareScope
+        let modelPeriod: Period
+        let modelStart: Date
+        let modelEnd: Date
+        let modelTotalTokens: Int64
+        let modelUnpricedTokens: Int64
         let syncEnabled: Bool
         let remoteCount: Int
+        let lastRefresh: Date?
+        let isLiquidLens: Bool
     }
 
-    private var summary: UsageSummary { model.summary }
+    private var activePeriod: Period { previewPeriod ?? model.period }
+    private var summary: UsageSummary { previewSummary ?? model.summary }
     private var isCosmos: Bool { settings.theme == .cosmos }
     private var isLiquidLens: Bool { settings.theme == .liquidGlass && settings.liquidView == .lens }
     private var primaryInk: Color { isCosmos ? CosmosPalette.ink : Palette.ink1 }
@@ -119,29 +132,37 @@ struct ShareExportSheet: View {
 
     private var currentLensBuckets: [LensBucket] {
         guard isLiquidLens else { return [] }
-        return model.lensBuckets(for: summary.period)
+        return previewLensBuckets
     }
 
     private var effectiveScope: ShareScope {
-        switch scope {
+        validatedScope(scope, against: summary)
+    }
+
+    private func validatedScope(_ targetScope: ShareScope, against targetSummary: UsageSummary) -> ShareScope {
+        switch targetScope {
         case .overall:
             return .overall
         case .source(let id):
-            return summary.bySource.contains(where: { $0.id == id }) ? scope : .overall
+            return targetSummary.bySource.contains(where: { $0.id == id }) ? targetScope : .overall
         case .model(let id):
-            return summary.byModel.contains(where: { $0.id == id }) ? scope : .overall
+            return targetSummary.byModel.contains(where: { $0.id == id }) ? targetScope : .overall
         }
     }
 
-    private var scopeQueryKey: ScopeQueryKey {
-        ScopeQueryKey(
-            scope: effectiveScope,
-            period: summary.period,
-            start: summary.start,
-            end: summary.end,
-            totalTokens: summary.total.total,
+    private var snapshotQueryKey: SnapshotQueryKey {
+        SnapshotQueryKey(
+            period: activePeriod,
+            scope: scope,
+            modelPeriod: model.period,
+            modelStart: model.summary.start,
+            modelEnd: model.summary.end,
+            modelTotalTokens: model.summary.total.total,
+            modelUnpricedTokens: model.summary.cost.unpricedTokens,
             syncEnabled: settings.syncEnabled,
-            remoteCount: refreshCoordinator?.remoteSnapshots.count ?? 0
+            remoteCount: refreshCoordinator?.remoteSnapshots.count ?? 0,
+            lastRefresh: refreshCoordinator?.lastRefresh,
+            isLiquidLens: isLiquidLens
         )
     }
 
@@ -149,7 +170,7 @@ struct ShareExportSheet: View {
         ShareCardData(
             summary: summary,
             scope: effectiveScope,
-            scopedSummary: loadedScopeKey == scopeQueryKey ? scopedSummary : nil
+            scopedSummary: loadedScopeKey == snapshotQueryKey ? scopedSummary : nil
         )
     }
 
@@ -170,6 +191,9 @@ struct ShareExportSheet: View {
     ) -> CosmosShareSnapshotKey {
         CosmosShareSnapshotKey(
             scope: scope,
+            period: sceneSummary.period,
+            start: sceneSummary.start,
+            end: sceneSummary.end,
             aspect: aspect,
             dimension: cosmosDimension(for: scope),
             periodTotal: sceneSummary.total.total
@@ -179,8 +203,8 @@ struct ShareExportSheet: View {
     private var currentCosmosSnapshotKey: CosmosShareSnapshotKey {
         makeCosmosSnapshotKey(
             scope: effectiveScope,
-            sceneSummary: cardData.scopedSummary ?? summary,
-            aspect: aspect
+            sceneSummary: cardData.cosmosSceneSummary,
+            aspect: effectiveAspect
         )
     }
 
@@ -200,7 +224,7 @@ struct ShareExportSheet: View {
     }
 
     private var displayedRank: Double? {
-        guard showRank, loadedScopeKey == scopeQueryKey else { return nil }
+        guard showRank, loadedScopeKey == snapshotQueryKey else { return nil }
         return rankTopPercent
     }
 
@@ -229,17 +253,37 @@ struct ShareExportSheet: View {
         }
         .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .onAppear {
+            if previewPeriod == nil {
+                previewPeriod = model.period
+            }
             if inscription == nil {
                 inscription = ShareInscriptions.random(for: settings.theme, locale: locale)
             }
         }
-        .onChange(of: scopeQueryKey, initial: true) { _, key in
-            scopedSummary = resolveScopedSummary(for: key.scope)
+        .onChange(of: snapshotQueryKey, initial: true) { _, key in
+            let resolved = resolveShareSnapshot(for: key)
+            previewSummary = resolved.summary
+            scopedSummary = resolved.scopedSummary
+            previewLensBuckets = resolved.lensBuckets
+            rankTopPercent = resolved.rank
             loadedScopeKey = key
-            rankTopPercent = resolveLast30DaysRank()
         }
         .onChange(of: currentCosmosSnapshotKey, initial: true) { _, key in
             renderCosmosSnapshot(for: key)
+        }
+        .alert(
+            "Export Failed",
+            isPresented: Binding(
+                get: { exportError != nil },
+                set: { if !$0 { exportError = nil } }
+            ),
+            presenting: exportError
+        ) { _ in
+            Button("OK", role: .cancel) {
+                exportError = nil
+            }
+        } message: { message in
+            Text(verbatim: message)
         }
         .onExitCommand {
             dismiss()
@@ -256,7 +300,7 @@ struct ShareExportSheet: View {
             return
         }
         cosmosSnapshot = CosmosSnapshot.image(
-            summary: cardData.scopedSummary ?? summary,
+            summary: cardData.cosmosSceneSummary,
             dimension: key.dimension,
             size: cosmosShareSceneSize(for: key.aspect),
             scale: 2
@@ -477,10 +521,10 @@ struct ShareExportSheet: View {
     }
 
     private func periodSegment(_ option: Period) -> some View {
-        let isSelected = model.period == option
+        let isSelected = activePeriod == option
         return Button {
             withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
-                model.period = option
+                previewPeriod = option
             }
         } label: {
             Text(periodTitle(option))
@@ -515,9 +559,9 @@ struct ShareExportSheet: View {
 
     private func movePeriod(by offset: Int) {
         let options = Period.allCases
-        guard let index = options.firstIndex(of: model.period) else { return }
+        guard let index = options.firstIndex(of: activePeriod) else { return }
         let nextIndex = min(max(index + offset, 0), options.count - 1)
-        model.period = options[nextIndex]
+        previewPeriod = options[nextIndex]
         focusedPeriod = options[nextIndex]
     }
 
@@ -833,13 +877,28 @@ struct ShareExportSheet: View {
 
     // MARK: - Scoped summary & export
 
+    private struct ResolvedShareSnapshot {
+        let summary: UsageSummary
+        let scopedSummary: UsageSummary?
+        let lensBuckets: [LensBucket]
+        let rank: Double?
+    }
+
+    private var themeFileTag: String {
+        switch settings.theme {
+        case .liquidGlass: "liquid-glass"
+        case .field: "field"
+        case .cosmos: "cosmos"
+        }
+    }
+
     private func resolveBaseStore() -> (store: any UsageStore, now: Date, priceTable: PriceTable)? {
-        let isSynthetic = summary.cost.priceTableVersion == PriceTable.synthetic.version
+        let isSynthetic = model.summary.cost.priceTableVersion == PriceTable.synthetic.version
         if let refreshCoordinator {
             let store: any UsageStore = settings.syncEnabled
                 ? MergedUsageStore(local: refreshCoordinator.store, remote: refreshCoordinator.remoteSnapshots)
                 : refreshCoordinator.store
-            return (store, .now, isSynthetic ? .synthetic : .bundled)
+            return (store, capturedNow, isSynthetic ? .synthetic : .bundled)
         } else if isSynthetic {
             return (SyntheticUsageStore(), SyntheticUsageStore.defaultToday, .synthetic)
         } else {
@@ -847,77 +906,128 @@ struct ShareExportSheet: View {
         }
     }
 
-    /// Resolves per-source models or per-model sources outside `body` so rendering never queries SQLite per frame.
-    private func resolveScopedSummary(for targetScope: ShareScope) -> UsageSummary? {
-        let filter: UsageFilter
-        switch targetScope {
-        case .overall:
-            return nil
-        case .source(let id):
-            filter = UsageFilter(sources: [id])
-        case .model(let id):
-            filter = UsageFilter(models: [id])
+    /// Queries summary, scoped summary, lens buckets, and 30-day rank from a single preload and captured `now`.
+    private func resolveShareSnapshot(for key: SnapshotQueryKey) -> ResolvedShareSnapshot {
+        guard let context = resolveBaseStore(),
+              let rows = try? UsageAggregator.preload(context.store) else {
+            return ResolvedShareSnapshot(
+                summary: model.summary,
+                scopedSummary: nil,
+                lensBuckets: key.isLiquidLens ? model.lensBuckets(for: key.period) : [],
+                rank: nil
+            )
         }
 
-        guard let context = resolveBaseStore() else { return nil }
-        let filtered = FilteredUsageStore(store: context.store, filter: filter)
-        return try? UsageAggregator(store: filtered, now: context.now, priceTable: context.priceTable)
-            .summary(for: summary.period)
+        let cachedStore = PreloadedUsageStore(rows: rows)
+        let aggregator = UsageAggregator(
+            store: cachedStore,
+            rows: rows,
+            now: context.now,
+            priceTable: context.priceTable
+        )
+        let resolvedSummary = (try? aggregator.summary(for: key.period)) ?? model.summary
+        let targetScope = validatedScope(key.scope, against: resolvedSummary)
+
+        let filter: UsageFilter? = switch targetScope {
+        case .overall: nil
+        case .source(let id): UsageFilter(sources: [id])
+        case .model(let id): UsageFilter(models: [id])
+        }
+
+        let resolvedScoped: UsageSummary?
+        if let filter {
+            let filtered = FilteredUsageStore(store: cachedStore, filter: filter)
+            resolvedScoped = try? UsageAggregator(
+                store: filtered,
+                now: context.now,
+                priceTable: context.priceTable
+            ).summary(for: key.period)
+        } else {
+            resolvedScoped = nil
+        }
+
+        let resolvedBuckets = key.isLiquidLens
+            ? ((try? aggregator.lensBuckets(for: key.period)) ?? [])
+            : []
+        let resolvedRank: Double?
+        if let points = try? aggregator.dailyTotals(lastDays: 30) {
+            let total = points.reduce(Int64(0)) { $0 + $1.total }
+            resolvedRank = UsageRank.topPercent(last30DaysTokens: total)
+        } else {
+            resolvedRank = nil
+        }
+
+        return ResolvedShareSnapshot(
+            summary: resolvedSummary,
+            scopedSummary: resolvedScoped,
+            lensBuckets: resolvedBuckets,
+            rank: resolvedRank
+        )
     }
 
-    /// Overall last-30-day rank computed outside `body` regardless of chosen period or scope.
-    private func resolveLast30DaysRank() -> Double? {
-        guard let context = resolveBaseStore(),
-              let points = try? UsageAggregator(
-                  store: context.store,
-                  now: context.now,
-                  priceTable: context.priceTable
-              ).dailyTotals(lastDays: 30) else {
-            return nil
+    private func sanitizedFileNameStem(for data: ShareCardData, scope targetScope: ShareScope) -> String {
+        let periodLabel: String = switch data.summary.period {
+        case .day: String(localized: "Today", locale: locale)
+        case .week: String(localized: "This week", locale: locale)
+        case .month: String(localized: "This month", locale: locale)
+        case .year: String(localized: "This year", locale: locale)
+        case .all: String(localized: "All time", locale: locale)
         }
-        let total = points.reduce(Int64(0)) { $0 + $1.total }
-        return UsageRank.topPercent(last30DaysTokens: total)
+        let scopeSuffix: String = switch targetScope {
+        case .overall:
+            String(localized: "Overall", locale: locale)
+        case .source, .model:
+            data.scopeDisplayTitle(locale: locale)
+        }
+        var sanitizedScope = scopeSuffix
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        while sanitizedScope.hasPrefix(".") {
+            sanitizedScope.removeFirst()
+        }
+        var stem = sanitizedScope.isEmpty
+            ? "Token Taken - \(periodLabel)"
+            : "Token Taken - \(periodLabel) - \(sanitizedScope)"
+        while stem.hasPrefix(".") {
+            stem.removeFirst()
+        }
+        let maxStemLength = 80 - 4
+        if stem.count > maxStemLength {
+            stem = String(stem.prefix(maxStemLength)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return stem.isEmpty ? "Token Taken" : stem
     }
 
     private var defaultFileName: String {
-        let periodLabel: String = switch summary.period {
-        case .day: String(localized: "Today")
-        case .week: String(localized: "This week")
-        case .month: String(localized: "This month")
-        case .year: String(localized: "This year")
-        case .all: String(localized: "All time")
-        }
-        let scopeSuffix: String = switch effectiveScope {
-        case .overall:
-            String(localized: "Overall")
-        case .source:
-            cardData.scopeDisplayTitle
-        case .model:
-            cardData.scopeDisplayTitle
-        }
-        let sanitizedScope = scopeSuffix
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-        return "Token Taken - \(periodLabel) - \(sanitizedScope).png"
+        "\(sanitizedFileNameStem(for: cardData, scope: effectiveScope)).png"
     }
 
     private func renderPNGData() -> Data? {
-        let resolvedScoped = loadedScopeKey == scopeQueryKey
-            ? scopedSummary
-            : resolveScopedSummary(for: effectiveScope)
-        let resolvedRank = showRank
-            ? (loadedScopeKey == scopeQueryKey ? rankTopPercent : resolveLast30DaysRank())
-            : nil
+        let queryKey = snapshotQueryKey
+        let resolved: ResolvedShareSnapshot
+        if loadedScopeKey == queryKey {
+            resolved = ResolvedShareSnapshot(
+                summary: summary,
+                scopedSummary: scopedSummary,
+                lensBuckets: previewLensBuckets,
+                rank: rankTopPercent
+            )
+        } else {
+            resolved = resolveShareSnapshot(for: queryKey)
+        }
+        let resolvedScope = validatedScope(scope, against: resolved.summary)
+        let resolvedRank = showRank ? resolved.rank : nil
         let exportData = ShareCardData(
-            summary: summary,
-            scope: effectiveScope,
-            scopedSummary: resolvedScoped
+            summary: resolved.summary,
+            scope: resolvedScope,
+            scopedSummary: resolved.scopedSummary
         )
         let resolvedAspect = effectiveAspect
         let canvasSize = resolvedAspect.canvasSize
-        let exportSceneSummary = resolvedScoped ?? summary
+        let exportSceneSummary = exportData.cosmosSceneSummary
         let exportSnapshotKey = makeCosmosSnapshotKey(
-            scope: effectiveScope,
+            scope: resolvedScope,
             sceneSummary: exportSceneSummary,
             aspect: resolvedAspect
         )
@@ -934,7 +1044,7 @@ struct ShareExportSheet: View {
         } else {
             exportCosmosSnapshot = nil
         }
-        let exportLensBuckets = isLiquidLens ? model.lensBuckets(for: summary.period) : []
+        let exportLensBuckets = isLiquidLens ? resolved.lensBuckets : []
         let view = ShareCardView(
             data: exportData,
             aspect: resolvedAspect,
@@ -951,6 +1061,7 @@ struct ShareExportSheet: View {
         .frame(width: canvasSize.width, height: canvasSize.height)
         .environment(\.colorScheme, settings.theme == .cosmos ? .dark : scheme)
         .environment(\.locale, locale)
+        .fontDesign(settings.theme == .field ? .serif : nil)
 
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2.0
@@ -972,10 +1083,17 @@ struct ShareExportSheet: View {
     }
 
     private func copyCardToPasteboard() {
-        guard let pngData = renderPNGData() else { return }
+        exportError = nil
+        guard let pngData = renderPNGData() else {
+            exportError = String(localized: "Could not render the share card image.", locale: locale)
+            return
+        }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setData(pngData, forType: .png)
+        guard pasteboard.setData(pngData, forType: .png) else {
+            exportError = String(localized: "Could not copy the image to the clipboard.", locale: locale)
+            return
+        }
 
         didCopy = true
         copyResetTask?.cancel()
@@ -987,31 +1105,84 @@ struct ShareExportSheet: View {
     }
 
     private func saveCardAsPNG() {
-        guard let pngData = renderPNGData() else { return }
+        exportError = nil
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true
         panel.isExtensionHidden = false
         panel.nameFieldStringValue = defaultFileName
-        if panel.runModal() == .OK, let url = panel.url {
-            try? pngData.write(to: url, options: .atomic)
+
+        let finishSave: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            guard let pngData = renderPNGData() else {
+                exportError = String(localized: "Could not render the share card image.", locale: locale)
+                return
+            }
+            do {
+                try pngData.write(to: url, options: .atomic)
+            } catch {
+                exportError = String(localized: "Could not save PNG: \(error.localizedDescription)", locale: locale)
+            }
+        }
+
+        if let window = shareAnchor.view?.window ?? NSApp.keyWindow {
+            Task { @MainActor in
+                let response = await panel.beginSheetModal(for: window)
+                finishSave(response)
+            }
+        } else {
+            finishSave(panel.runModal())
         }
     }
 
     private func presentSharePicker() {
-        guard let pngData = renderPNGData(), let anchorView = shareAnchor.view else { return }
+        exportError = nil
+        guard let anchorView = shareAnchor.view else {
+            exportError = String(localized: "Could not open the share menu.", locale: locale)
+            return
+        }
+        guard let pngData = renderPNGData() else {
+            exportError = String(localized: "Could not render the share card image.", locale: locale)
+            return
+        }
         let tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("TokenTakenShare", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let fileURL = tempDir.appendingPathComponent(defaultFileName)
+        let shortUUID = String(UUID().uuidString.prefix(8)).lowercased()
+        let stem = sanitizedFileNameStem(for: cardData, scope: effectiveScope)
+        let fileName = "\(stem)-\(themeFileTag)-\(effectiveAspect.rawValue)-\(shortUUID).png"
+        let fileURL = tempDir.appendingPathComponent(fileName)
         do {
+            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+            pruneExpiredShareTempFiles(in: tempDir, before: Date.now.addingTimeInterval(-86_400))
             try pngData.write(to: fileURL, options: .atomic)
             let picker = NSSharingServicePicker(items: [fileURL])
             picker.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
         } catch {
-            return
+            exportError = String(localized: "Could not prepare the share image: \(error.localizedDescription)", locale: locale)
         }
     }
+
+    private func pruneExpiredShareTempFiles(in directory: URL, before cutoff: Date) {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey],
+            options: []
+        ) else { return }
+        for url in urls {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
+            let timestamp = values?.contentModificationDate ?? values?.creationDate
+            if let timestamp, timestamp < cutoff {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+    }
+}
+
+private struct PreloadedUsageStore: UsageStore {
+    let rows: UsageAggregator.Rows
+    var devices: [Device] { rows.devices }
+    func records() -> [UsageRecord] { rows.records }
+    func hourly() -> [HourlyUsage] { rows.hourly }
 }
 
 // MARK: - Card Data
@@ -1047,6 +1218,7 @@ struct ShareCardData {
     let kind: Kind
     let counts: TokenCounts
     let estimatedUSD: Double
+    let unpricedTokens: Int64
 
     private static let overallSkyColor = Color(light: "#3A9BE0", dark: "#5BB2F0")
     fileprivate static let mergedStratumColor = Color(light: "#6E7D92", dark: "#8494AB")
@@ -1063,6 +1235,7 @@ struct ShareCardData {
             self.kind = .overall
             self.counts = summary.total
             self.estimatedUSD = summary.cost.estimatedUSD
+            self.unpricedTokens = summary.cost.unpricedTokens
 
         case .source(let id):
             if let source = summary.bySource.first(where: { $0.id == id }) {
@@ -1070,15 +1243,27 @@ struct ShareCardData {
                 self.counts = source.counts
                 if let scopedSummary {
                     self.estimatedUSD = scopedSummary.cost.estimatedUSD
+                    self.unpricedTokens = scopedSummary.cost.unpricedTokens
                 } else if summary.bySource.count == 1 {
                     self.estimatedUSD = summary.cost.estimatedUSD
+                    self.unpricedTokens = summary.cost.unpricedTokens
                 } else {
-                    self.estimatedUSD = summary.cost.estimatedUSD * Share.ratio(source.counts.total, of: summary.total.total)
+                    let ratio = Share.ratio(source.counts.total, of: summary.total.total)
+                    self.estimatedUSD = summary.cost.estimatedUSD * ratio
+                    if summary.cost.unpricedTokens <= 0 {
+                        self.unpricedTokens = 0
+                    } else if summary.cost.unpricedTokens >= summary.total.total, summary.total.total > 0 {
+                        self.unpricedTokens = source.counts.total
+                    } else {
+                        let scaled = Int64((Double(summary.cost.unpricedTokens) * ratio).rounded())
+                        self.unpricedTokens = min(source.counts.total, max(source.counts.uncategorized, scaled))
+                    }
                 }
             } else {
                 self.kind = .overall
                 self.counts = summary.total
                 self.estimatedUSD = summary.cost.estimatedUSD
+                self.unpricedTokens = summary.cost.unpricedTokens
             }
 
         case .model(let id):
@@ -1087,26 +1272,75 @@ struct ShareCardData {
                 self.counts = item.counts
                 if let scopedSummary {
                     self.estimatedUSD = scopedSummary.cost.estimatedUSD
+                    self.unpricedTokens = scopedSummary.cost.unpricedTokens
                 } else {
-                    self.estimatedUSD = priceTable.estimate(model: item.id, counts: item.counts).usd
+                    let estimate = priceTable.estimate(model: item.id, counts: item.counts)
+                    self.estimatedUSD = estimate.usd
+                    self.unpricedTokens = estimate.unpricedTokens
                 }
             } else {
                 self.kind = .overall
                 self.counts = summary.total
                 self.estimatedUSD = summary.cost.estimatedUSD
+                self.unpricedTokens = summary.cost.unpricedTokens
             }
         }
     }
 
-    var scopeDisplayTitle: String {
+    func scopeDisplayTitle(locale: Locale) -> String {
         switch kind {
         case .overall:
-            String(localized: "Overall")
+            String(localized: "Overall", locale: locale)
         case .source(_, let name):
             name
         case .model(_, let name):
             name
         }
+    }
+
+    /// Scoped summary for Cosmos scene/ranking; avoids leaking global summary when `scopedSummary` is nil.
+    var cosmosSceneSummary: UsageSummary {
+        if let scopedSummary {
+            return scopedSummary
+        }
+        guard isPartialScope else {
+            return summary
+        }
+
+        let fallbackSources: [Breakdown]
+        let fallbackModels: [Breakdown]
+        switch kind {
+        case .overall:
+            fallbackSources = summary.bySource
+            fallbackModels = summary.byModel
+        case .source(let id, let name):
+            fallbackSources = counts.total > 0 ? [Breakdown(id: id, name: name, counts: counts)] : []
+            fallbackModels = activeSources.count == 1 ? activeModels : []
+        case .model(let id, let name):
+            if activeSources.count == 1, let sole = activeSources.first, counts.total > 0 {
+                fallbackSources = [Breakdown(id: sole.id, name: sole.name, counts: counts)]
+            } else {
+                fallbackSources = []
+            }
+            fallbackModels = counts.total > 0 ? [Breakdown(id: id, name: name, counts: counts)] : []
+        }
+
+        return UsageSummary(
+            period: summary.period,
+            start: summary.start,
+            end: summary.end,
+            total: counts,
+            bySource: fallbackSources,
+            byModel: fallbackModels,
+            byDevice: [],
+            series: [],
+            cost: CostEstimate(
+                estimatedUSD: estimatedUSD,
+                unpricedTokens: unpricedTokens,
+                priceTableVersion: summary.cost.priceTableVersion
+            ),
+            devices: summary.devices
+        )
     }
 
     func periodHeadlineText(locale: Locale) -> String {
@@ -1338,18 +1572,25 @@ struct ShareCardData {
     }
 
     private var categoryStrata: [Stratum] {
-        TokenCategory.allCases
-            .compactMap { category -> Stratum? in
-                let value = counts[category]
-                guard value > 0 else { return nil }
-                return Stratum(
-                    id: category.rawValue,
-                    label: .localized(category.title),
-                    tokens: value,
-                    color: Palette.color(for: category)
-                )
-            }
-            .sorted { $0.tokens > $1.tokens }
+        var strata = TokenCategory.allCases.compactMap { category -> Stratum? in
+            let value = counts[category]
+            guard value > 0 else { return nil }
+            return Stratum(
+                id: category.rawValue,
+                label: .localized(category.title),
+                tokens: value,
+                color: Palette.color(for: category)
+            )
+        }
+        if counts.uncategorized > 0 {
+            strata.append(Stratum(
+                id: "uncategorized",
+                label: .localized("Uncategorized"),
+                tokens: counts.uncategorized,
+                color: Palette.ink3.opacity(0.45)
+            ))
+        }
+        return strata.sorted { $0.tokens > $1.tokens }
     }
 
     /// Mirrors `BreakdownCard`: folding a single trailing item into "Other 1" saves no space.
@@ -1623,7 +1864,7 @@ struct CosmosShareCard: View {
             ? CGSize(width: cardSize.width - sceneSize.width, height: cardSize.height)
             : CGSize(width: cardSize.width, height: cardSize.height - sceneSize.height)
     }
-    private var sceneSummary: UsageSummary { data.scopedSummary ?? data.summary }
+    private var sceneSummary: UsageSummary { data.cosmosSceneSummary }
     private var sceneDimension: BreakdownDimension {
         switch data.kind {
         case .overall: dimension
@@ -1829,18 +2070,38 @@ struct CosmosShareCard: View {
             .minimumScaleFactor(0.8)
     }
 
+    @ViewBuilder
     private var cost: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(verbatim: TokenFormat.usd(data.estimatedUSD))
-                .font(.system(size: 30, weight: .medium, design: .monospaced))
-                .foregroundStyle(CosmosPalette.accent)
-                .monospacedDigit()
+        if data.unpricedTokens > 0, data.unpricedTokens >= data.counts.total {
+            Text("No prices for these models")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(CosmosPalette.ink2)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(verbatim: TokenFormat.usd(data.estimatedUSD))
+                    .font(.system(size: 30, weight: .medium, design: .monospaced))
+                    .foregroundStyle(CosmosPalette.accent)
+                    .monospacedDigit()
+                    .lineLimit(1)
 
-            Text("estimate, not a bill")
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("estimate, not a bill")
+                        .foregroundStyle(CosmosPalette.ink3)
+                    if data.unpricedTokens > 0 {
+                        Text(verbatim: "·")
+                            .foregroundStyle(CosmosPalette.ink3)
+                        Text("\(TokenFormat.short(data.unpricedTokens)) unpriced")
+                            .foregroundStyle(CosmosPalette.accent)
+                            .monospacedDigit()
+                    }
+                }
                 .font(.system(size: 16))
-                .foregroundStyle(CosmosPalette.ink3)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .padding(.top, 4)
+            }
         }
     }
 
@@ -1851,13 +2112,14 @@ struct CosmosShareCard: View {
     }
 
     private var ranking: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let denominator = data.counts.total
+        return VStack(alignment: .leading, spacing: 0) {
             Text(sceneDimension == .sources ? LocalizedStringKey("Top 3 harnesses") : LocalizedStringKey("Top 3 models"))
                 .font(.system(size: 18))
                 .foregroundStyle(CosmosPalette.ink2)
 
             if items.isEmpty {
-                Text("No usage in this period")
+                Text(data.isPartialScope && data.counts.total > 0 ? LocalizedStringKey("Breakdown unavailable") : LocalizedStringKey("No usage in this period"))
                     .font(.system(size: 18))
                     .foregroundStyle(CosmosPalette.ink3)
                     .padding(.top, 16)
@@ -1883,9 +2145,9 @@ struct CosmosShareCard: View {
 
                             Group {
                                 if data.isPartialScope {
-                                    Text("Share of scope \(Share.percent(item.counts.total, of: sceneSummary.total.total))")
+                                    Text("Share of scope \(Share.percent(item.counts.total, of: denominator))")
                                 } else {
-                                    Text("Share of period \(Share.percent(item.counts.total, of: sceneSummary.total.total))")
+                                    Text("Share of period \(Share.percent(item.counts.total, of: denominator))")
                                 }
                             }
                             .font(.system(size: 16, design: .monospaced))
@@ -1900,38 +2162,56 @@ struct CosmosShareCard: View {
     }
 
     private var composition: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let total = data.counts.total
+        return VStack(alignment: .leading, spacing: 0) {
             Text("Composition")
                 .font(.system(size: 18))
                 .foregroundStyle(CosmosPalette.ink2)
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(CosmosScene.categoryOrder) { category in
-                    let value = sceneSummary.total[category]
-                    HStack(spacing: 10) {
-                        Rectangle()
-                            .fill(Self.categoryColors[category] ?? CosmosPalette.ink3)
-                            .frame(width: 8, height: 8)
-                            .accessibilityHidden(true)
-                        Text(category.title)
-                            .font(.system(size: 16))
-                            .foregroundStyle(CosmosPalette.ink2)
-                            .lineLimit(1)
-                        Spacer(minLength: 8)
-                        Text(verbatim: TokenFormat.short(value))
-                            .font(.system(size: 16, design: .monospaced))
-                            .foregroundStyle(CosmosPalette.ink)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                        Text(verbatim: Share.percent(value, of: sceneSummary.total.total))
-                            .font(.system(size: 16, design: .monospaced))
-                            .foregroundStyle(CosmosPalette.ink3)
-                            .monospacedDigit()
-                            .frame(width: 58, alignment: .trailing)
-                    }
+                    let value = data.counts[category]
+                    compositionRow(
+                        color: Self.categoryColors[category] ?? CosmosPalette.ink3,
+                        title: category.title,
+                        value: value,
+                        total: total
+                    )
+                }
+                if data.counts.uncategorized > 0 {
+                    compositionRow(
+                        color: CosmosPalette.ink3,
+                        title: "Uncategorized",
+                        value: data.counts.uncategorized,
+                        total: total
+                    )
                 }
             }
             .padding(.top, 12)
+        }
+    }
+
+    private func compositionRow(color: Color, title: LocalizedStringKey, value: Int64, total: Int64) -> some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 16))
+                .foregroundStyle(CosmosPalette.ink2)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(verbatim: TokenFormat.short(value))
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(CosmosPalette.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+            Text(verbatim: Share.percent(value, of: total))
+                .font(.system(size: 16, design: .monospaced))
+                .foregroundStyle(CosmosPalette.ink3)
+                .monospacedDigit()
+                .frame(width: 58, alignment: .trailing)
         }
     }
 
@@ -2085,7 +2365,7 @@ struct ShareCardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.top, 34)
 
-            if showComposition, !activeCategoryParts.isEmpty {
+            if showComposition, !compositionParts.isEmpty {
                 lensCompositionStrip(compact: false)
                     .padding(.top, 22)
             }
@@ -2165,7 +2445,7 @@ struct ShareCardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(.top, 22)
 
-            if showComposition, !activeCategoryParts.isEmpty {
+            if showComposition, !compositionParts.isEmpty {
                 lensCompositionStrip(compact: true)
                     .padding(.top, 16)
             }
@@ -2231,7 +2511,7 @@ struct ShareCardView: View {
                     LensShareGraphic(snapshot: snapshot)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    if showComposition, !activeCategoryParts.isEmpty {
+                    if showComposition, !compositionParts.isEmpty {
                         lensCompositionStrip(compact: true)
                     }
                 }
@@ -2281,16 +2561,28 @@ struct ShareCardView: View {
         }
     }
 
-    private var activeCategoryParts: [(category: TokenCategory, tokens: Int64)] {
+    private struct CompositionPart: Identifiable {
+        let id: String
+        let label: LocalizedStringKey
+        let tokens: Int64
+        let color: Color
+    }
+
+    private var compositionParts: [CompositionPart] {
         TokenCategory.allCases.compactMap { category in
             let value = data.counts[category]
-            return value > 0 ? (category, value) : nil
-        }
+            return value > 0
+                ? CompositionPart(id: category.rawValue, label: category.title, tokens: value, color: Palette.color(for: category))
+                : nil
+        } + (data.counts.uncategorized > 0
+            ? [CompositionPart(id: "uncategorized", label: "Uncategorized", tokens: data.counts.uncategorized, color: Palette.ink3.opacity(0.45))]
+            : [])
     }
 
     private func lensCompositionStrip(compact: Bool) -> some View {
-        let total = max(1, data.counts.total)
-        let parts = activeCategoryParts
+        let total = data.counts.total
+        let divisor = max(1, total)
+        let parts = compositionParts
         let barHeight: CGFloat = compact ? 12 : 14
 
         return VStack(alignment: .leading, spacing: compact ? 10 : 12) {
@@ -2299,23 +2591,18 @@ struct ShareCardView: View {
                 let capsule = Path(roundedRect: fullRect, cornerRadius: barHeight * 0.5, style: .continuous)
                 context.fill(capsule, with: .color(Palette.barTrack))
 
-                let segments: [(color: Color, tokens: Int64)] = parts.map {
-                    (Palette.color(for: $0.category), $0.tokens)
-                } + (data.counts.uncategorized > 0
-                    ? [(Palette.ink3.opacity(0.45), data.counts.uncategorized)]
-                    : [])
-                guard !segments.isEmpty else { return }
+                guard !parts.isEmpty else { return }
 
                 context.drawLayer { layer in
                     layer.clip(to: capsule)
                     let gap: CGFloat = 2.5
-                    let totalGaps = CGFloat(max(0, segments.count - 1)) * gap
+                    let totalGaps = CGFloat(max(0, parts.count - 1)) * gap
                     let usable = max(0, size.width - totalGaps)
                     var cursorX: CGFloat = 0
 
-                    for (idx, seg) in segments.enumerated() {
-                        let rawW = usable * CGFloat(seg.tokens) / CGFloat(total)
-                        let w = idx == segments.count - 1
+                    for (idx, seg) in parts.enumerated() {
+                        let rawW = usable * CGFloat(seg.tokens) / CGFloat(divisor)
+                        let w = idx == parts.count - 1
                             ? max(2, size.width - cursorX)
                             : max(2, rawW)
                         let segRect = CGRect(x: cursorX, y: 0, width: w, height: size.height)
@@ -2330,15 +2617,15 @@ struct ShareCardView: View {
             .frame(height: barHeight)
             .accessibilityHidden(true)
 
-            HStack(spacing: compact ? 15 : 20) {
-                ForEach(parts, id: \.category) { part in
+            HStack(spacing: compact ? 12 : 18) {
+                ForEach(parts) { part in
                     HStack(spacing: 6) {
                         Circle()
-                            .fill(Palette.color(for: part.category))
+                            .fill(part.color)
                             .frame(width: compact ? 9.5 : 11, height: compact ? 9.5 : 11)
                             .accessibilityHidden(true)
 
-                        Text(part.category.title)
+                        Text(part.label)
                             .foregroundStyle(Palette.ink2)
 
                         Text(verbatim: Share.percent(part.tokens, of: total))
@@ -2498,6 +2785,7 @@ struct ShareCardView: View {
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .lineLimit(1)
+                .minimumScaleFactor(0.80)
         }
     }
 
@@ -2563,18 +2851,35 @@ struct ShareCardView: View {
         }
     }
 
+    @ViewBuilder
     private func costRow(amountSize: CGFloat, noteSize: CGFloat) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 14) {
-            Text(verbatim: TokenFormat.usd(data.estimatedUSD))
-                .font(.system(size: amountSize, weight: .semibold))
-                .foregroundStyle(Palette.ink1)
-                .monospacedDigit()
-
-            Text("estimate, not a bill")
-                .font(.system(size: noteSize, weight: .regular))
+        if data.unpricedTokens > 0, data.unpricedTokens >= data.counts.total {
+            Text("No prices for these models")
+                .font(.system(size: noteSize, weight: .semibold))
                 .foregroundStyle(Palette.ink2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.80)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text(verbatim: TokenFormat.usd(data.estimatedUSD))
+                    .font(.system(size: amountSize, weight: .semibold))
+                    .foregroundStyle(Palette.ink1)
+                    .monospacedDigit()
+
+                Text("estimate, not a bill")
+                    .font(.system(size: noteSize, weight: .regular))
+                    .foregroundStyle(Palette.ink2)
+
+                if data.unpricedTokens > 0 {
+                    Text("\(TokenFormat.short(data.unpricedTokens)) unpriced")
+                        .font(.system(size: noteSize - 4, weight: .medium))
+                        .foregroundStyle(Palette.ink3)
+                        .monospacedDigit()
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
         }
-        .lineLimit(1)
     }
 
     private var portraitSupportingFacts: some View {
@@ -2792,7 +3097,7 @@ struct ShareCardView: View {
 // MARK: - Brand App Icon Logo & Full-Card Tide Vessel Canvas
 
 @MainActor
-private struct ShareBrandLogo: View {
+struct ShareBrandLogo: View {
     let theme: AppTheme
     let size: CGFloat
 

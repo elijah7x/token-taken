@@ -40,14 +40,15 @@ run() {
 }
 
 # The CLI opens the store read-only, so the script owns store creation. Schema matches
-# TokenTakenKit/SQLiteUsageStore.swift, including the final health columns and user_version 2.
+# TokenTakenKit/SQLiteUsageStore.swift (user_version 6).
 create_store() {
     if [ -f "$database" ]; then
         return 0
     fi
     "$sqlite" "$database" <<'SQL'
 CREATE TABLE IF NOT EXISTS devices (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'mac'
 );
 CREATE TABLE IF NOT EXISTS health (
     source_id TEXT PRIMARY KEY, last_attempt REAL, last_success REAL,
@@ -59,7 +60,7 @@ CREATE TABLE IF NOT EXISTS daily_usage (
     raw_model_id TEXT NOT NULL, day TEXT NOT NULL, time_zone TEXT NOT NULL,
     input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
     output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
-    event_count INTEGER NOT NULL,
+    event_count INTEGER NOT NULL, cache_write_1h INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (device_id, source_id, model_id, day)
 );
 CREATE TABLE IF NOT EXISTS hourly_usage (
@@ -69,7 +70,12 @@ CREATE TABLE IF NOT EXISTS hourly_usage (
     event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
     PRIMARY KEY (device_id, source_id, hour_start)
 );
-PRAGMA user_version = 2;
+CREATE TABLE IF NOT EXISTS history_epochs (
+    device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+    time_zone TEXT,
+    PRIMARY KEY (device_id, source_id)
+);
+PRAGMA user_version = 6;
 SQL
 }
 
@@ -126,8 +132,8 @@ fi
 # (d) Seed two models for today and check summary, models, and CSV against the seeded sums.
 "$sqlite" "$database" <<SQL
 INSERT INTO daily_usage VALUES
-    ('smoke-device', 'claude', 'smoke-model-a', 'smoke-model-a', '$today', '$zone', 100, 20, 10, 5, 3, 1, 4),
-    ('smoke-device', 'codex', 'smoke-model-b', 'smoke-model-b', '$today', '$zone', 7, 0, 0, 2, 0, 0, 1);
+    ('smoke-device', 'claude', 'smoke-model-a', 'smoke-model-a', '$today', '$zone', 100, 20, 10, 5, 3, 1, 4, 0),
+    ('smoke-device', 'codex', 'smoke-model-b', 'smoke-model-b', '$today', '$zone', 7, 0, 0, 2, 0, 0, 1, 0);
 SQL
 
 run "$outputs/summary.json" "$outputs/summary.err" "$bin" summary --json --period week --local-only --tz "$zone"
@@ -179,7 +185,7 @@ assert b"\r\n" in raw, "CSV must use CRLF line endings"
 with open(path, newline="", encoding="utf-8") as handle:
     rows = list(csv.reader(handle))
 header = ("day,timeZoneID,deviceID,sourceID,modelID,rawModelID,input,cacheRead,"
-          "cacheWrite,output,reasoning,uncategorized,total,eventCount").split(",")
+          "cacheWrite,output,reasoning,uncategorized,total,eventCount,cacheWrite1h").split(",")
 assert rows[0] == header, rows[0]
 assert len(rows) == 3, len(rows)
 totals = {row[4]: int(row[12]) for row in rows[1:]}
@@ -235,7 +241,7 @@ fi
 # Seed local device metadata and fresh source health for sources/devices checks.
 now_epoch=$(date +%s)
 "$sqlite" "$database" <<SQL
-INSERT INTO devices VALUES ('smoke-device', 'Smoke Mac', $now_epoch.0);
+INSERT INTO devices VALUES ('smoke-device', 'Smoke Mac', $now_epoch.0, 'mac');
 INSERT INTO health VALUES ('claude', $now_epoch.0, $now_epoch.0, 1, NULL, 0, 'ok');
 SQL
 
@@ -346,7 +352,7 @@ fi
 # Seed an earlier row on a second device so custom date ranges and device filters exclude real data.
 "$sqlite" "$database" <<SQL
 INSERT INTO daily_usage VALUES
-    ('smoke-device-2', 'codex', 'smoke-model-b', 'smoke-model-b', '2025-06-15', '$zone', 30, 0, 0, 5, 0, 0, 2);
+    ('smoke-device-2', 'codex', 'smoke-model-b', 'smoke-model-b', '2025-06-15', '$zone', 30, 0, 0, 5, 0, 0, 2, 0);
 SQL
 
 # (l) --since/--until bounds custom ranges and clears the named period.

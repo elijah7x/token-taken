@@ -76,7 +76,7 @@ final class AccountDeviceStoreTests: XCTestCase {
 
         XCTAssertEqual(store.devices, [Device(id: "device-a", name: "Test Mac", kind: .mac)])
         XCTAssertEqual(try store.records().map(\.day), ["2026-11-02"])
-        XCTAssertEqual(try userVersion(), 5)
+        XCTAssertEqual(try userVersion(), 6)
     }
 
     func testAccountDeviceRoundTripsItsKind() throws {

@@ -456,4 +456,78 @@ final class ZcodeCollectorTests: XCTestCase {
         XCTAssertNil(batch.daily.first { $0.modelID == "glm-after" })
         XCTAssertEqual(batch.skippedRecords, 3)
     }
+
+    func testLegacyInvalidJSONRowIsSkippedWithoutFailing() async throws {
+        let url = try makeDatabase()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        let beforeBoundary = milliseconds("2026-01-03T00:00:00Z") - 1_000
+        try execute(db, """
+            INSERT INTO message (session_id, time_created, time_updated, data)
+            VALUES ('session-bad-json', \(beforeBoundary), \(beforeBoundary), '{not-valid-json');
+            """)
+        sqlite3_close(db)
+
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        let batch = try await collector.collect()
+
+        XCTAssertEqual(batch.daily.count, 3)
+        XCTAssertEqual(batch.skippedRecords, 1)
+    }
+
+    func testISOStartedAtInNativeTableIsSkipped() async throws {
+        let url = try makeDatabase()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        try execute(db, """
+            INSERT INTO model_usage VALUES (
+                'completed', '2026-01-03T00:00:00Z', 'glm-iso', 'zai', 10, 5, 0, 0, 0
+            );
+            """)
+        sqlite3_close(db)
+
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!
+        )
+        let batch = try await collector.collect()
+
+        XCTAssertEqual(batch.daily.count, 3)
+        XCTAssertNil(batch.daily.first { $0.modelID == "glm-iso" })
+        XCTAssertNil(batch.daily.first { $0.day == "1970-01-01" })
+        XCTAssertEqual(batch.skippedRecords, 1)
+    }
+
+    func testFutureTimestampIsSkipped() async throws {
+        let url = try makeDatabase()
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &handle), SQLITE_OK)
+        let db = try XCTUnwrap(handle)
+        let future = milliseconds("2026-01-05T00:00:00Z")
+        try execute(db, """
+            INSERT INTO model_usage VALUES (
+                'completed', \(future), 'glm-future', 'zai', 10, 5, 0, 0, 0
+            );
+            """)
+        sqlite3_close(db)
+
+        let now = ISO8601DateFormatter().date(from: "2026-01-03T02:00:00Z")!
+        let collector = ZcodeCollector(
+            databaseURL: url,
+            deviceID: "device-a",
+            timeZone: TimeZone(identifier: "UTC")!,
+            now: now
+        )
+        let batch = try await collector.collect()
+
+        XCTAssertNil(batch.daily.first { $0.modelID == "glm-future" })
+        XCTAssertEqual(batch.skippedRecords, 1)
+    }
 }

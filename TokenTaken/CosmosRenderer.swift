@@ -256,13 +256,14 @@ final class CosmosRenderer {
         }
         guard let provider = CGDataProvider(data: bytes as CFData) else { return nil }
         let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         return CGImage(
             width: width,
             height: height,
             bitsPerComponent: 8,
             bitsPerPixel: 32,
             bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: colorSpace,
             bitmapInfo: bitmapInfo,
             provider: provider,
             decode: nil,

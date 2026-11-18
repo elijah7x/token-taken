@@ -19,7 +19,7 @@ struct EmptyStateView: View {
                 .foregroundStyle(Palette.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if model.state != .decodeFailed {
+            if model.state == .noReport || model.state == .iCloudUnavailable {
                 Text("Open Token Taken on your Mac, go to Settings, and turn on Sync to iPhone. Your Mac and this iPhone must use the same Apple ID.")
                     .font(.callout)
                     .foregroundStyle(Palette.ink2)
@@ -52,6 +52,8 @@ struct EmptyStateView: View {
 
     private var symbol: String {
         switch model.state {
+        case .downloading: "icloud.and.arrow.down"
+        case .unsupportedVersion: "arrow.down.circle"
         case .decodeFailed: "exclamationmark.triangle"
         case .iCloudUnavailable: "icloud.slash"
         default: "icloud"
@@ -60,6 +62,8 @@ struct EmptyStateView: View {
 
     private var title: LocalizedStringKey {
         switch model.state {
+        case .downloading: "Downloading report"
+        case .unsupportedVersion: "Update Token Taken"
         case .decodeFailed: "Couldn't read the report"
         case .iCloudUnavailable: "iCloud is unavailable"
         default: "No report yet"
@@ -68,6 +72,10 @@ struct EmptyStateView: View {
 
     private var message: LocalizedStringKey {
         switch model.state {
+        case .downloading:
+            "Waiting for iCloud to finish downloading your report. Try again in a moment."
+        case .unsupportedVersion:
+            "The report in iCloud uses a newer format than this version of the app supports."
         case .decodeFailed:
             "The report file couldn't be decoded. Try again, or open Token Taken on your Mac."
         case .iCloudUnavailable:

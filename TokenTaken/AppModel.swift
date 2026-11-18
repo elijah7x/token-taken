@@ -70,7 +70,11 @@ final class AppModel {
     }
 
     var dataIssues: DataIssues {
-        let health = refreshCoordinator?.health.map { $0.markingStale() } ?? []
+        dataIssues(now: .now)
+    }
+
+    func dataIssues(now: Date) -> DataIssues {
+        let health = refreshCoordinator?.health.map { $0.markingStale(now: now) } ?? []
         var failed = 0
         var unavailable = 0
         var stale = 0
@@ -85,8 +89,8 @@ final class AppModel {
         var unavailableDevices = 0
         var partialDevices = 0
         var staleDevices = 0
-        for remote in remoteDevices where remote.state != .ok && deviceKind(for: remote.deviceID) == .mac {
-            switch remote.state {
+        for remote in remoteDevices where deviceKind(for: remote.deviceID) == .mac {
+            switch remote.effectiveState(now: now) {
             case .unavailable: unavailableDevices += 1
             case .partial: partialDevices += 1
             case .stale: staleDevices += 1
@@ -106,6 +110,12 @@ final class AppModel {
             isPartial: failed + unavailable + stale + devices > 0 || skipped > 0 || storageError != nil || readError != nil
                 || (settings?.syncEnabled == true && (refreshCoordinator?.syncFailed == true || refreshCoordinator?.iCloudAvailable == false))
         )
+    }
+
+    var hasEngineIssue: Bool {
+        guard let refreshCoordinator else { return false }
+        if case .found = refreshCoordinator.engineStatus { return false }
+        return true
     }
 
     /// Computed when data loads, never from a view body: checking the store reads every record.
@@ -129,10 +139,10 @@ final class AppModel {
         case .invalidOverride:
             return "Invalid engine override"
         }
-        if let lastRefresh = refreshCoordinator.lastRefresh {
+        if let lastScan = refreshCoordinator.lastCompletedScan ?? refreshCoordinator.lastRefresh {
             // Collection finishes a moment after the view samples `.now`; never phrase it as future time.
-            if Date.now.timeIntervalSince(lastRefresh) < 60 { return "Updated · just now" }
-            let relative = Self.relativeFormatter.localizedString(for: lastRefresh, relativeTo: .now)
+            if Date.now.timeIntervalSince(lastScan) < 60 { return "Updated · just now" }
+            let relative = Self.relativeFormatter.localizedString(for: lastScan, relativeTo: .now)
             return "Updated · \(relative)"
         }
         return "Not updated yet"
@@ -274,4 +284,19 @@ private struct EmptyUsageStore: UsageStore {
     let devices: [Device] = []
     func records() -> [UsageRecord] { [] }
     func hourly() -> [HourlyUsage] { [] }
+}
+
+extension RemoteDeviceStatus {
+    static let staleInterval: TimeInterval = 24 * 60 * 60
+
+    func effectiveState(now: Date = .now) -> State {
+        if state == .ok, lastWrite.map({ now.timeIntervalSince($0) > Self.staleInterval }) == true {
+            return .stale
+        }
+        return state
+    }
+
+    func isStaleOrIncomplete(now: Date = .now) -> Bool {
+        effectiveState(now: now) != .ok
+    }
 }

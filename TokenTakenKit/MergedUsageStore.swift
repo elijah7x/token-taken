@@ -11,9 +11,19 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
         self.remote = remote.filter { seen.insert($0.device.id).inserted }
     }
 
+    private var hasAccountDevices: Bool {
+        local.devices.contains { $0.kind == .account }
+            || remote.contains { $0.status.state != .unavailable && !$0.accounts.isEmpty }
+    }
+
     public func records() throws -> [UsageRecord] {
         let localRows = try local.records()
-        let accounts = try resolvedAccounts(localRows: localRows, localHours: local.hourly())
+        let accounts: [AccountCandidate]
+        if hasAccountDevices || localRows.contains(where: { AccountDeviceID.isAccount($0.deviceID) }) {
+            accounts = try resolvedAccounts(localRows: localRows, localHours: local.hourly())
+        } else {
+            accounts = []
+        }
         let accountIDs = Set(accounts.map(\.deviceID))
         var rows = localRows.filter { !accountIDs.contains($0.deviceID) }
         rows += accounts.flatMap(\.daily)
@@ -25,7 +35,12 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
 
     public func hourly() throws -> [HourlyUsage] {
         let localHours = try local.hourly()
-        let accounts = try resolvedAccounts(localRows: local.records(), localHours: localHours)
+        let accounts: [AccountCandidate]
+        if hasAccountDevices || localHours.contains(where: { AccountDeviceID.isAccount($0.deviceID) }) {
+            accounts = try resolvedAccounts(localRows: local.records(), localHours: localHours)
+        } else {
+            accounts = []
+        }
         let accountIDs = Set(accounts.map(\.deviceID))
         var rows = localHours.filter { !accountIDs.contains($0.deviceID) }
         rows += accounts.flatMap(\.hourly)
@@ -72,8 +87,8 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
         guard !accountIDs.isEmpty else { return [] }
 
         let health: [SourceHealth]
-        if let store = local as? SQLiteUsageStore, let values = try? store.health() {
-            health = values
+        if let store = local as? SQLiteUsageStore {
+            health = try store.health()
         } else {
             health = []
         }

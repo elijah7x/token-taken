@@ -70,10 +70,11 @@ public struct MiniMaxCodeCollector: UsageCollector {
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
+        let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
         var aggregator = Aggregator(
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, cutoff: currentHour.addingTimeInterval(-47 * 3_600)
+            currentHour: currentHour, cutoff: currentHour.addingTimeInterval(-47 * 3_600),
+            maxDate: now.addingTimeInterval(86_400)
         )
 
         for file in files {
@@ -83,7 +84,8 @@ public struct MiniMaxCodeCollector: UsageCollector {
             } catch {
                 throw CollectorError.open("Could not read a MiniMax Code session file")
             }
-            for line in data.split(separator: 0x0A) {
+            let payload = data.starts(with: [0xEF, 0xBB, 0xBF]) ? data.dropFirst(3) : data[...]
+            for line in payload.split(separator: 0x0A) {
                 let trimmed = line.drop { $0 == 0x20 || $0 == 0x0D || $0 == 0x09 }
                 guard !trimmed.isEmpty else { continue }
                 let record = trimmed.first == 0x7B
@@ -166,6 +168,7 @@ public struct MiniMaxCodeCollector: UsageCollector {
         let calendar: Calendar
         let currentHour: Date
         let cutoff: Date
+        let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
         var hourly: [Date: HourlyUsage] = [:]
@@ -181,16 +184,33 @@ public struct MiniMaxCodeCollector: UsageCollector {
                   message.role == "assistant",
                   let usage = message.usage else { return }
             // A usage object with no counter at all (for example only the always-zero `cost`) has
-            // nothing to count; one with some but not all valid counters is malformed.
+            // nothing to count; `input` and `output` are required while missing `cacheRead`/`cacheWrite`
+            // default to zero, and any present counter with a malformed value skips the record.
             let counters = [usage.input, usage.cacheRead, usage.cacheWrite, usage.output]
             guard counters.contains(where: { $0 != nil }) else { return }
-            guard let input = usage.input?.value, let cacheRead = usage.cacheRead?.value,
-                  let cacheWrite = usage.cacheWrite?.value, let output = usage.output?.value else {
+            guard let input = usage.input?.value,
+                  let output = usage.output?.value else {
                 skipped += 1
                 return
             }
-            guard input + cacheRead + cacheWrite + output > 0 else { return }
+            if let cacheRead = usage.cacheRead, cacheRead.value == nil {
+                skipped += 1
+                return
+            }
+            if let cacheWrite = usage.cacheWrite, cacheWrite.value == nil {
+                skipped += 1
+                return
+            }
+            let cacheRead = usage.cacheRead?.value ?? 0
+            let cacheWrite = usage.cacheWrite?.value ?? 0
+            guard input > 0 || cacheRead > 0 || cacheWrite > 0 || output > 0 else { return }
             guard let timestamp = message.timestamp?.value, timestamp > 0 else {
+                skipped += 1
+                return
+            }
+            let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
+            guard date <= maxDate,
+                  let hour = calendar.dateInterval(of: .hour, for: date)?.start else {
                 skipped += 1
                 return
             }
@@ -202,7 +222,6 @@ public struct MiniMaxCodeCollector: UsageCollector {
             let rawModelID = (message.model ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let model = rawModelID.isEmpty ? "unknown" : rawModelID.lowercased()
             let counts = TokenCounts(input: input, cacheRead: cacheRead, cacheWrite: cacheWrite, output: output)
-            let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
 
             let day = UsageDay.string(from: date, in: timeZone)
             let dailyKey = Key(day: day, modelID: model)
@@ -215,7 +234,6 @@ public struct MiniMaxCodeCollector: UsageCollector {
             row.eventCount += 1
             daily[dailyKey] = row
 
-            let hour = calendar.dateInterval(of: .hour, for: date)!.start
             guard hour >= cutoff, hour <= currentHour else { return }
             var hourRow = hourly[hour] ?? HourlyUsage(
                 hourStart: hour, deviceID: deviceID, sourceID: "mcode",

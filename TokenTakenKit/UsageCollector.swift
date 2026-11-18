@@ -50,6 +50,7 @@ public protocol UsageCollector: Sendable {
 
 public enum CollectorError: LocalizedError, Sendable {
     case sourceUnavailable
+    case engineUnavailable(String)
     case process(String)
     case invalidOutput(String)
     case open(String)
@@ -58,7 +59,7 @@ public enum CollectorError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .sourceUnavailable: "Source data is unavailable"
-        case .process(let message), .invalidOutput(let message), .open(let message), .sql(let message):
+        case .engineUnavailable(let message), .process(let message), .invalidOutput(let message), .open(let message), .sql(let message):
             CollectionRunner.sanitizeErrorMessage(message)
         }
     }

@@ -4,10 +4,14 @@
 import argparse
 import hashlib
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+DOTTED_NUMERIC_RE = re.compile(r"\A[0-9]+(?:\.[0-9]+)*\Z")
 
 
 def parse_args(argv):
@@ -69,12 +73,17 @@ def main(argv):
     version = args.version.strip()
     build = args.build.strip()
     minimum_system_version = args.minimum_system_version.strip()
-    if not version or not build or not minimum_system_version:
-        print(
-            "error: --version, --build, and --minimum-system-version must be non-empty",
-            file=sys.stderr,
-        )
-        return 2
+    for flag, value in (
+        ("--version", version),
+        ("--build", build),
+        ("--minimum-system-version", minimum_system_version),
+    ):
+        if not DOTTED_NUMERIC_RE.fullmatch(value):
+            print(
+                "error: %s must be dotted numeric (e.g. 1.2.3): %s" % (flag, value),
+                file=sys.stderr,
+            )
+            return 2
 
     notes = ""
     if args.notes_file is not None:

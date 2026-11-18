@@ -267,43 +267,83 @@ struct LensShareGraphic: View {
 
         let leftPad: CGFloat = 20
         let rightPad: CGFloat = 20
-        let topPad: CGFloat = 42
         let bottomPad: CGFloat = 28
-        let desiredPlotW = max(60, logicalSize.width - leftPad - rightPad)
-        let desiredPlotH = max(40, logicalSize.height - topPad - bottomPad)
 
-        // Reuse LensBarLayout's exact stacking, color ranking, ceiling, and X-tick selection while omitting
-        // its left Y-axis gutter so bars span symmetrically across the full stage width.
-        let internalLeft: CGFloat = 46
-        let internalRight: CGFloat = LensBarLayout.bevelWidth + 4
-        let internalTop: CGFloat = 22
-        let internalBottom: CGFloat = 24
-        let layoutInputSize = CGSize(
-            width: desiredPlotW + internalLeft + internalRight,
-            height: desiredPlotH + internalTop + internalBottom
-        )
-        let layout = LensBarLayout(
-            buckets: snapshot.buckets,
-            dimension: snapshot.dimension,
-            period: snapshot.period,
-            size: layoutInputSize,
-            sourceOrder: snapshot.sourceOrder,
-            modelOrder: snapshot.modelOrder
-        )
+        func makePass(topPad: CGFloat) -> (
+            layout: LensBarLayout,
+            plotRect: CGRect,
+            shiftX: CGFloat,
+            lensMetrics: ResolvedLensGeometry?
+        ) {
+            let desiredPlotW = max(60, logicalSize.width - leftPad - rightPad)
+            let desiredPlotH = max(40, logicalSize.height - topPad - bottomPad)
 
-        let shiftX = leftPad - layout.plotRect.minX
-        let shiftY = topPad - layout.plotRect.minY
-        let plotRect = layout.plotRect.offsetBy(dx: shiftX, dy: shiftY)
-
-        let lensMetrics = snapshot.frozenRange.flatMap { range in
-            resolveLensGeometry(
-                for: range,
-                layout: layout,
-                shiftX: shiftX,
-                plotRect: plotRect,
-                stageRect: stageRect
+            // Reuse LensBarLayout's exact stacking, color ranking, ceiling, and X-tick selection while omitting
+            // its left Y-axis gutter so bars span symmetrically across the full stage width.
+            let internalLeft: CGFloat = 46
+            let internalRight: CGFloat = LensBarLayout.bevelWidth + 4
+            let internalTop: CGFloat = 22
+            let internalBottom: CGFloat = 24
+            let layoutInputSize = CGSize(
+                width: desiredPlotW + internalLeft + internalRight,
+                height: desiredPlotH + internalTop + internalBottom
             )
+            let layout = LensBarLayout(
+                buckets: snapshot.buckets,
+                dimension: snapshot.dimension,
+                period: snapshot.period,
+                size: layoutInputSize,
+                sourceOrder: snapshot.sourceOrder,
+                modelOrder: snapshot.modelOrder
+            )
+
+            let shiftX = leftPad - layout.plotRect.minX
+            let shiftY = topPad - layout.plotRect.minY
+            let plotRect = layout.plotRect.offsetBy(dx: shiftX, dy: shiftY)
+
+            let lensMetrics = snapshot.frozenRange.flatMap { range in
+                resolveLensGeometry(
+                    for: range,
+                    layout: layout,
+                    shiftX: shiftX,
+                    plotRect: plotRect,
+                    stageRect: stageRect
+                )
+            }
+            return (layout, plotRect, shiftX, lensMetrics)
         }
+
+        var pass = makePass(topPad: 42)
+        var degradedBadge: DegradedBadgeLayout?
+        var minPillTop = stageRect.minY + 5
+
+        if !pass.layout.isEmpty && pass.layout.isDayModelDegraded {
+            let badge = resolveDegradedBadge(
+                in: context,
+                stageRect: stageRect,
+                lensCenterX: pass.lensMetrics?.rect.midX
+            )
+            degradedBadge = badge
+            if let metrics = pass.lensMetrics, let range = snapshot.frozenRange, snapshot.frozenTotal > 0 {
+                let candidatePill = resolveSumPill(
+                    in: context,
+                    total: snapshot.frozenTotal,
+                    isRange: range.count >= 2,
+                    lensRect: metrics.rect,
+                    stageRect: stageRect,
+                    minTop: minPillTop
+                )
+                if badge.rect.insetBy(dx: -6, dy: -2).intersects(candidatePill.rect) {
+                    minPillTop = badge.rect.maxY + 4
+                    pass = makePass(topPad: 62)
+                }
+            }
+        }
+
+        let layout = pass.layout
+        let plotRect = pass.plotRect
+        let shiftX = pass.shiftX
+        let lensMetrics = pass.lensMetrics
         let showLens = lensMetrics != nil && !layout.isEmpty
 
         drawBasePass(
@@ -329,6 +369,7 @@ struct LensShareGraphic: View {
                 range: range,
                 lensRect: metrics.rect,
                 lensCornerRadius: metrics.cornerRadius,
+                minPillTop: minPillTop,
                 isDark: isDark,
                 increased: increased
             )
@@ -342,11 +383,10 @@ struct LensShareGraphic: View {
                     .foregroundStyle(Palette.ink3)
             )
             context.draw(resolved, at: CGPoint(x: plotRect.midX, y: plotRect.midY), anchor: .center)
-        } else if layout.isDayModelDegraded {
+        } else if let degradedBadge {
             drawDegradedNotice(
                 in: &context,
-                stageRect: stageRect,
-                lensCenterX: lensMetrics?.rect.midX,
+                badge: degradedBadge,
                 isDark: isDark
             )
         }
@@ -541,6 +581,7 @@ struct LensShareGraphic: View {
         range: ClosedRange<Int>,
         lensRect: CGRect,
         lensCornerRadius: CGFloat,
+        minPillTop: CGFloat,
         isDark: Bool,
         increased: Bool
     ) {
@@ -742,25 +783,36 @@ struct LensShareGraphic: View {
 
         // 4. Single total capsule centered above the frozen lens.
         if snapshot.frozenTotal > 0 {
-            drawSumPill(
-                in: &context,
+            let pill = resolveSumPill(
+                in: context,
                 total: snapshot.frozenTotal,
                 isRange: isRange,
                 lensRect: lensRect,
                 stageRect: stageRect,
-                isDark: isDark
+                minTop: minPillTop
             )
+            drawSumPill(in: &context, pill: pill, isDark: isDark)
         }
     }
 
-    private func drawSumPill(
-        in context: inout GraphicsContext,
+    private struct SumPillLayout {
+        let rect: CGRect
+        let text: GraphicsContext.ResolvedText
+    }
+
+    private struct DegradedBadgeLayout {
+        let rect: CGRect
+        let text: GraphicsContext.ResolvedText
+    }
+
+    private func resolveSumPill(
+        in context: GraphicsContext,
         total: Int64,
         isRange: Bool,
         lensRect: CGRect,
         stageRect: CGRect,
-        isDark: Bool
-    ) {
+        minTop: CGFloat
+    ) -> SumPillLayout {
         let formatted = TokenFormat.short(total)
         let pillString = isRange && lensRect.width >= 88
             ? String(localized: "Total \(formatted)", locale: locale)
@@ -777,9 +829,18 @@ struct LensShareGraphic: View {
         let minCx = stageRect.minX + pillW * 0.5 + 8
         let maxCx = stageRect.maxX - pillW * 0.5 - 8
         let clampedX = minCx <= maxCx ? min(max(lensRect.midX, minCx), maxCx) : stageRect.midX
-        let pillTop = max(stageRect.minY + 5, lensRect.minY - pillH - 6)
+        let pillTop = max(minTop, lensRect.minY - pillH - 6)
         let pillRect = CGRect(x: clampedX - pillW * 0.5, y: pillTop, width: pillW, height: pillH)
-        let pillPath = Path(roundedRect: pillRect, cornerRadius: pillH * 0.5, style: .continuous)
+        return SumPillLayout(rect: pillRect, text: resolved)
+    }
+
+    private func drawSumPill(
+        in context: inout GraphicsContext,
+        pill: SumPillLayout,
+        isDark: Bool
+    ) {
+        let pillRect = pill.rect
+        let pillPath = Path(roundedRect: pillRect, cornerRadius: pillRect.height * 0.5, style: .continuous)
 
         if reduceTransparency {
             context.fill(pillPath, with: .color(Palette.cardSurface))
@@ -806,15 +867,14 @@ struct LensShareGraphic: View {
             )
         }
 
-        context.draw(resolved, at: CGPoint(x: clampedX, y: pillRect.midY), anchor: .center)
+        context.draw(pill.text, at: CGPoint(x: pillRect.midX, y: pillRect.midY), anchor: .center)
     }
 
-    private func drawDegradedNotice(
-        in context: inout GraphicsContext,
+    private func resolveDegradedBadge(
+        in context: GraphicsContext,
         stageRect: CGRect,
-        lensCenterX: CGFloat?,
-        isDark: Bool
-    ) {
+        lensCenterX: CGFloat?
+    ) -> DegradedBadgeLayout {
         let notice = String(localized: "Hourly collection has no model breakdown", locale: locale)
         let resolved = context.resolve(
             Text(verbatim: notice)
@@ -829,7 +889,16 @@ struct LensShareGraphic: View {
             ? max(stageRect.minX + 10, stageRect.maxX - badgeW - 10)
             : (stageRect.minX + 10)
         let badgeRect = CGRect(x: badgeX, y: stageRect.minY + 7, width: badgeW, height: badgeH)
-        let badgePath = Path(roundedRect: badgeRect, cornerRadius: badgeH * 0.5, style: .continuous)
+        return DegradedBadgeLayout(rect: badgeRect, text: resolved)
+    }
+
+    private func drawDegradedNotice(
+        in context: inout GraphicsContext,
+        badge: DegradedBadgeLayout,
+        isDark: Bool
+    ) {
+        let badgeRect = badge.rect
+        let badgePath = Path(roundedRect: badgeRect, cornerRadius: badgeRect.height * 0.5, style: .continuous)
 
         context.fill(
             badgePath,
@@ -838,7 +907,7 @@ struct LensShareGraphic: View {
                 : (isDark ? Color(hex: "#182130").opacity(0.86) : Color.white.opacity(0.84)))
         )
         context.stroke(badgePath, with: .color(Palette.hairline), lineWidth: 0.7)
-        context.draw(resolved, at: CGPoint(x: badgeRect.midX, y: badgeRect.midY), anchor: .center)
+        context.draw(badge.text, at: CGPoint(x: badgeRect.midX, y: badgeRect.midY), anchor: .center)
     }
 
     // MARK: - Bar & Hatched Gap Primitives

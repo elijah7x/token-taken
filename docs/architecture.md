@@ -52,7 +52,7 @@ The engine interface is selected by [ADR-0003](decisions/0003-usage-engine.md), 
 ### Store
 
 - Owns the local database under `~/Library/Application Support/Token Taken/`.
-- SQLite schema version 5 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices (with their `mac` or `account` kind), history epochs, and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
+- SQLite schema version 6 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices (with their `mac` or `account` kind), history epochs (with last applied collection time zone), and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
 - Rebuilds usage-cache tables when migrating an older version, retaining devices and health metadata and marking health stale. Rejects newer unknown schemas. The CLI opens read-only and asks the app to migrate an old cache.
 - Merges one source/device's daily history and replaces its 48-hour hourly snapshot in a single transaction. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()` and `hourly()` throw on failed reads.
 - Preserves cached rows and last success on failed/unavailable collection. Source health tracks skipped records and `ok`, `unavailable`, `failed`, `stale`, and `notInstalled` states; health read/write errors remain visible through throwing reads and runner results.

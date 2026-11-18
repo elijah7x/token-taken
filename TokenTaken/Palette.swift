@@ -293,6 +293,9 @@ enum Palette {
             (["antigravity", "antigravity-cli", "antigravity-extension"], "#A35CC0", "#BD78D9"),
             (["dsh"], "#8F9A3A", "#ABB656"),
             (["fx"], "#C0505A", "#DB6C75"),
+            (["mcode", "minimax-code"], "#B86B94", "#D586B0"),
+            (["deepseek-cli", "deepseek"], "#4B7CA3", "#6A9BC2"),
+            (["cursor"], "#5E6B7B", "#8594A6"),
         ]
         var out: [String: Color] = [:]
         for hue in hues {
@@ -377,21 +380,33 @@ struct SourceMonogramBadge: View {
 
     static func monogram(for id: String, name: String) -> String {
         switch id.lowercased() {
-        case "claude", "claude-code": "CC"
-        case "codex": "CX"
-        case "zcode": "ZC"
-        case "omp", "oh-my-pi": "OM"
-        case "pi": "PI"
-        case "kimi", "kimi-code": "KM"
-        case "grok": "GK"
-        case "opencode": "OC"
-        case "gemini", "gemini-cli": "GM"
-        case "factory", "droid": "FD"
-        case "devin", "devin-cli", "devin-desktop": "DV"
-        case "antigravity", "antigravity-cli", "antigravity-extension": "AG"
-        case "dsh": "DS"
-        case "fx": "FX"
-        default: String(name.prefix(2)).uppercased()
+        case "claude", "claude-code": return "CC"
+        case "codex": return "CX"
+        case "zcode": return "ZC"
+        case "omp", "oh-my-pi": return "OM"
+        case "pi": return "PI"
+        case "kimi", "kimi-code": return "KM"
+        case "grok": return "GK"
+        case "opencode": return "OC"
+        case "gemini", "gemini-cli": return "GM"
+        case "factory", "droid": return "FD"
+        case "devin", "devin-cli", "devin-desktop": return "DV"
+        case "antigravity", "antigravity-cli", "antigravity-extension": return "AG"
+        case "dsh": return "DS"
+        case "fx": return "FX"
+        case "mcode", "minimax-code": return "MC"
+        case "deepseek-cli", "deepseek": return "DC"
+        case "cursor": return "CR"
+        default:
+            let words = name
+                .split { !$0.isLetter && !$0.isNumber }
+                .filter { !$0.isEmpty }
+            if words.count >= 2, let first = words[0].first, let second = words[1].first {
+                return "\(first)\(second)".uppercased()
+            }
+            let chars = name.filter { $0.isLetter || $0.isNumber }
+            let prefix = String(chars.prefix(2)).uppercased()
+            return prefix.isEmpty ? "••" : prefix
         }
     }
 }
@@ -817,12 +832,13 @@ extension Period {
 enum Share {
     /// One decimal, as in the reference (`12.3%`). Zero total renders `0.0%`;
     /// a non-zero part that would round to `0.0%` renders `<0.1%`.
-    static func percent(_ part: Int64, of total: Int64) -> String {
+    static func percent(_ part: Int64, of total: Int64, locale: Locale = .current) -> String {
         let ratio = total > 0 ? Double(part) / Double(total) : 0
-        let text = ratio.formatted(.percent.precision(.fractionLength(1)))
+        let format = FloatingPointFormatStyle<Double>.Percent.percent.precision(.fractionLength(1)).locale(locale)
+        let text = ratio.formatted(format)
         // Compare against the formatted zero so ties that round down (e.g. exactly 0.05%) are caught too.
-        if part > 0, text == 0.0.formatted(.percent.precision(.fractionLength(1))) {
-            return "<" + 0.001.formatted(.percent.precision(.fractionLength(1)))
+        if part > 0, text == 0.0.formatted(format) {
+            return "<" + 0.001.formatted(format)
         }
         return text
     }

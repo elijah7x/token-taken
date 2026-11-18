@@ -6,17 +6,7 @@ enum CLI {
     static let version = "0.1.0"
     static let schemaVersion = 1
 
-    static let usage = """
-        Usage:
-          token-taken summary  [options]
-          token-taken sources  [options]
-          token-taken models   [options]
-          token-taken devices  [options]
-          token-taken export   [--format json|csv] [--output FILE] [options]
-          token-taken --version
-          token-taken --schema [VERSION]
-
-        Options:
+    static let commonOptionsUsage = """
           --period day|week|month|year|all  Named range ending today (default: month)
           --since YYYY-MM-DD          Inclusive local start date; overrides --period
           --until YYYY-MM-DD          Inclusive local end date; overrides --period
@@ -28,6 +18,22 @@ enum CLI {
           --synthetic                 Read the bundled fixture instead of the store
           --local-only                Skip synced devices from iCloud Drive
           --schema [VERSION]          Print JSON schema version or select VERSION
+          -h, --help                  Show help
+        """
+
+    static let usage = """
+        Usage:
+          token-taken summary  [options]
+          token-taken sources  [options]
+          token-taken models   [options]
+          token-taken devices  [options]
+          token-taken export   [--format json|csv] [--output FILE] [options]
+          token-taken --version
+          token-taken --schema [VERSION]
+          token-taken --help
+
+        Options:
+        \(commonOptionsUsage)
           --format json|csv           Export format; csv overrides --json (export only)
           --output FILE               Write export to FILE instead of stdout (export only)
         """
@@ -35,6 +41,53 @@ enum CLI {
 
 enum Command: String {
     case summary, sources, models, devices, export
+
+    var usage: String {
+        switch self {
+        case .summary:
+            """
+            Usage:
+              token-taken summary [options]
+
+            Options:
+            \(CLI.commonOptionsUsage)
+            """
+        case .sources:
+            """
+            Usage:
+              token-taken sources [options]
+
+            Options:
+            \(CLI.commonOptionsUsage)
+            """
+        case .models:
+            """
+            Usage:
+              token-taken models [options]
+
+            Options:
+            \(CLI.commonOptionsUsage)
+            """
+        case .devices:
+            """
+            Usage:
+              token-taken devices [options]
+
+            Options:
+            \(CLI.commonOptionsUsage)
+            """
+        case .export:
+            """
+            Usage:
+              token-taken export [--format json|csv] [--output FILE] [options]
+
+            Options:
+            \(CLI.commonOptionsUsage)
+              --format json|csv           Export format; csv overrides --json
+              --output FILE               Write export to FILE instead of stdout
+            """
+        }
+    }
 }
 
 enum ExportFormat: String {
@@ -111,6 +164,10 @@ func parseOptions(_ arguments: [String], command: Command) -> Options {
         }
 
         switch flag {
+        case "--help", "-h":
+            rejectInline(flag, inline)
+            print(command.usage)
+            exit(0)
         case "--json":
             rejectInline(flag, inline)
             options.json = true
@@ -228,7 +285,7 @@ struct Group: Encodable {
 }
 
 struct Cost: Encodable {
-    let estimatedUSD: Double
+    let estimatedUSD: Decimal
     let priceTableVersion: String
     let unpricedTokens: Int64
 }
@@ -355,6 +412,11 @@ func deviceKindLabel(_ kind: DeviceKind) -> String {
     }
 }
 
+func remoteDeviceName(_ status: RemoteDeviceStatus) -> String {
+    // An unreadable device.json leaves only the id; say so instead of printing the id twice.
+    status.displayName == status.deviceID ? "Unknown Mac" : status.displayName
+}
+
 func deviceWarnings(_ remote: [RemoteDeviceSnapshot]) -> [Warning] {
     remote
         .map(\.status)
@@ -369,8 +431,7 @@ func deviceWarnings(_ remote: [RemoteDeviceSnapshot]) -> [Warning] {
             guard let code else { return nil }
             let label = deviceStateLabel(status)
             let lastWrite = status.lastWrite.map { ", last write \(rfc3339($0))" } ?? ""
-            // An unreadable device.json leaves only the id; say so instead of printing the id twice.
-            let name = status.displayName == status.deviceID ? "Unknown Mac" : status.displayName
+            let name = remoteDeviceName(status)
             return Warning(code: code, message: "\(name) (\(status.deviceID)): \(label)\(lastWrite)")
         }
 }
@@ -379,7 +440,7 @@ func deviceWarnings(_ remote: [RemoteDeviceSnapshot]) -> [Warning] {
 /// app's first launch there is no local snapshot to exclude, so the local store's own device wins. An
 /// account device is never this Mac, even when its rows were collected here.
 func localDeviceID(store: any UsageStore) -> String {
-    if let id = LocalDevice.storedID() { return id }
+    if let id = LocalDevice.storedID(supportDirectory: AppPaths.supportDirectoryLocation) { return id }
     let accountIDs = Set(store.devices.filter { $0.kind == .account }.map(\.id))
     let records = (try? store.records()) ?? []
     var counts: [String: Int] = [:]
@@ -399,13 +460,14 @@ func selectStore(_ options: Options) -> StoreSelection {
         )
     }
 
-    guard FileManager.default.fileExists(atPath: AppPaths.databaseURL.path) else {
+    let databaseURL = AppPaths.databaseLocation
+    guard FileManager.default.fileExists(atPath: databaseURL.path) else {
         writeError("no data yet: open Token Taken once")
         exit(3)
     }
     do {
         let now = Date.now
-        let local = try SQLiteUsageStore(url: AppPaths.databaseURL, readOnly: true)
+        let local = try SQLiteUsageStore(url: databaseURL, readOnly: true)
         let health = try local.health().map { $0.markingStale(now: now) }
         var remote: [RemoteDeviceSnapshot] = []
         var merged = false
@@ -429,6 +491,12 @@ func selectStore(_ options: Options) -> StoreSelection {
             store: store, now: now, priceTable: .bundled, health: health, remote: remote,
             warnings: sourceWarnings(health) + deviceWarnings(remote)
         )
+    } catch let error as StoreError {
+        let detail = switch error {
+        case .open(let message), .sql(let message): message
+        }
+        writeError("token-taken: \(detail.isEmpty ? "could not open usage store" : detail)")
+        exit(1)
     } catch {
         writeError("token-taken: could not open usage store")
         exit(1)
@@ -540,7 +608,7 @@ func runSummary(_ arguments: [String]) -> Never {
                 byModel: summary.byModel.map(Group.init),
                 byDevice: summary.byDevice.map(Group.init),
                 cost: Cost(
-                    estimatedUSD: (summary.cost.estimatedUSD * 100).rounded() / 100,
+                    estimatedUSD: TokenFormat.roundedUSD(summary.cost.estimatedUSD),
                     priceTableVersion: summary.cost.priceTableVersion,
                     unpricedTokens: summary.cost.unpricedTokens
                 )
@@ -703,8 +771,14 @@ func deviceEntries(store: any UsageStore, remote: [RemoteDeviceSnapshot], filter
     return ids.map { id in
         let status = statuses[id]
         let kind = kinds[id] ?? .mac
+        let recordedName = names[id]
+        let name = if let status, recordedName == nil || recordedName == id {
+            remoteDeviceName(status)
+        } else {
+            recordedName ?? id
+        }
         return DeviceEntry(
-            id: id, name: names[id] ?? id, kind: deviceKindLabel(kind),
+            id: id, name: name, kind: deviceKindLabel(kind),
             local: status == nil && kind == .mac,
             lastWrite: status?.lastWrite.map(rfc3339),
             state: status.map { deviceStateLabel($0) },

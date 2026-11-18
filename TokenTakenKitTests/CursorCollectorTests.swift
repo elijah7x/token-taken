@@ -45,7 +45,7 @@ final class CursorCollectorTests: XCTestCase {
             throw TestError.sqlite("Could not create a synthetic Cursor state database")
         }
         defer { sqlite3_close(db) }
-        try execute(db, "CREATE TABLE ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);")
+        try execute(db, "CREATE TABLE IF NOT EXISTS ItemTable (key TEXT UNIQUE ON CONFLICT REPLACE, value BLOB);")
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, "INSERT INTO ItemTable (key, value) VALUES ('cursorAuth/accessToken', ?);", -1, &statement, nil) == SQLITE_OK,
               let statement else {
@@ -425,7 +425,59 @@ final class CursorCollectorTests: XCTestCase {
             decisions.append(decision.followed)
         }
         XCTAssertEqual(decisions, [true, false, false])
+        XCTAssertFalse(CursorRedirectPolicy.allows(URL(string: "http://cursor.com/a")))
+        XCTAssertFalse(CursorRedirectPolicy.allows(URL(string: "http://www.cursor.com/a")))
+        XCTAssertFalse(CursorRedirectPolicy.allows(URL(string: "https://cursor.com:8443/a")))
+        XCTAssertTrue(CursorRedirectPolicy.allows(URL(string: "https://cursor.com:443/a")))
         XCTAssertFalse(CursorRedirectPolicy.allows(URL(string: "https://example.com/settings")))
         XCTAssertFalse(CursorRedirectPolicy.allows(nil))
+
+        let httpDecision = Decision()
+        CursorRedirectPolicy().urlSession(
+            session, task: task, willPerformHTTPRedirection: response,
+            newRequest: URLRequest(url: URL(string: "http://cursor.com/a")!)
+        ) { httpDecision.followed = $0 != nil }
+        XCTAssertFalse(httpDecision.followed)
+    }
+
+    func testJWTSubjectIsPreferredOverCLIConfigAndUserIdIsNormalized() async throws {
+        let payload = Data(#"{"sub":"auth0|user_from_jwt","exp":1}"#.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let jwt = "header.\(payload).signature"
+        try makeStateDatabase(token: jwt)
+        try writeCLIConfig(["authInfo": ["userId": "user_from_cli"]])
+
+        let captured = CapturedRequest()
+        let batch = try await collector(fetch: respond(export, captured: captured)).collect()
+
+        XCTAssertEqual(batch.accountDevice?.id, CursorCollector.accountID(identifier: "user_from_jwt"))
+        XCTAssertEqual(
+            captured.request?.value(forHTTPHeaderField: "Cookie"),
+            "WorkosCursorSessionToken=user_from_jwt%3A%3A\(jwt)"
+        )
+
+        try makeStateDatabase(token: "synthetic-session-token-value")
+        try writeCLIConfig(["authInfo": ["userId": "auth0|user_from_cli"]])
+
+        let fallbackBatch = try await collector(fetch: respond(export)).collect()
+        XCTAssertEqual(fallbackBatch.accountDevice?.id, CursorCollector.accountID(identifier: "user_from_cli"))
+    }
+
+    func testFutureDateRowIsSkippedAndLosesAuthority() async throws {
+        try makeStateDatabase(token: "synthetic-session-token-value")
+        try writeCLIConfig(["authInfo": ["userId": identifier]])
+        let body = """
+            Date,Model,Input (w/ Cache Write),Input (w/o Cache Write),Cache Read,Output Tokens
+            2026-11-11T00:00:00.000Z,composer-1,80,50,20,30
+            """
+
+        let batch = try await collector(fetch: respond(body)).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(batch.authoritativeSourceIDs, [])
     }
 }

@@ -3,6 +3,12 @@ import Foundation
 public struct SourceHealth: Codable, Sendable, Hashable, Identifiable {
     public enum State: String, Codable, Sendable {
         case ok, unavailable, notInstalled, failed, stale
+
+        public init(from decoder: any Decoder) throws {
+            let raw = try decoder.singleValueContainer().decode(String.self)
+            // A newer v1 writer may introduce a new state; degrade to `.failed` so the device stays readable.
+            self = State(rawValue: raw) ?? .failed
+        }
     }
 
     public let sourceID: String

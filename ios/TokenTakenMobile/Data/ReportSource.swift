@@ -4,6 +4,8 @@ enum ReportState: String, Sendable, Equatable {
     case ok
     case stale
     case noReport
+    case downloading
+    case unsupportedVersion
     case iCloudUnavailable
     case decodeFailed
 }

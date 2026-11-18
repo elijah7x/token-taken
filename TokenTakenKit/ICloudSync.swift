@@ -88,6 +88,8 @@ public struct SyncBackend: Sendable {
 }
 
 public enum ICloudSync {
+    private static let hourlyClockSkewTolerance: TimeInterval = 300
+
     public static var defaultRoot: URL? {
         root(environment: ProcessInfo.processInfo.environment, fileManager: .default)
     }
@@ -255,7 +257,8 @@ public enum ICloudSync {
                         // Use absolute age: the writer's hours may start at a fractional offset (e.g. :30 UTC)
                         // that the reader's own hour rounding would wrongly cut off.
                         let oldest = now.addingTimeInterval(-48 * 3_600)
-                        hourly = snapshot.records.filter { $0.hourStart > oldest && $0.hourStart <= now }
+                        let newest = now.addingTimeInterval(hourlyClockSkewTolerance)
+                        hourly = snapshot.records.filter { $0.hourStart > oldest && $0.hourStart <= newest }
                         hourlyAvailable = true
                     } else {
                         let snapshot = try SyncSnapshot.decode(DailySyncSnapshot.self, from: data)
@@ -274,6 +277,10 @@ public enum ICloudSync {
             guard !unsupported else { return nil }
             // Daily history is one record-kind snapshot: never mix months from different publications.
             if !dailyAvailable { daily = [] }
+            let (accounts, pendingAccountFiles) = accountPublications(
+                metadata.accounts, publisherID: id, path: path, backend: backend,
+                now: now, requestDownloads: requestDownloads
+            )
             let stale = now.timeIntervalSince(metadata.lastWriteUTC) > 86_400
             let sourcePartial = metadata.sources.contains {
                 $0.state != .notInstalled
@@ -282,12 +289,11 @@ public enum ICloudSync {
             let state: RemoteDeviceStatus.State
             if !dailyAvailable && !hourlyAvailable { state = .unavailable }
             else if stale { state = .stale }
-            else if !dailyAvailable || !hourlyAvailable || sourcePartial { state = .partial }
+            else if !dailyAvailable || !hourlyAvailable || sourcePartial || pendingAccountFiles { state = .partial }
             else { state = .ok }
             return RemoteDeviceSnapshot(device: device, daily: daily, hourly: hourly,
                 status: RemoteDeviceStatus(deviceID: id, displayName: device.name, lastWrite: metadata.lastWriteUTC, state: state),
-                accounts: accountPublications(metadata.accounts, publisherID: id, path: path, backend: backend,
-                    now: now, requestDownloads: requestDownloads))
+                accounts: accounts)
         }
     }
 
@@ -296,9 +302,11 @@ public enum ICloudSync {
     private static func accountPublications(
         _ published: [AccountPublication], publisherID: String, path: String, backend: SyncBackend,
         now: Date, requestDownloads: Bool
-    ) -> [RemoteAccountPublication] {
+    ) -> (publications: [RemoteAccountPublication], hasPendingDownload: Bool) {
         let oldest = now.addingTimeInterval(-48 * 3_600)
-        return published.compactMap { publication -> RemoteAccountPublication? in
+        let newest = now.addingTimeInterval(hourlyClockSkewTolerance)
+        var hasPendingDownload = false
+        let publications = published.compactMap { publication -> RemoteAccountPublication? in
             guard publication.kind == "account",
                   let shortID = AccountDeviceID.shortID(publication.deviceId),
                   !publication.files.isEmpty,
@@ -308,11 +316,21 @@ public enum ICloudSync {
             let sources = Set(publication.sources)
             var daily: [UsageRecord] = []
             var hourly: [HourlyUsage] = []
+            var pending = false
             for (name, hash) in publication.files.sorted(by: { $0.key < $1.key }) {
                 let month = accountMonth(name, shortID: shortID)
                 guard month != nil || name == "account-\(shortID)-hourly.json" else { return nil }
+                let data: Data
                 do {
-                    let data = try backend.read(path + "/" + name, requestDownloads: requestDownloads)
+                    data = try backend.read(path + "/" + name, requestDownloads: requestDownloads)
+                } catch {
+                    hasPendingDownload = true
+                    pending = true
+                    if !requestDownloads { return nil }
+                    continue
+                }
+                guard !pending else { continue }
+                do {
                     guard try schemaVersion(data) == 1, digest(data) == hash else { return nil }
                     if let month {
                         let snapshot = try SyncSnapshot.decode(DailySyncSnapshot.self, from: data)
@@ -331,16 +349,18 @@ public enum ICloudSync {
                               Set(snapshot.records.map { "\($0.sourceID)\u{0}\($0.hourStart.timeIntervalSince1970)" }).count
                                 == snapshot.records.count
                         else { return nil }
-                        hourly = snapshot.records.filter { $0.hourStart > oldest && $0.hourStart <= now }
+                        hourly = snapshot.records.filter { $0.hourStart > oldest && $0.hourStart <= newest }
                     }
                 } catch {
                     return nil
                 }
             }
+            guard !pending else { return nil }
             return RemoteAccountPublication(
                 device: Device(id: publication.deviceId, name: publication.displayName, kind: .account),
                 publisherID: publisherID, collectedAt: publication.collectedAtUTC, daily: daily, hourly: hourly)
         }
+        return (publications, hasPendingDownload)
     }
 
     private static func accountMonth(_ name: String, shortID: String) -> String? {

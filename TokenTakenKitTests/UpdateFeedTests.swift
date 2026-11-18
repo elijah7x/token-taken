@@ -274,6 +274,77 @@ final class UpdateFeedTests: XCTestCase {
         )
     }
 
+    func testSelectionAllowsNilOr443PortAndRejectsOtherPorts() throws {
+        let current = try XCTUnwrap(AppVersion(version: "0.1.0", build: "1"))
+        let customPort = makeFeed(downloadURL: URL(string: "https://updates.example.com:8443/App.dmg")!)
+        let port80 = makeFeed(downloadURL: URL(string: "https://updates.example.com:80/App.dmg")!)
+
+        XCTAssertNil(UpdateFeedSelection.newest(
+            [customPort, port80],
+            newerThan: current,
+            systemVersion: system26,
+            allowedDownloadHosts: allowedHosts
+        ))
+
+        let explicit443 = makeFeed(downloadURL: URL(string: "https://updates.example.com:443/App.dmg")!)
+        XCTAssertEqual(
+            UpdateFeedSelection.newest(
+                [explicit443],
+                newerThan: current,
+                systemVersion: system26,
+                allowedDownloadHosts: allowedHosts
+            ),
+            explicit443
+        )
+    }
+
+    func testSelectionRejectsVersionGroupIfAnySourceExceedsSystemVersion() throws {
+        let current = try XCTUnwrap(AppVersion(version: "0.1.0", build: "1"))
+        let staticFeed27 = makeFeed(
+            version: "0.2.0",
+            build: "10",
+            minimumSystemVersion: "27.0",
+            downloadURL: URL(string: "https://updates.example.com/App-0.2.0-10.dmg")!,
+            sha256: validHashA
+        )
+        let githubFallback26 = makeFeed(
+            version: "0.2.0",
+            build: "10",
+            minimumSystemVersion: "26.0",
+            downloadURL: URL(string: "https://cdn.example.net/App-0.2.0-10.dmg")!,
+            sha256: validHashA
+        )
+
+        XCTAssertNil(UpdateFeedSelection.newest(
+            [staticFeed27, githubFallback26],
+            newerThan: current,
+            systemVersion: system26,
+            allowedDownloadHosts: allowedHosts
+        ))
+        XCTAssertNil(UpdateFeedSelection.newest(
+            [githubFallback26, staticFeed27],
+            newerThan: current,
+            systemVersion: system26,
+            allowedDownloadHosts: allowedHosts
+        ))
+
+        let compatibleLower = makeFeed(
+            version: "0.1.5",
+            build: "5",
+            minimumSystemVersion: "26.0",
+            sha256: validHashB
+        )
+        XCTAssertEqual(
+            UpdateFeedSelection.newest(
+                [githubFallback26, staticFeed27, compatibleLower],
+                newerThan: current,
+                systemVersion: system26,
+                allowedDownloadHosts: allowedHosts
+            ),
+            compatibleLower
+        )
+    }
+
     private func makeFeed(
         schemaVersion: Int = 1,
         version: String = "0.2.0",

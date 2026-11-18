@@ -22,13 +22,22 @@
 - **主动开启、仅同步聚合结果** — iCloud Drive 同步与向 iPhone 伴侣同步默认均为关闭状态。同步内容仅包含聚合后的用量元数据，绝不包含提示词、回复内容、文件路径、项目名称或任何凭据。
 - **费用仅为估算** — 界面中的金额由内置价格表估算得出，并非服务商实际账单。
 
+完整隐私政策请参见 [PRIVACY.md](PRIVACY.md)。
+
 ## 当前状态
 
 目前仅公开源码，尚未发布正式 Release。打包版本很快就会到来，欢迎先点个 **Star** 收藏仓库，发版时即可收到通知。
 
 ## 从源码构建
 
-需要 macOS 26 及以上的 Apple 芯片 Mac 与 Xcode。iPhone 伴侣应用位于 `ios/`，架构与设计文档见 [`docs/`](docs/)。
+需要 macOS 26 及以上的 Apple 芯片 Mac、Xcode 与 [XcodeGen](https://github.com/yonaskolb/XcodeGen)。iPhone 伴侣应用位于 `ios/`，架构与设计文档见 [`docs/`](docs/)。
+
+```bash
+brew install xcodegen
+./scripts/fetch-engine.sh
+xcodegen generate
+open TokenTaken.xcodeproj
+```
 
 ## 许可协议
 

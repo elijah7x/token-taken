@@ -12,15 +12,17 @@ public actor CollectionRunner {
     }
 
     public func runAll(now: Date = .now) async -> [SourceHealth] {
+        guard !Task.isCancelled else { return [] }
         let previous: [String: SourceHealth]
         // Every device's rows, so an account-scoped source can read back the rows it stored under the account id.
         let cachedDaily: [UsageRecord]
         let cachedHourly: [HourlyUsage]
+        let accountDeviceIDs: Set<String>
         do {
-            try store.upsert(device: device)
             previous = Dictionary(try store.health().map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
             cachedDaily = try store.records()
             cachedHourly = try store.hourly()
+            accountDeviceIDs = Set(store.devices.filter { $0.kind == .account }.map(\.id))
         } catch {
             let message = Self.sanitizeErrorMessage(Self.message(for: error))
             return collectors.flatMap(\.sourceIDs).map {
@@ -28,6 +30,15 @@ public actor CollectionRunner {
             }
         }
         let outcomes = await collectAll()
+        guard !Task.isCancelled, !outcomes.contains(where: \.cancelled) else { return [] }
+        do {
+            try store.upsert(device: device)
+        } catch {
+            let message = Self.sanitizeErrorMessage(Self.message(for: error))
+            return collectors.flatMap(\.sourceIDs).map {
+                SourceHealth(sourceID: $0, lastAttempt: now, errorMessage: message, state: .failed)
+            }
+        }
         // An account-scoped collector reports the device its rows belong to: the account, not this Mac (ADR-0010).
         var accountDevices: [String: Device] = [:]
         var accountUpsertErrors: [String: String] = [:]
@@ -51,8 +62,18 @@ public actor CollectionRunner {
             for sourceID in collector.sourceIDs {
                 let existing = previous[sourceID]
                 let targetDeviceID = accountDevices[sourceID]?.id ?? device.id
-                let cached = cachedDaily.filter { $0.deviceID == targetDeviceID && $0.sourceID == sourceID }
-                let cachedHourlyRows = cachedHourly.filter { $0.deviceID == targetDeviceID && $0.sourceID == sourceID }
+                let cached: [UsageRecord]
+                let cachedHourlyRows: [HourlyUsage]
+                if let accountDeviceID = accountDevices[sourceID]?.id {
+                    cached = cachedDaily.filter { $0.deviceID == accountDeviceID && $0.sourceID == sourceID }
+                    cachedHourlyRows = cachedHourly.filter { $0.deviceID == accountDeviceID && $0.sourceID == sourceID }
+                } else if SourceCatalog.accountSourceIDs.contains(sourceID) {
+                    cached = cachedDaily.filter { accountDeviceIDs.contains($0.deviceID) && $0.sourceID == sourceID }
+                    cachedHourlyRows = cachedHourly.filter { accountDeviceIDs.contains($0.deviceID) && $0.sourceID == sourceID }
+                } else {
+                    cached = cachedDaily.filter { $0.deviceID == device.id && $0.sourceID == sourceID }
+                    cachedHourlyRows = cachedHourly.filter { $0.deviceID == device.id && $0.sourceID == sourceID }
+                }
                 let cachedCount = cached.count
                 // "Unavailable" protects cached data; a missing source with nothing cached is simply not installed,
                 // even if an older build recorded a successful empty collection for it.
@@ -181,17 +202,33 @@ public actor CollectionRunner {
             for (index, collector) in collectors.enumerated() {
                 group.addTask {
                     do {
-                        return try await Outcome(index: index, batch: collector.collect(), errorMessage: nil, unavailable: false)
+                        try Task.checkCancellation()
+                        let batch = try await collector.collect()
+                        try Task.checkCancellation()
+                        return Outcome(index: index, batch: batch, errorMessage: nil, unavailable: false, cancelled: false)
+                    } catch is CancellationError {
+                        return Outcome(index: index, batch: nil, errorMessage: nil, unavailable: false, cancelled: true)
                     } catch {
+                        if Task.isCancelled {
+                            return Outcome(index: index, batch: nil, errorMessage: nil, unavailable: false, cancelled: true)
+                        }
                         let unavailable: Bool
                         if let error = error as? CollectorError, case .sourceUnavailable = error { unavailable = true }
                         else { unavailable = false }
-                        return Outcome(index: index, batch: nil, errorMessage: Self.message(for: error), unavailable: unavailable)
+                        return Outcome(
+                            index: index, batch: nil, errorMessage: Self.message(for: error),
+                            unavailable: unavailable, cancelled: false
+                        )
                     }
                 }
             }
             var indexed: [Int: Outcome] = [:]
-            for await outcome in group { indexed[outcome.index] = outcome }
+            for await outcome in group {
+                if outcome.cancelled {
+                    group.cancelAll()
+                }
+                indexed[outcome.index] = outcome
+            }
             return collectors.indices.compactMap { indexed[$0] }
         }
     }
@@ -264,5 +301,6 @@ public actor CollectionRunner {
         let batch: CollectionBatch?
         let errorMessage: String?
         let unavailable: Bool
+        let cancelled: Bool
     }
 }

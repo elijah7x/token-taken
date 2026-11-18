@@ -55,8 +55,9 @@ struct SummaryRail: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink2)
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityValue(TokenFormat.spoken(summary.total.total))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Total"))
+                .accessibilityValue(Text("\(TokenFormat.spoken(summary.total.total)) tokens"))
                 .padding(.top, 6)
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -72,6 +73,16 @@ struct SummaryRail: View {
                 .accessibilityElement(children: .combine)
                 .help(costHelp)
                 .padding(.top, 8)
+
+                if summary.cost.unpricedTokens > 0 {
+                    Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.ink3)
+                        .monospacedDigit()
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(Text("\(TokenFormat.spoken(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate"))
+                        .padding(.top, 4)
+                }
 
                 if model.dataIssues.devices > 0 {
                     PartialDeviceBanner(
@@ -122,11 +133,12 @@ struct SummaryRail: View {
                         .foregroundStyle(CosmosPalette.accent)
                         .contentTransition(reduceMotion ? .identity : .numericText())
                 }
-                .accessibilityElement(children: .combine)
-                .accessibilityValue(TokenFormat.spoken(summary.total.total))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text("Total"))
+                .accessibilityValue(Text("\(TokenFormat.spoken(summary.total.total)) tokens"))
                 .padding(.top, 12)
 
-                Text(verbatim: "\(summary.total.total.formatted(.number.locale(locale))) Token")
+                Text("\(summary.total.total.formatted(.number.locale(locale))) Token")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(CosmosPalette.ink3)
                     .padding(.top, 2)
@@ -180,6 +192,9 @@ struct SummaryRail: View {
             return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
         case .week:
             let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
+            if Calendar.current.isDate(start, inSameDayAs: today) || today <= start {
+                return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+            }
             return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
         case .month:
             return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
@@ -246,7 +261,8 @@ struct TrayDevices: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, ThemeRuntime.isCosmos ? 8 : 0)
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: Host.current().localizedName ?? "Mac") + Text(verbatim: ", ") + Text("This Mac"))
                 .accessibilityValue(Text("Summarising…"))
             } else {
                 VStack(alignment: .leading, spacing: ThemeRuntime.isCosmos ? 0 : 12) {
@@ -368,8 +384,33 @@ struct TrayDevices: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(TokenFormat.spoken(device.counts.total))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(deviceAccessibilityLabel(device, isAccount: isAccount, isLocal: isLocal))
+        .accessibilityValue(deviceAccessibilityValue(device, isLocal: isLocal, now: now))
+    }
+
+    private func deviceAccessibilityLabel(_ device: Breakdown, isAccount: Bool, isLocal: Bool) -> Text {
+        var label = Text(verbatim: device.name)
+        if isAccount {
+            label = label + Text(verbatim: ", ") + Text("Account")
+        }
+        if isLocal {
+            label = label + Text(verbatim: ", ") + Text("This Mac")
+        }
+        return label
+    }
+
+    private func deviceAccessibilityValue(_ device: Breakdown, isLocal: Bool, now: Date) -> Text {
+        var value = Text("\(TokenFormat.spoken(device.counts.total)) tokens")
+        if hidesDeviceShare {
+            value = value + Text(verbatim: ", ") + Text("Included")
+        } else {
+            value = value + Text(verbatim: ", \(Share.percent(device.counts.total, of: summary.total.total))")
+        }
+        if let update = updateStatus(for: device, isLocal: isLocal, now: now) {
+            value = value + Text(verbatim: ", ") + update.text
+        }
+        return value
     }
 
     private func updateStatus(
@@ -631,8 +672,13 @@ private struct CategoryRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .monospacedDigit()
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(isCollecting ? Text("Summarising…") : Text(TokenFormat.spoken(value)))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(category.title))
+        .accessibilityValue(
+            isCollecting
+                ? Text("Summarising…")
+                : Text("\(TokenFormat.spoken(value)) tokens, \(Share.percent(value, of: total)) of total")
+        )
     }
 }
 
@@ -855,7 +901,6 @@ struct BreakdownCard: View {
                             .foregroundStyle(Palette.ink1)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .accessibilityLabel(Text(verbatim: item.name))
 
                         Spacer(minLength: 12)
 
@@ -913,7 +958,6 @@ struct BreakdownCard: View {
                             .foregroundStyle(Palette.ink1)
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .accessibilityLabel(Text(verbatim: item.name))
                     }
 
                     Spacer(minLength: 0)
@@ -947,8 +991,17 @@ struct BreakdownCard: View {
             }
         }
         .help(item.name)
-        .accessibilityElement(children: .combine)
-        .accessibilityValue(TokenFormat.spoken(item.counts.total))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: item.name))
+        .accessibilityValue(rowAccessibilityValue(item, secondary: secondary))
+    }
+
+    private func rowAccessibilityValue(_ item: Breakdown, secondary: String?) -> Text {
+        let base = Text("\(TokenFormat.spoken(item.counts.total)) tokens, \(Share.percent(item.counts.total, of: summary.total.total)) of total")
+        if let secondary {
+            return base + Text(verbatim: ", ") + Text("Mainly from \(secondary)")
+        }
+        return base
     }
 
     private var footer: some View {

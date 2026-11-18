@@ -22,6 +22,8 @@ struct CosmosSceneView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.locale) private var locale
     @State private var renderedFrame: CosmosFrame?
     @State private var metalAvailable = true
     @State private var hoveredBody: String?
@@ -63,7 +65,7 @@ struct CosmosSceneView: View {
                     scene: scene,
                     style: style,
                     reduceMotion: reduceMotion,
-                    isActive: appearsActive,
+                    isActive: appearsActive && controlActiveState == .key,
                     hoverCategory: activeCategory ?? -1,
                     frame: $renderedFrame,
                     metalAvailable: $metalAvailable
@@ -174,7 +176,9 @@ struct CosmosSceneView: View {
     private func bodyOverlay(frame: CosmosFrame, activeBody: String?) -> some View {
         ForEach(frame.placements.filter { $0.isVisible }) { placement in
             let body = placement.body
-            if let labelFrame = placement.labelFrame {
+            if let labelFrame = placement.labelFrame,
+               labelFrame.origin.x.isFinite, labelFrame.origin.y.isFinite,
+               labelFrame.width.isFinite, labelFrame.height.isFinite {
                 VStack(alignment: placement.labelSide > 0 ? .leading : .trailing, spacing: 0) {
                     Text(verbatim: body.name)
                         .font(.system(size: 11))
@@ -195,35 +199,38 @@ struct CosmosSceneView: View {
                 .accessibilityHidden(true)
             }
 
-            Button {
-                highlight = body.id
-                focused = .body(body.id)
-            } label: {
-                Circle()
-                    .fill(Color.white.opacity(0.001))
-                    .overlay {
-                        Circle().stroke(
-                            focused == .body(body.id) ? CosmosSceneInk.accent : Color.clear,
-                            lineWidth: 0.8
-                        )
-                    }
-            }
-            .buttonStyle(.plain)
-            .frame(width: placement.hitFrame.width, height: placement.hitFrame.height)
-            .contentShape(Circle())
-            .offset(x: placement.hitFrame.minX, y: placement.hitFrame.minY)
-            .focused($focused, equals: .body(body.id))
-            .onHover { inside in
-                if inside {
-                    hoveredBody = body.id
+            if placement.hitFrame.origin.x.isFinite, placement.hitFrame.origin.y.isFinite,
+               placement.hitFrame.width.isFinite, placement.hitFrame.height.isFinite {
+                Button {
                     highlight = body.id
-                } else {
-                    if hoveredBody == body.id { hoveredBody = nil }
-                    if focused != .body(body.id), highlight == body.id { highlight = nil }
+                    focused = .body(body.id)
+                } label: {
+                    Circle()
+                        .fill(Color.white.opacity(0.001))
+                        .overlay {
+                            Circle().stroke(
+                                focused == .body(body.id) ? CosmosSceneInk.accent : Color.clear,
+                                lineWidth: 0.8
+                            )
+                        }
                 }
+                .buttonStyle(.plain)
+                .frame(width: placement.hitFrame.width, height: placement.hitFrame.height)
+                .contentShape(Circle())
+                .offset(x: placement.hitFrame.minX, y: placement.hitFrame.minY)
+                .focused($focused, equals: .body(body.id))
+                .onHover { inside in
+                    if inside {
+                        hoveredBody = body.id
+                        highlight = body.id
+                    } else {
+                        if hoveredBody == body.id { hoveredBody = nil }
+                        if focused != .body(body.id), highlight == body.id { highlight = nil }
+                    }
+                }
+                .accessibilityLabel(Text(verbatim: body.name))
+                .accessibilityValue(Text("\(body.tokens.formatted(.number.locale(locale))) tokens, \(Share.percent(body.tokens, of: frame.target.total)) of total, approximately \(Self.rate(body.rate)) tokens per hour"))
             }
-            .accessibilityLabel(Text(verbatim: body.name))
-            .accessibilityValue(Text("\(body.tokens.formatted()) tokens, \(Share.percent(body.tokens, of: frame.target.total)) of total, approximately \(Self.rate(body.rate)) tokens per hour"))
         }
     }
 
@@ -243,7 +250,7 @@ struct CosmosSceneView: View {
                                 .font(.system(size: 11))
                         }
                         .frame(height: 15)
-                        Text(verbatim: "\(category.value.formatted()) · \(Share.percent(category.value, of: scene.total))")
+                        Text(verbatim: "\(category.value.formatted(.number.locale(locale))) · \(Share.percent(category.value, of: scene.total))")
                             .lineLimit(1)
                             .font(.system(size: 11, design: .monospaced))
                             .monospacedDigit()
@@ -272,7 +279,7 @@ struct CosmosSceneView: View {
                     }
                 }
                 .accessibilityLabel(Text(category.category.title))
-                .accessibilityValue(Text("\(category.value.formatted()) tokens, \(Share.percent(category.value, of: scene.total)) of total"))
+                .accessibilityValue(Text("\(category.value.formatted(.number.locale(locale))) tokens, \(Share.percent(category.value, of: scene.total)) of total"))
             }
         }
         .frame(width: 220)
@@ -290,7 +297,7 @@ struct CosmosSceneView: View {
                 .foregroundStyle(CosmosSceneInk.ink1)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Text("\(body.tokens.formatted()) Token")
+            Text("\(body.tokens.formatted(.number.locale(locale))) Token")
                 .font(.system(size: 14, weight: .medium, design: .monospaced))
                 .monospacedDigit()
                 .foregroundStyle(CosmosSceneInk.accent)
@@ -303,12 +310,14 @@ struct CosmosSceneView: View {
                     let value = body.counts[category.category]
                     HStack(spacing: 6) {
                         Text(category.category.title)
-                            .frame(width: 52, alignment: .leading)
+                            .frame(width: 70, alignment: .leading)
                             .lineLimit(1)
                         GeometryReader { proxy in
-                            Rectangle()
-                                .fill(CosmosSceneInk.category[index])
-                                .frame(width: proxy.size.width * max(0.01, Share.ratio(value, of: body.tokens)))
+                            if value > 0 {
+                                Rectangle()
+                                    .fill(CosmosSceneInk.category[index])
+                                    .frame(width: proxy.size.width * max(0.01, Share.ratio(value, of: body.tokens)))
+                            }
                         }
                         .frame(height: 3)
                         Text(verbatim: Share.percent(value, of: body.tokens))
@@ -362,7 +371,7 @@ struct CosmosSceneView: View {
             .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(category.category.title)
-                Text("\(category.value.formatted()) Token · \(Share.percent(category.value, of: frame.target.total))")
+                Text("\(category.value.formatted(.number.locale(locale))) Token · \(Share.percent(category.value, of: frame.target.total))")
                     .monospacedDigit()
                     .foregroundStyle(CosmosSceneInk.ink2)
             }
@@ -392,7 +401,7 @@ struct CosmosSceneView: View {
 
 enum CosmosSnapshot {
     @MainActor static func image(summary: UsageSummary, dimension: BreakdownDimension, size: CGSize, scale: CGFloat) -> NSImage? {
-        guard size.width > 0, size.height > 0, scale > 0,
+        guard size.width > 1, size.height > 1, scale > 0,
               let device = MTLCreateSystemDefaultDevice(),
               let renderer = CosmosRenderer(device: device) else { return nil }
         let scene = CosmosScene.cached(summary: summary, dimension: dimension)

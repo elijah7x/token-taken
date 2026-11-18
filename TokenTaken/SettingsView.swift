@@ -503,6 +503,46 @@ private struct SettingsHairline: View {
     }
 }
 
+// MARK: - Formatting & Shared Controls
+
+@MainActor
+private enum SettingsFormatting {
+    static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
+    static func relativeString(for date: Date, relativeTo now: Date = .now, locale: Locale) -> String {
+        relativeFormatter.locale = locale
+        return relativeFormatter.localizedString(for: date, relativeTo: now)
+    }
+}
+
+private struct SettingsSecondaryButton: View {
+    let title: LocalizedStringKey
+    let action: () -> Void
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    init(_ title: LocalizedStringKey, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+
+    var body: some View {
+        if reduceTransparency && !ThemeRuntime.isCosmos {
+            Button(title, action: action)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        } else {
+            Button(title, action: action)
+                .themedGlassButton()
+                .controlSize(.small)
+        }
+    }
+}
+
 // MARK: - General
 
 private struct GeneralSettingsTab: View {
@@ -510,6 +550,7 @@ private struct GeneralSettingsTab: View {
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.locale) private var locale
 
     var body: some View {
         @Bindable var settings = settings
@@ -697,16 +738,15 @@ private struct GeneralSettingsTab: View {
             if Date.now.timeIntervalSince(lastRefresh) < 60 {
                 return Text("Updated · just now")
             }
-            return Text("Updated · \(Self.relativeFormatter.localizedString(for: lastRefresh, relativeTo: .now))")
+            let relative = SettingsFormatting.relativeString(
+                for: lastRefresh,
+                relativeTo: .now,
+                locale: settings.language.locale ?? locale
+            )
+            return Text("Updated · \(relative)")
         }
         return Text("Not updated yet")
     }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
 }
 
 private struct InterfaceTransparencySlider: View {
@@ -767,6 +807,7 @@ private struct SourcesSettingsTab: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsNotInstalled = false
     @State private var localMonthBySource: [String: Int64] = [:]
+    @State private var detectedOnDiskSourceIDs: Set<String> = []
 
     /// Account-scoped sources have no local log folder, so they never enter the installed/not-installed ledger.
     private static let accountSourceIDs = SourceCatalog.accountSourceIDs
@@ -836,6 +877,34 @@ private struct SourcesSettingsTab: View {
                     }
                 }
 
+                if let override = settings.tokscalePathOverride, !override.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        SettingsGroupCaption(
+                            title: "Advanced",
+                            description: "Overrides for the local collection engine."
+                        )
+
+                        SettingsRowsGroup {
+                            SettingsControlRow(title: "tokscale path override") {
+                                HStack(spacing: 10) {
+                                    Text(verbatim: override)
+                                        .font(.system(size: 11.5, design: .monospaced))
+                                        .foregroundStyle(Palette.ink2)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .textSelection(.enabled)
+                                        .help(override)
+
+                                    SettingsSecondaryButton("Reset") {
+                                        settings.tokscalePathOverride = nil
+                                        refreshCoordinator?.updateEngineStatus()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Text("Harnesses are identified automatically from local logs; no manual setup is needed.")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
@@ -843,13 +912,31 @@ private struct SourcesSettingsTab: View {
             }
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: showsNotInstalled)
         }
-        .onAppear(perform: reloadLocalMonthUsage)
-        .onChange(of: refreshCoordinator?.lastRefresh) { _, _ in reloadLocalMonthUsage() }
+        .onAppear(perform: reloadSourcesState)
+        .onChange(of: refreshCoordinator?.lastRefresh) { _, _ in reloadSourcesState() }
         .onChange(of: refreshCoordinator?.isRefreshing) { _, refreshing in
             if refreshing == false {
-                reloadLocalMonthUsage()
+                reloadSourcesState()
             }
         }
+    }
+
+    private func reloadSourcesState() {
+        reloadLocalMonthUsage()
+        reloadDetectedSources()
+    }
+
+    private func reloadDetectedSources() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        detectedOnDiskSourceIDs = Set(
+            SourceCatalog.all.compactMap { source in
+                guard !Self.accountSourceIDs.contains(source.id) else { return nil }
+                let exists = Self.dataLocations[source.id, default: []].contains { path in
+                    FileManager.default.fileExists(atPath: home.appendingPathComponent(path).path)
+                }
+                return exists ? source.id : nil
+            }
+        )
     }
 
     private func reloadLocalMonthUsage() {
@@ -888,7 +975,7 @@ private struct SourcesSettingsTab: View {
                 } else {
                     installed.append((index, SourceLedgerEntry(source: source, health: currentHealth)))
                 }
-            } else if isDetectedOnDisk(source) {
+            } else if detectedOnDiskSourceIDs.contains(source.id) {
                 installed.append((index, SourceLedgerEntry(
                     source: source,
                     health: SourceHealth(sourceID: source.id, state: .stale)
@@ -910,107 +997,132 @@ private struct SourcesSettingsTab: View {
         return (sortedInstalled, notInstalled)
     }
 
-    private func isDetectedOnDisk(_ source: SourceInfo) -> Bool {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return Self.dataLocations[source.id, default: []].contains { path in
-            FileManager.default.fileExists(atPath: home.appendingPathComponent(path).path)
+    private func visibleErrorMessage(for health: SourceHealth) -> String? {
+        guard health.state == .failed || health.state == .unavailable,
+              let raw = health.errorMessage else {
+            return nil
         }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return CollectionRunner.sanitizeErrorMessage(trimmed)
     }
 
     private func sourceRow(_ entry: SourceLedgerEntry, now: Date) -> some View {
         let monthTokens = localMonthBySource[entry.id] ?? 0
-        return HStack(spacing: 12) {
-            HStack(spacing: 9) {
-                SourceMonogramBadge(sourceID: entry.source.id, name: entry.source.name)
-                Text(verbatim: entry.source.name)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(Palette.ink1)
-                    .lineLimit(1)
-            }
-            .frame(width: 176, alignment: .leading)
+        let errorMessage = visibleErrorMessage(for: entry.health)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                HStack(spacing: 9) {
+                    SourceMonogramBadge(sourceID: entry.source.id, name: entry.source.name)
+                    Text(verbatim: entry.source.name)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Palette.ink1)
+                        .lineLimit(1)
+                }
+                .frame(width: 176, alignment: .leading)
 
-            Group {
-                if monthTokens > 0 {
-                    Text("\(TokenFormat.short(monthTokens)) tokens")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Palette.ink2)
-                        .monospacedDigit()
-                } else {
-                    Text("No usage this month")
+                Group {
+                    if monthTokens > 0 {
+                        Text("\(TokenFormat.short(monthTokens)) tokens")
+                            .font(.system(size: 13))
+                            .foregroundStyle(Palette.ink2)
+                            .monospacedDigit()
+                    } else {
+                        Text("No usage this month")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Palette.ink3)
+                    }
+                }
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                HStack(spacing: 8) {
+                    SourceHealthLabel(state: entry.health.state)
+                    Text(verbatim: entry.health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.ink3)
+                        .monospacedDigit()
+                        .lineLimit(1)
                 }
+                .frame(width: 192, alignment: .trailing)
             }
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 8) {
-                SourceHealthLabel(state: entry.health.state)
-                Text(verbatim: entry.health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
+            if let errorMessage {
+                Text(verbatim: errorMessage)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.ink3)
-                    .monospacedDigit()
-                    .lineLimit(1)
+                    .foregroundStyle(entry.health.state == .failed ? SourceHealth.State.failed.dotColor : Palette.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: 192, alignment: .trailing)
         }
+        .padding(.vertical, errorMessage == nil ? 0 : 8)
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
-        .help(entry.health.errorMessage ?? "")
+        .help(errorMessage ?? "")
     }
 
     /// Cursor has no local log folder to detect: it reads Cursor's own sign-in and the account's export.
     private func cursorAccountRow(isOn: Binding<Bool>, now: Date) -> some View {
         let source = SourceCatalog.info(for: "cursor")
         let health = refreshCoordinator?.health.first(where: { $0.sourceID == source.id })?.markingStale(now: now)
-        return HStack(spacing: 12) {
-            HStack(spacing: 9) {
-                SourceMonogramBadge(sourceID: source.id, name: source.name)
-                Text(verbatim: source.name)
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundStyle(Palette.ink1)
-                    .lineLimit(1)
-            }
-            .frame(width: 176, alignment: .leading)
+        let errorMessage = health.flatMap { visibleErrorMessage(for: $0) }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                HStack(spacing: 9) {
+                    SourceMonogramBadge(sourceID: source.id, name: source.name)
+                    Text(verbatim: source.name)
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(Palette.ink1)
+                        .lineLimit(1)
+                }
+                .frame(width: 176, alignment: .leading)
 
-            Text("Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(Palette.ink3)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.ink3)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-            HStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    if isOn.wrappedValue {
-                        if let health {
-                            SourceHealthLabel(state: health.state)
-                            Text(verbatim: health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(Palette.ink3)
-                                .monospacedDigit()
+                    HStack(spacing: 8) {
+                        if isOn.wrappedValue {
+                            if let health {
+                                SourceHealthLabel(state: health.state)
+                                Text(verbatim: health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Palette.ink3)
+                                    .monospacedDigit()
+                            } else {
+                                Text("Not collected yet")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Palette.ink3)
+                            }
                         } else {
-                            Text("Not collected yet")
-                                .font(.system(size: 11.5))
+                            Text("Off")
+                                .font(.system(size: 11.5, weight: .medium))
                                 .foregroundStyle(Palette.ink3)
                         }
-                    } else {
-                        Text("Off")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(Palette.ink3)
                     }
-                }
-                .lineLimit(1)
-                .frame(width: 192, alignment: .trailing)
+                    .lineLimit(1)
+                    .frame(width: 192, alignment: .trailing)
 
-                Toggle("Cursor account usage", isOn: isOn)
-                    .labelsHidden()
-                    .toggleStyle(GlassToggleStyle())
-                    .accessibilityLabel(Text("Cursor account usage"))
+                    Toggle("Cursor account usage", isOn: isOn)
+                        .labelsHidden()
+                        .toggleStyle(GlassToggleStyle())
+                        .accessibilityLabel(Text("Cursor account usage"))
+                }
+            }
+
+            if isOn.wrappedValue, let errorMessage {
+                Text(verbatim: errorMessage)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(health?.state == .failed ? SourceHealth.State.failed.dotColor : Palette.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .padding(.vertical, isOn.wrappedValue && errorMessage != nil ? 8 : 0)
         .frame(minHeight: 48)
-        .help(health?.errorMessage ?? "")
+        .help(errorMessage ?? "")
     }
 
     private func notInstalledGroup(_ sources: [SourceInfo]) -> some View {
@@ -1172,6 +1284,8 @@ private struct SyncSettingsTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
+    @Environment(\.locale) private var locale
+    @State private var iCloudRootAvailable = true
 
     var body: some View {
         @Bindable var settings = settings
@@ -1193,7 +1307,7 @@ private struct SyncSettingsTab: View {
                             .accessibilityLabel(Text("iCloud sync"))
                     }
 
-                    if refreshCoordinator?.iCloudAvailable == false || ICloudSync.defaultRoot == nil {
+                    if refreshCoordinator?.iCloudAvailable == false || !iCloudRootAvailable {
                         SettingsHairline()
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
@@ -1292,6 +1406,18 @@ private struct SyncSettingsTab: View {
                 }
             }
         }
+        .onAppear(perform: refreshICloudRootAvailability)
+        .onChange(of: refreshCoordinator?.lastRefresh) { _, _ in refreshICloudRootAvailability() }
+        .onChange(of: refreshCoordinator?.isRefreshing) { _, refreshing in
+            if refreshing == false {
+                refreshICloudRootAvailability()
+            }
+        }
+        .onChange(of: settings.syncEnabled) { _, _ in refreshICloudRootAvailability() }
+    }
+
+    private func refreshICloudRootAvailability() {
+        iCloudRootAvailable = ICloudSync.defaultRoot != nil
     }
 
     private func remoteRow(_ device: RemoteDeviceStatus) -> some View {
@@ -1308,7 +1434,12 @@ private struct SyncSettingsTab: View {
                     }
                 }
                 if let lastWrite = device.lastWrite {
-                    Text("Last synced \(Self.relativeFormatter.localizedString(for: lastWrite, relativeTo: .now))")
+                    let relative = SettingsFormatting.relativeString(
+                        for: lastWrite,
+                        relativeTo: .now,
+                        locale: settings.language.locale ?? locale
+                    )
+                    Text("Last synced \(relative)")
                         .font(.system(size: 11.5))
                         .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
@@ -1337,8 +1468,12 @@ private struct SyncSettingsTab: View {
         case .failed:
             statusLine(Text("Publish failed"), isWarning: true)
         case .published(let date):
-            statusLine(Text("Last published \(Self.relativeFormatter.localizedString(for: date, relativeTo: .now))"),
-                isWarning: false)
+            let relative = SettingsFormatting.relativeString(
+                for: date,
+                relativeTo: .now,
+                locale: settings.language.locale ?? locale
+            )
+            statusLine(Text("Last published \(relative)"), isWarning: false)
         case .disabled:
             statusLine(Text("Not published yet"), isWarning: false)
         }
@@ -1361,12 +1496,6 @@ private struct SyncSettingsTab: View {
         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
 }
 
 private struct AccountBadge: View {
@@ -1422,6 +1551,9 @@ private struct RemoteStatusLabel: View {
 private struct AboutSettingsTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.locale) private var locale
+    @State private var cliStatus: CLIInstaller.Status = .notInstalled
+    @State private var thirdPartyNoticesURL: URL?
     @State private var installationMessage: String?
     @State private var installationFailed = false
 
@@ -1510,15 +1642,37 @@ private struct AboutSettingsTab: View {
                 SettingsHairline()
                 AboutValueRow(label: "License", value: Text(verbatim: "MIT"))
                 SettingsHairline()
-                AboutValueRow(label: "Acknowledgements", value: Text(verbatim: "tokscale, TokenTracker"))
+                AboutValueRow(label: "Acknowledgements", value: Text(verbatim: "tokscale, TokenTracker, Token Monitor"))
+                SettingsHairline()
+                SettingsControlRow(title: "Open-source licenses") {
+                    secondaryActionButton("Third-party notices") {
+                        if let thirdPartyNoticesURL {
+                            NSWorkspace.shared.open(thirdPartyNoticesURL)
+                        }
+                    }
+                    .disabled(thirdPartyNoticesURL == nil)
+                }
                 SettingsHairline()
                 AboutValueRow(label: "Privacy", value: Text("Read-only local Agent logs, no content uploads, no telemetry"))
             }
 
             SettingsRowsGroup {
-                SettingsControlRow(title: "Command-Line Tool", help: "Use token-taken in Terminal") {
-                    secondaryActionButton("Install Command-Line Tool", action: install)
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Command-Line Tool")
+                            .font(.system(size: 13, weight: .regular))
+                            .foregroundStyle(Palette.ink1)
+                        cliStatusLabel
+                    }
+                    Spacer(minLength: 12)
+                    HStack(spacing: 8) {
+                        secondaryActionButton("Install", action: install)
+                        secondaryActionButton("Uninstall", action: uninstall)
+                            .disabled(cliStatus == .notInstalled)
+                    }
                 }
+                .padding(.vertical, 8)
+                .frame(minHeight: 48)
 
                 if let installationMessage {
                     SettingsHairline()
@@ -1531,6 +1685,37 @@ private struct AboutSettingsTab: View {
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 }
             }
+        }
+        .onAppear {
+            refreshCLIStatus()
+            thirdPartyNoticesURL = Bundle.main.url(forResource: "THIRD_PARTY_NOTICES", withExtension: "md")
+        }
+    }
+
+    @ViewBuilder
+    private var cliStatusLabel: some View {
+        switch cliStatus {
+        case .installed(let url):
+            Text("Installed at \(url.path)")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
+                .lineLimit(2)
+                .truncationMode(.middle)
+        case .broken(let url):
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .accessibilityHidden(true)
+                Text("Broken link at \(url.path) — reinstall or uninstall to fix")
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+            }
+            .font(.system(size: 11.5))
+            .foregroundStyle(Palette.healthWarn)
+        case .notInstalled:
+            Text("Not installed · Use token-taken in Terminal")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Palette.ink3)
         }
     }
 
@@ -1669,7 +1854,12 @@ private struct AboutSettingsTab: View {
                         if Date.now.timeIntervalSince(lastCheckedAt) < 60 {
                             Text("Up to date · checked just now")
                         } else {
-                            Text("Up to date · checked \(Self.relativeFormatter.localizedString(for: lastCheckedAt, relativeTo: .now))")
+                            let relative = SettingsFormatting.relativeString(
+                                for: lastCheckedAt,
+                                relativeTo: .now,
+                                locale: settings.language.locale ?? locale
+                            )
+                            Text("Up to date · checked \(relative)")
                         }
                     } else {
                         Text("Up to date")
@@ -1734,17 +1924,8 @@ private struct AboutSettingsTab: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder
     private func secondaryActionButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        if reduceTransparency && !ThemeRuntime.isCosmos {
-            Button(title, action: action)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-        } else {
-            Button(title, action: action)
-                .themedGlassButton()
-                .controlSize(.small)
-        }
+        SettingsSecondaryButton(title, action: action)
     }
 
     @ViewBuilder
@@ -1766,21 +1947,46 @@ private struct AboutSettingsTab: View {
         }
     }
 
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return formatter
-    }()
+    private func refreshCLIStatus() {
+        cliStatus = CLIInstaller.currentStatus()
+    }
 
     private func install() {
         do {
-            if let destination = try CLIInstaller.install() {
-                installationMessage = String(localized: "Installed at \(destination.path)")
+            if let result = try CLIInstaller.install() {
+                if let exportLine = result.exportPATHLine {
+                    installationMessage = String(
+                        localized: "Installed at \(result.destination.path)\nThis folder is not in PATH. Add to your shell profile:\n\(exportLine)"
+                    )
+                } else {
+                    installationMessage = String(localized: "Installed at \(result.destination.path)")
+                }
                 installationFailed = false
+                refreshCLIStatus()
             }
         } catch {
             installationMessage = error.localizedDescription
             installationFailed = true
+            refreshCLIStatus()
+        }
+    }
+
+    private func uninstall() {
+        do {
+            switch cliStatus {
+            case .installed(let url), .broken(let url):
+                if try CLIInstaller.uninstall(at: url) {
+                    installationMessage = String(localized: "Removed \(url.path)")
+                    installationFailed = false
+                }
+            case .notInstalled:
+                break
+            }
+            refreshCLIStatus()
+        } catch {
+            installationMessage = error.localizedDescription
+            installationFailed = true
+            refreshCLIStatus()
         }
     }
 }

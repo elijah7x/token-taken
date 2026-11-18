@@ -45,11 +45,11 @@ public struct ZcodeCollector: UsageCollector {
 
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
-        let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
+        let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
         let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
         var aggregator = Aggregator(
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, cutoff: cutoff
+            currentHour: currentHour, cutoff: cutoff, maxDate: now.addingTimeInterval(86_400)
         )
 
         try SQLiteSnapshotReader.withReadableDatabase(
@@ -153,6 +153,10 @@ public struct ZcodeCollector: UsageCollector {
             let result = sqlite3_step(statement)
             guard result != SQLITE_DONE else { break }
             guard result == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
+            guard sqlite3_column_type(statement, 0) == SQLITE_INTEGER else {
+                aggregator.skipped += 1
+                continue
+            }
             aggregator.record(
                 timestamp: sqlite3_column_int64(statement, 0),
                 modelID: text(statement, 1),
@@ -168,6 +172,20 @@ public struct ZcodeCollector: UsageCollector {
     }
 
     private func collectLegacy(db: OpaquePointer, boundary: Int64?, into aggregator: inout Aggregator) throws {
+        let invalidStatement = try SQLiteSnapshotReader.prepare(db, """
+            SELECT COUNT(*) FROM message
+            WHERE (?1 IS NULL OR time_updated < ?1)
+              AND COALESCE(json_valid(data), 0) = 0;
+            """)
+        defer { sqlite3_finalize(invalidStatement) }
+        if let boundary {
+            sqlite3_bind_int64(invalidStatement, 1, boundary)
+        } else {
+            sqlite3_bind_null(invalidStatement, 1)
+        }
+        guard sqlite3_step(invalidStatement) == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
+        aggregator.skipped += Int(sqlite3_column_int64(invalidStatement, 0))
+
         let statement = try SQLiteSnapshotReader.prepare(db, """
             SELECT session_id, time_created, rowid,
                    COALESCE(json_extract(data, '$.time.created'), 0),
@@ -180,15 +198,16 @@ public struct ZcodeCollector: UsageCollector {
                    COALESCE(json_extract(data, '$.modelID'), json_extract(data, '$.modelId'), json_extract(data, '$.model.id')),
                    COALESCE(json_extract(data, '$.providerID'), json_extract(data, '$.model.providerID'), json_extract(data, '$.providerId'))
             FROM message
-            WHERE json_extract(data, '$.role') = 'assistant'
+            WHERE json_valid(data) = 1
               AND (?1 IS NULL OR time_updated < ?1)
-              AND (
+              AND CASE WHEN json_valid(data) = 1 THEN json_extract(data, '$.role') END = 'assistant'
+              AND CASE WHEN json_valid(data) = 1 THEN (
                   COALESCE(json_extract(data, '$.tokens.input'), 0) <> 0
                   OR COALESCE(json_extract(data, '$.tokens.output'), 0) <> 0
                   OR COALESCE(json_extract(data, '$.tokens.reasoning'), 0) <> 0
                   OR COALESCE(json_extract(data, '$.tokens.cache.read'), 0) <> 0
                   OR COALESCE(json_extract(data, '$.tokens.cache.write'), 0) <> 0
-              )
+              ) ELSE 0 END = 1
             ORDER BY time_created, rowid;
             """)
         defer { sqlite3_finalize(statement) }
@@ -291,6 +310,7 @@ public struct ZcodeCollector: UsageCollector {
         let calendar: Calendar
         let currentHour: Date
         let cutoff: Date
+        let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
         var hourly: [Date: HourlyUsage] = [:]
@@ -307,6 +327,11 @@ public struct ZcodeCollector: UsageCollector {
                 return
             }
             let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
+            guard date <= maxDate,
+                  let hour = calendar.dateInterval(of: .hour, for: date)?.start else {
+                skipped += 1
+                return
+            }
             let day = UsageDay.string(from: date, in: timeZone)
             let key = Key(day: day, modelID: model)
             var record = daily[key] ?? UsageRecord(
@@ -317,7 +342,6 @@ public struct ZcodeCollector: UsageCollector {
             record.counts += usage.counts
             record.eventCount += 1
             daily[key] = record
-            let hour = calendar.dateInterval(of: .hour, for: date)!.start
             if hour >= cutoff, hour <= currentHour {
                 var row = hourly[hour] ?? HourlyUsage(
                     hourStart: hour, deviceID: deviceID, sourceID: "zcode",

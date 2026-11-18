@@ -16,17 +16,7 @@ struct HomeView: View {
                 }
 
                 if let report = model.report {
-                    if model.state == .decodeFailed {
-                        StatusBanner(
-                            text: "Couldn't read the newest report. Showing the last saved copy.",
-                            systemImage: "exclamationmark.triangle"
-                        )
-                    } else if model.state == .iCloudUnavailable {
-                        StatusBanner(
-                            text: "iCloud is unavailable. Showing the last saved copy.",
-                            systemImage: "icloud.slash"
-                        )
-                    }
+                    statusBanner
 
                     hero(report)
                     rankBlock(report)
@@ -44,6 +34,7 @@ struct HomeView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(report.totals.allTime.total <= 0)
                     .padding(.top, 4)
                 } else {
                     EmptyStateView()
@@ -73,6 +64,40 @@ struct HomeView: View {
     }
 
     // MARK: - Sections
+
+    @ViewBuilder
+    private var statusBanner: some View {
+        switch model.state {
+        case .ok, .noReport:
+            EmptyView()
+        case .stale:
+            StatusBanner(
+                text: "Data is more than a day old. Open Token Taken on your Mac to refresh.",
+                systemImage: "clock.badge.exclamationmark"
+            )
+        case .downloading:
+            StatusBanner(
+                text: "Downloading the newest report from iCloud. Showing the last saved copy.",
+                systemImage: "icloud.and.arrow.down",
+                tint: Palette.accent
+            )
+        case .unsupportedVersion:
+            StatusBanner(
+                text: "Update Token Taken to read the newest report. Showing the last saved copy.",
+                systemImage: "arrow.down.circle"
+            )
+        case .decodeFailed:
+            StatusBanner(
+                text: "Couldn't read the newest report. Showing the last saved copy.",
+                systemImage: "exclamationmark.triangle"
+            )
+        case .iCloudUnavailable:
+            StatusBanner(
+                text: "iCloud is unavailable. Showing the last saved copy.",
+                systemImage: "icloud.slash"
+            )
+        }
+    }
 
     private func hero(_ report: MobileReport) -> some View {
         let total = report.totals.last30Days.total
@@ -148,34 +173,38 @@ struct HomeView: View {
         .cardSurface()
     }
 
+    @ViewBuilder
     private func chartCard(_ report: MobileReport) -> some View {
         let months = report.last12Months
+        if !months.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeader(title: "Last 12 months")
 
-        return VStack(alignment: .leading, spacing: 12) {
-            SectionHeader(title: "Last 12 months")
-
-            Chart(months, id: \.month) { month in
-                BarMark(
-                    x: .value("Month", ReportText.monthLabel(month.month, locale: locale)),
-                    y: .value("Tokens", Double(month.total))
-                )
-                .foregroundStyle(Palette.accent.opacity(0.85))
-                .cornerRadius(3)
-                .accessibilityLabel(Text(verbatim: ReportText.monthLabel(month.month, locale: locale)))
-                .accessibilityValue(Text(verbatim: TokenFormat.spoken(month.total, locale: locale)))
-            }
-            .chartYAxis(.hidden)
-            .chartXAxis {
-                AxisMarks(values: .automatic(desiredCount: 6)) { _ in
-                    AxisValueLabel()
+                Chart(months, id: \.month) { month in
+                    BarMark(
+                        x: .value("Month", month.month),
+                        y: .value("Tokens", Double(month.total))
+                    )
+                    .foregroundStyle(Palette.accent.opacity(0.85))
+                    .cornerRadius(3)
+                    .accessibilityLabel(Text(verbatim: ReportText.monthLabel(month.month, locale: locale)))
+                    .accessibilityValue(Text(verbatim: TokenFormat.spoken(month.total, locale: locale)))
+                }
+                .chartYAxis(.hidden)
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 6)) { value in
+                        AxisValueLabel {
+                            Text(verbatim: value.as(String.self).map { ReportText.monthLabel($0, locale: locale) } ?? "")
+                        }
                         .font(.caption2)
                         .foregroundStyle(Palette.ink3)
+                    }
                 }
+                .frame(height: 170)
             }
-            .frame(height: 170)
+            .padding(16)
+            .cardSurface()
         }
-        .padding(16)
-        .cardSurface()
     }
 
     @ViewBuilder
@@ -307,7 +336,7 @@ struct HomeView: View {
     }
 
     private var shareCard: ShareCardView? {
-        guard let report = model.report else { return nil }
+        guard let report = model.report, report.totals.allTime.total > 0 else { return nil }
         let period: String
         if let range = report.last30DayRange {
             period = String(localized: "Last 30 days", locale: locale)

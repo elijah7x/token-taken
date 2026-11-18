@@ -13,7 +13,7 @@ Every refresh rescanned all agent logs: about 14 s and a 245 MB memory peak on a
 - Each collector keeps a small local state file under `collector-state/` in the support directory. It is never synced or exported.
 - Every state carries a stamp of the viewer time zone, a collector format version, and (for tokscale) the pinned engine version. A mismatch or unreadable state means a full collection.
 - pi and omp record per-file inode, size, modification time, the offset after the last complete line, and the compact per-event data the existing dedupe and aggregation need. Unchanged files reuse cached events, grown files are parsed from the saved offset, and anything else is reparsed. Output is rebuilt from all events, so it equals a full scan.
-- Zcode compares fingerprints of the database and its `-wal` and `-shm` files and skips the backup when they match.
+- Zcode compares fingerprints of the database and its `-wal` and `-shm` files and skips opening the database when they match; when changed, it uses `SQLiteSnapshotReader` read-only access (falling back to a private temporary snapshot only when WAL sidecars require it).
 - tokscale fingerprints each client's inputs with a metadata-only walk (file count, total size, latest modification) and runs `graph` and `hourly` only for changed clients.
 - A collector reports untouched sources in `CollectionBatch.unchangedSourceIDs`. The runner re-stores their cached rows through the normal path, so the 48-hour hourly window and zero coverage advance as after a fresh collection.
 - New state is written through `CollectionBatch.stateCommits` only after every source of the batch was stored. Failures leave the previous state, so the next refresh collects again.

@@ -640,4 +640,49 @@ final class AntigravityCollectorTests: XCTestCase {
         let second = try await collector(home: home, stateDirectory: stateDirectory).collect()
         XCTAssertEqual(second.unchangedSourceIDs, ["antigravity"])
     }
+
+    func testUnreadableRootBlocksStateCommitAndCountsSkipped() async throws {
+        let home = try makeHome()
+        let root = cliRoot(home)
+        try makeDirectory(root)
+        let stateDirectory = directory.appendingPathComponent("state", isDirectory: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: root.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: root.path) }
+
+        let batch = try await collector(home: home, stateDirectory: stateDirectory).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertTrue(batch.stateCommits.isEmpty)
+    }
+
+    func testTokenAdditionClampsAtInt64Max() async throws {
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        let stamp = milliseconds("2026-11-10T10:00:00Z")
+        try writeDatabase(at: cliRoot(home).appendingPathComponent("overflow.db"), rows: [
+            blob(Row(responseID: "resp-1", model: "gemini-4-argon", input: UInt64(Int64.max), explicit: stamp)),
+            blob(Row(responseID: "resp-2", model: "gemini-4-argon", input: 100, explicit: stamp)),
+        ])
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.counts.input, Int64.max)
+        XCTAssertEqual(batch.hourly.first?.counts.input, Int64.max)
+    }
+
+    func testFutureTimestampIsSkipped() async throws {
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        let future = milliseconds("2026-11-13T00:00:00Z")
+        try writeDatabase(at: cliRoot(home).appendingPathComponent("future.db"), rows: [
+            blob(Row(responseID: "resp-future", model: "gemini-4-argon", input: 50, explicit: future)),
+        ])
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
+    }
 }

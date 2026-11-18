@@ -75,18 +75,16 @@ public struct PiCollector: UsageCollector {
 ///   `unknown`.
 /// - A file without a `session` header is still read record by record instead of being discarded.
 ///
-/// Daily totals cover every event; hourly buckets keep only the last 48 hours at UTC hour resolution.
+/// Daily totals cover every event; hourly buckets keep only the last 48 hours in the collector's time zone.
 struct PiFormatScan: Sendable {
     /// pi groups model-less tool, compaction, and branch-summary usage in this bucket.
     static let toolsSummariesModel = "tools/summaries"
-    /// Only recent usage needs hour resolution; older events roll into the daily totals only.
-    static let hourlyWindow: TimeInterval = 48 * 3_600
     /// Bounds the single buffered line; oversized records are discarded while streaming.
     static let maximumLineBytes = 64 << 20
     /// Placeholder epoch timestamps used to land usage in 1970; treated as missing.
     static let minimumTimestamp = Date(timeIntervalSince1970: 1_577_836_800)
     /// Bumped whenever the persisted incremental state layout or scan semantics change.
-    static let stateFormatVersion = 3
+    static let stateFormatVersion = 4
 
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
@@ -110,6 +108,7 @@ struct PiFormatScan: Sendable {
     /// When nil, every collection is a full scan and no state is read or written.
     let stateDirectory: URL?
     let now: Date
+    var beforeScan: (@Sendable () -> Void)? = nil
 
     func run() throws -> CollectionBatch {
         let startedAt = DispatchTime.now().uptimeNanoseconds
@@ -123,6 +122,7 @@ struct PiFormatScan: Sendable {
         }
 
         let files = try sessionFiles()
+        beforeScan?()
         let fractional = ISO8601DateFormatter()
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let plain = ISO8601DateFormatter()
@@ -132,9 +132,16 @@ struct PiFormatScan: Sendable {
             var totals = Totals(sourceID: sourceID, deviceID: deviceID, timeZone: timeZone, now: now)
             for file in files {
                 try autoreleasepool {
+                    let handle: FileHandle
+                    do {
+                        handle = try FileHandle(forReadingFrom: file)
+                    } catch where Self.isFileNotFound(error) {
+                        return
+                    }
+                    defer { try? handle.close() }
                     let modificationDate = Self.modificationDate(of: file) ?? now
                     var state = FileState()
-                    _ = try Self.forEachLine(in: file, onLine: { line, terminated in
+                    _ = try Self.forEachLine(handle: handle, onLine: { line, terminated in
                         autoreleasepool {
                             totals.scan(
                                 line: line,
@@ -205,13 +212,20 @@ struct PiFormatScan: Sendable {
                         totals.replay(entry: plan.entry!)
                         nextState.files[plan.key] = plan.entry
                     case .grow:
+                        let handle: FileHandle
+                        do {
+                            handle = try FileHandle(forReadingFrom: plan.file)
+                        } catch where Self.isFileNotFound(error) {
+                            return
+                        }
+                        defer { try? handle.close() }
                         var entry = plan.entry!
                         reparsedFiles += 1
                         // The previous tail is not replayed: the reread below covers its bytes again.
                         for event in entry.events { totals.replay(event, models: entry.models) }
                         totals.skippedRecords += entry.skipped
                         let scanned = try scanFile(
-                            plan.file, totals: &totals, fractional: fractional, plain: plain,
+                            plan.file, handle: handle, totals: &totals, fractional: fractional, plain: plain,
                             startOffset: entry.offset, seedModel: entry.currentModel, seedModels: entry.models
                         )
                         entry.fingerprint = plan.fingerprint!
@@ -226,9 +240,16 @@ struct PiFormatScan: Sendable {
                         entry.prefixHash = scanned.prefixHash
                         nextState.files[plan.key] = entry
                     case .reparse:
+                        let handle: FileHandle
+                        do {
+                            handle = try FileHandle(forReadingFrom: plan.file)
+                        } catch where Self.isFileNotFound(error) {
+                            return
+                        }
+                        defer { try? handle.close() }
                         reparsedFiles += 1
                         let scanned = try scanFile(
-                            plan.file, totals: &totals, fractional: fractional, plain: plain,
+                            plan.file, handle: handle, totals: &totals, fractional: fractional, plain: plain,
                             startOffset: 0, seedModel: nil, seedModels: []
                         )
                         if let fingerprint = plan.fingerprint {
@@ -240,11 +261,18 @@ struct PiFormatScan: Sendable {
         } else {
             for file in files {
                 try autoreleasepool {
+                    let handle: FileHandle
+                    do {
+                        handle = try FileHandle(forReadingFrom: file)
+                    } catch where Self.isFileNotFound(error) {
+                        return
+                    }
+                    defer { try? handle.close() }
                     reparsedFiles += 1
                     // Stat before reading: bytes appended while the scan runs are picked up next time.
                     let fingerprint = FileFingerprint(url: file)
                     let scanned = try scanFile(
-                        file, totals: &totals, fractional: fractional, plain: plain,
+                        file, handle: handle, totals: &totals, fractional: fractional, plain: plain,
                         startOffset: 0, seedModel: nil, seedModels: []
                     )
                     if let fingerprint {
@@ -325,6 +353,7 @@ struct PiFormatScan: Sendable {
     /// model changes are re-derived next time.
     private func scanFile(
         _ file: URL,
+        handle: FileHandle,
         totals: inout Totals,
         fractional: ISO8601DateFormatter,
         plain: ISO8601DateFormatter,
@@ -336,8 +365,9 @@ struct PiFormatScan: Sendable {
         var fileState = FileState(currentModel: seedModel, isFirstLine: startOffset == 0)
         var committedModel = seedModel
         totals.beginCapture(models: seedModels)
+        defer { if totals.capturing { _ = totals.endCapture() } }
         let offset = try Self.forEachLine(
-            in: file,
+            handle: handle,
             startOffset: startOffset,
             onLine: { line, terminated in
                 autoreleasepool {
@@ -401,6 +431,7 @@ struct PiFormatScan: Sendable {
                 at: root,
                 includingPropertiesForKeys: [.isRegularFileKey],
                 errorHandler: { _, error in
+                    if Self.isFileNotFound(error) { return true }
                     enumerationError = error
                     return false
                 }
@@ -424,6 +455,21 @@ struct PiFormatScan: Sendable {
 
     private static func modificationDate(of url: URL) -> Date? {
         (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
+    private static func isFileNotFound(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSCocoaErrorDomain,
+           nsError.code == NSFileNoSuchFileError || nsError.code == NSFileReadNoSuchFileError {
+            return true
+        }
+        if nsError.domain == NSPOSIXErrorDomain, nsError.code == ENOENT {
+            return true
+        }
+        if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? Error {
+            return isFileNotFound(underlying)
+        }
+        return false
     }
 
     private struct FileState {
@@ -498,13 +544,13 @@ struct PiFormatScan: Sendable {
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
             type = try values.decodeIfPresent(String.self, forKey: .type)
-            id = try? values.decodeIfPresent(String.self, forKey: .id)
-            timestamp = try? values.decodeIfPresent(String.self, forKey: .timestamp)
-            model = try? values.decodeIfPresent(String.self, forKey: .model)
-            modelId = try? values.decodeIfPresent(String.self, forKey: .modelId)
-            responseId = try? values.decodeIfPresent(String.self, forKey: .responseId)
-            message = try? values.decodeIfPresent(ScanMessage.self, forKey: .message)
-            usage = try? values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+            id = try values.decodeIfPresent(String.self, forKey: .id)
+            timestamp = try values.decodeIfPresent(String.self, forKey: .timestamp)
+            model = try values.decodeIfPresent(String.self, forKey: .model)
+            modelId = try values.decodeIfPresent(String.self, forKey: .modelId)
+            responseId = try values.decodeIfPresent(String.self, forKey: .responseId)
+            message = try values.decodeIfPresent(ScanMessage.self, forKey: .message)
+            usage = try values.decodeIfPresent(ScanUsage.self, forKey: .usage)
         }
     }
 
@@ -521,11 +567,11 @@ struct PiFormatScan: Sendable {
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
-            role = try? values.decodeIfPresent(String.self, forKey: .role)
-            model = try? values.decodeIfPresent(String.self, forKey: .model)
-            responseId = try? values.decodeIfPresent(String.self, forKey: .responseId)
-            timestamp = try? values.decodeIfPresent(JSONInteger.self, forKey: .timestamp)
-            usage = try? values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+            role = try values.decodeIfPresent(String.self, forKey: .role)
+            model = try values.decodeIfPresent(String.self, forKey: .model)
+            responseId = try values.decodeIfPresent(String.self, forKey: .responseId)
+            timestamp = try values.decodeIfPresent(JSONInteger.self, forKey: .timestamp)
+            usage = try values.decodeIfPresent(ScanUsage.self, forKey: .usage)
         }
     }
 
@@ -543,28 +589,35 @@ struct PiFormatScan: Sendable {
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
-            input = try? values.decodeIfPresent(JSONInteger.self, forKey: .input)
-            cacheRead = try? values.decodeIfPresent(JSONInteger.self, forKey: .cacheRead)
-            cacheWrite = try? values.decodeIfPresent(JSONInteger.self, forKey: .cacheWrite)
-            output = try? values.decodeIfPresent(JSONInteger.self, forKey: .output)
-            reasoningTokens = try? values.decodeIfPresent(JSONInteger.self, forKey: .reasoningTokens)
-            reasoning = try? values.decodeIfPresent(JSONInteger.self, forKey: .reasoning)
+            input = try values.decodeIfPresent(JSONInteger.self, forKey: .input)
+            cacheRead = try values.decodeIfPresent(JSONInteger.self, forKey: .cacheRead)
+            cacheWrite = try values.decodeIfPresent(JSONInteger.self, forKey: .cacheWrite)
+            output = try values.decodeIfPresent(JSONInteger.self, forKey: .output)
+            reasoningTokens = try values.decodeIfPresent(JSONInteger.self, forKey: .reasoningTokens)
+            reasoning = try values.decodeIfPresent(JSONInteger.self, forKey: .reasoning)
         }
     }
 
     private struct JSONInteger: Decodable {
-        let value: Int64?
+        let value: Int64
 
         init(from decoder: Decoder) throws {
             let values = try decoder.singleValueContainer()
-            guard let number = try? values.decode(Double.self), number.isFinite else {
-                value = nil
+            if let exact = try? values.decode(Int64.self) {
+                value = exact
                 return
             }
+            let number = try values.decode(Double.self)
+            guard number.isFinite else {
+                throw DecodingError.dataCorruptedError(
+                    in: values, debugDescription: "Non-finite numeric value"
+                )
+            }
             let rounded = number.rounded(.towardZero)
-            guard rounded >= Double(Int64.min), rounded < 0x1p63 else {
-                value = nil
-                return
+            guard rounded > Double(Int64.min), rounded < 0x1p63 else {
+                throw DecodingError.dataCorruptedError(
+                    in: values, debugDescription: "Numeric value out of Int64 range"
+                )
             }
             value = Int64(rounded)
         }
@@ -660,24 +713,33 @@ struct PiFormatScan: Sendable {
                         if peek == 0x22 {
                             let value = try parseString()
                             output.append(contentsOf: bytes[value.range])
+                        } else if peek == 0x6E {
+                            try consumeLiteral("null")
+                            output.append(contentsOf: "null".utf8)
                         } else {
                             try skipValue()
-                            output.append(contentsOf: "null".utf8)
+                            output.append(contentsOf: "false".utf8)
                         }
                     case .number:
                         if let byte = peek, byte == 0x2D || (0x30...0x39).contains(byte) {
                             let value = try parseNumber()
                             output.append(contentsOf: bytes[value])
+                        } else if peek == 0x6E {
+                            try consumeLiteral("null")
+                            output.append(contentsOf: "null".utf8)
                         } else {
                             try skipValue()
-                            output.append(contentsOf: "null".utf8)
+                            output.append(contentsOf: "false".utf8)
                         }
                     case .object(let nestedMode):
                         if peek == 0x7B {
                             try projectObject(mode: nestedMode, into: &output)
+                        } else if peek == 0x6E {
+                            try consumeLiteral("null")
+                            output.append(contentsOf: "null".utf8)
                         } else {
                             try skipValue()
-                            output.append(contentsOf: "null".utf8)
+                            output.append(contentsOf: "false".utf8)
                         }
                     }
                     emitted = true
@@ -946,7 +1008,10 @@ struct PiFormatScan: Sendable {
         let sourceID: String
         let deviceID: String
         let timeZone: TimeZone
+        let calendar: Calendar
         let now: Date
+        let currentHour: Date
+        let cutoff: Date
 
         var daily: [DailyKey: DailyTotals] = [:]
         var hourly: [Date: HourlyTotals] = [:]
@@ -955,6 +1020,20 @@ struct PiFormatScan: Sendable {
         /// While set, every parsed record is also captured for the incremental state file.
         var capturing = false
         var capture = FileCapture()
+
+        init(sourceID: String, deviceID: String, timeZone: TimeZone, now: Date) {
+            self.sourceID = sourceID
+            self.deviceID = deviceID
+            self.timeZone = timeZone
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = timeZone
+            self.calendar = calendar
+            self.now = now
+            let currentHour = calendar.dateInterval(of: .hour, for: now)?.start
+                ?? Date(timeIntervalSince1970: (now.timeIntervalSince1970 / 3_600).rounded(.down) * 3_600)
+            self.currentHour = currentHour
+            self.cutoff = currentHour.addingTimeInterval(-47 * 3_600)
+        }
 
         mutating func beginCapture(models: [String]) {
             capture = FileCapture(models: models)
@@ -1014,8 +1093,8 @@ struct PiFormatScan: Sendable {
             dailyTotals.eventCount += 1
             daily[dailyKey] = dailyTotals
 
-            let hourStart = Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 3_600).rounded(.down) * 3_600)
-            guard hourStart >= now.addingTimeInterval(-PiFormatScan.hourlyWindow), hourStart <= now else { return }
+            guard let hourStart = calendar.dateInterval(of: .hour, for: date)?.start,
+                  hourStart >= cutoff, hourStart <= currentHour else { return }
             var hourlyTotals = hourly[hourStart] ?? HourlyTotals()
             hourlyTotals.counts += counts
             hourlyTotals.eventCount += 1
@@ -1121,14 +1200,33 @@ struct PiFormatScan: Sendable {
                 return
             }
             guard counts.total > 0 else { return }
-            let sourceDate = Self.sourceEventDate(
+            let date: Date
+            let epochMs: Int64
+            let timestampIdentity: String
+            switch Self.sourceEventDate(
                 messageTimestamp: messageTimestamp,
                 recorded: object.timestamp,
                 fractional: fractional,
-                plain: plain
-            )
-            let date = sourceDate ?? fallbackDate
-            if sourceDate == nil, capturing { capture.usedFallbackDate = true }
+                plain: plain,
+                now: now
+            ) {
+            case .valid(let resolvedDate, let resolvedMs):
+                date = resolvedDate
+                epochMs = resolvedMs
+                timestampIdentity = String(resolvedMs)
+            case .missing:
+                guard let fallbackMs = Self.safeEpochMs(fallbackDate) else {
+                    countSkipped(terminated: terminated)
+                    return
+                }
+                date = fallbackDate
+                epochMs = fallbackMs
+                timestampIdentity = "missing"
+                if capturing { capture.usedFallbackDate = true }
+            case .invalid:
+                countSkipped(terminated: terminated)
+                return
+            }
 
             let rawModelID = model ?? "unknown"
 
@@ -1137,9 +1235,6 @@ struct PiFormatScan: Sendable {
             // a short response id differ in entry id, timestamp, or counts and must both count.
             let identifier = Self.text(object.id).map { "\(type):\($0)" }
                 ?? "\(type):line:\(Self.fingerprint(line))"
-            let timestampIdentity = sourceDate.map {
-                String(Int64(($0.timeIntervalSince1970 * 1_000).rounded()))
-            } ?? "missing"
             var key = DedupKey()
             key.combine(identifier)
             key.combine(timestampIdentity)
@@ -1158,7 +1253,7 @@ struct PiFormatScan: Sendable {
                     PiFormatScanEvent(
                         keyA: key.a,
                         keyB: key.b,
-                        epochMs: Int64((date.timeIntervalSince1970 * 1_000).rounded()),
+                        epochMs: epochMs,
                         modelIndex: capture.modelIndex(of: rawModelID),
                         counts: counts,
                         reasoningKnown: reasoningKnown
@@ -1229,24 +1324,45 @@ struct PiFormatScan: Sendable {
             return (counts, reasoningKnown)
         }
 
+        enum SourceDateResult {
+            case valid(Date, Int64)
+            case missing
+            case invalid
+        }
+
+        static func safeEpochMs(_ date: Date) -> Int64? {
+            let ms = (date.timeIntervalSince1970 * 1_000).rounded()
+            guard ms.isFinite, ms >= Double(Int64.min), ms < 0x1p63 else { return nil }
+            return Int64(ms)
+        }
+
         static func sourceEventDate(
             messageTimestamp: JSONInteger?,
             recorded: String?,
             fractional: ISO8601DateFormatter,
-            plain: ISO8601DateFormatter
-        ) -> Date? {
+            plain: ISO8601DateFormatter,
+            now: Date
+        ) -> SourceDateResult {
+            let maximumDate = now.addingTimeInterval(86_400)
             // An assistant message's own timestamp is the request start; the entry timestamp is
             // when the record was persisted, so the message timestamp wins when it is usable.
             if let milliseconds = messageTimestamp?.value, milliseconds > 0 {
                 let date = Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
-                if date >= PiFormatScan.minimumTimestamp { return date }
+                if date > maximumDate { return .invalid }
+                if date >= PiFormatScan.minimumTimestamp {
+                    guard let epochMs = safeEpochMs(date) else { return .invalid }
+                    return .valid(date, epochMs)
+                }
             }
             if let recorded,
-               let date = fractional.date(from: recorded) ?? plain.date(from: recorded),
-               date >= PiFormatScan.minimumTimestamp {
-                return date
+               let date = fractional.date(from: recorded) ?? plain.date(from: recorded) {
+                if date > maximumDate { return .invalid }
+                if date >= PiFormatScan.minimumTimestamp {
+                    guard let epochMs = safeEpochMs(date) else { return .invalid }
+                    return .valid(date, epochMs)
+                }
             }
-            return nil
+            return .missing
         }
 
         private static func text(_ value: String?) -> String? {
@@ -1273,13 +1389,11 @@ struct PiFormatScan: Sendable {
     /// terminated it; the final unterminated line is still delivered, matching a full scan, but the
     /// caller files it under the state's tail so a later append re-reads its bytes.
     private static func forEachLine(
-        in url: URL,
+        handle file: FileHandle,
         startOffset: UInt64 = 0,
         onLine: (Data, Bool) -> Void,
         onOverlongLine: (Bool) -> Void
     ) throws -> UInt64 {
-        let file = try FileHandle(forReadingFrom: url)
-        defer { try? file.close() }
         if startOffset > 0 { try file.seek(toFileOffset: startOffset) }
 
         let newline = UInt8(ascii: "\n")
@@ -1294,7 +1408,10 @@ struct PiFormatScan: Sendable {
             defer { chunkStart += UInt64(chunk.count) }
             var rest = chunk[...]
             while let index = rest.firstIndex(of: newline) {
-                if !discardingOverlongLine {
+                if discardingOverlongLine {
+                    onOverlongLine(true)
+                    discardingOverlongLine = false
+                } else {
                     let segment = rest[rest.startIndex..<index]
                     if pending.count + segment.count > maximumLineBytes {
                         onOverlongLine(true)
@@ -1303,7 +1420,6 @@ struct PiFormatScan: Sendable {
                         onLine(pending, true)
                     }
                 }
-                discardingOverlongLine = false
                 offsetThroughLastNewline =
                     chunkStart + UInt64(chunk.distance(from: chunk.startIndex, to: index)) + 1
                 pending.removeAll(keepingCapacity: pending.count <= (64 << 10))
@@ -1313,12 +1429,13 @@ struct PiFormatScan: Sendable {
             if pending.count + rest.count > maximumLineBytes {
                 pending.removeAll(keepingCapacity: false)
                 discardingOverlongLine = true
-                onOverlongLine(false)
             } else {
                 pending.append(contentsOf: rest)
             }
         }
-        if !pending.isEmpty, !discardingOverlongLine {
+        if discardingOverlongLine {
+            onOverlongLine(false)
+        } else if !pending.isEmpty {
             onLine(pending, false)
         }
         return offsetThroughLastNewline

@@ -66,14 +66,20 @@ public struct AntigravityCollector: UsageCollector {
 
         var files: [DatabaseFile] = []
         var available = false
+        var unreadableRoots = 0
         for root in roots {
             var isDirectory: ObjCBool = false
             guard manager.fileExists(atPath: root.directory.path, isDirectory: &isDirectory),
                   isDirectory.boolValue else { continue }
             available = true
-            let names = (try? manager.contentsOfDirectory(atPath: root.directory.path)) ?? []
-            for name in names.sorted() where name.hasSuffix(".db") {
-                files.append(DatabaseFile(client: root.client, url: root.directory.appendingPathComponent(name)))
+            do {
+                let names = try manager.contentsOfDirectory(atPath: root.directory.path)
+                for name in names.sorted() where name.hasSuffix(".db") {
+                    files.append(DatabaseFile(client: root.client, url: root.directory.appendingPathComponent(name)))
+                }
+            } catch {
+                unreadableRoots += 1
+                Self.logger.error("source=antigravity unreadable_root")
             }
         }
         guard available else { throw CollectorError.sourceUnavailable }
@@ -81,7 +87,7 @@ public struct AntigravityCollector: UsageCollector {
         let stamp = CollectionStamp(formatVersion: Self.stateFormatVersion, timeZone: timeZone, sourceIDs: sourceIDs)
         // Fingerprint before the read: a write that lands while reading must trigger a re-collect next time.
         let fingerprints = Self.fingerprints(files)
-        if let stateFile, !fingerprints.isEmpty, let saved = stateFile.load(),
+        if let stateFile, unreadableRoots == 0, !fingerprints.isEmpty, let saved = stateFile.load(),
            saved.stamp == stamp, saved.files == fingerprints {
             log(mode: "unchanged", since: started)
             return CollectionBatch(unchangedSourceIDs: Set(sourceIDs))
@@ -92,6 +98,9 @@ public struct AntigravityCollector: UsageCollector {
         defer { try? manager.removeItem(at: temporaryDirectory) }
 
         var aggregator = Aggregator(deviceID: deviceID, timeZone: timeZone, now: now)
+        for _ in 0..<unreadableRoots {
+            aggregator.skipUnreadableDatabase()
+        }
         var unreadableDatabases = 0
         for file in files {
             let conversation: Conversation?
@@ -113,9 +122,9 @@ public struct AntigravityCollector: UsageCollector {
         }
 
         var batch = aggregator.batch()
-        // Save the fingerprint only when every database was read and none changed during the read; otherwise an
-        // unchanged fingerprint would stop the next run from retrying the databases this one could not read.
-        if let stateFile, unreadableDatabases == 0, Self.fingerprints(files) == fingerprints {
+        // Save the fingerprint only when every root and database was read and none changed during the read;
+        // otherwise an unchanged fingerprint would stop the next run from retrying unreadable inputs.
+        if let stateFile, unreadableRoots == 0, unreadableDatabases == 0, Self.fingerprints(files) == fingerprints {
             let saved = SavedState(stamp: stamp, files: fingerprints)
             batch.stateCommits = [{ try stateFile.save(saved) }]
         }
@@ -140,7 +149,7 @@ public struct AntigravityCollector: UsageCollector {
             // which is the only stamp left when neither decodes.
             let sessionStamp = sessionCreated(at: db) ?? modified
                 ?? Int64((now.timeIntervalSince1970 * 1_000).rounded())
-            return Conversation(rows: rows, sessionStamp: sessionStamp, steps: stepTimestamps(db))
+            return Conversation(rows: rows, sessionStamp: sessionStamp, steps: try stepTimestamps(db))
         }
     }
 
@@ -185,7 +194,7 @@ public struct AntigravityCollector: UsageCollector {
     /// responseId and `#20.#3` the generation index. The 24-character step id rarely equals the 20-character
     /// usage id on current builds, so the index join carries most rows; an exact-match-only id join can miss
     /// but never mis-date.
-    private func stepTimestamps(_ db: OpaquePointer) -> StepTimestamps {
+    private func stepTimestamps(_ db: OpaquePointer) throws -> StepTimestamps {
         var stamps = StepTimestamps()
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(
@@ -194,7 +203,8 @@ public struct AntigravityCollector: UsageCollector {
         defer { sqlite3_finalize(statement) }
         while true {
             let result = sqlite3_step(statement)
-            guard result == SQLITE_ROW else { break }
+            guard result != SQLITE_DONE else { break }
+            guard result == SQLITE_ROW else { throw SQLiteSnapshotReader.lastError(db) }
             guard let blob = Self.blob(statement, 0) else { continue }
             let metadata = ProtoMessage(blob)
             guard let stamp = metadata.message(1).flatMap(ProtoMessage.milliseconds), stamp > 0 else { continue }
@@ -331,6 +341,7 @@ public struct AntigravityCollector: UsageCollector {
         let calendar: Calendar
         let currentHour: Date
         let cutoff: Date
+        let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
         var hourly: [Date: HourlyUsage] = [:]
@@ -344,9 +355,10 @@ public struct AntigravityCollector: UsageCollector {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = timeZone
             self.calendar = calendar
-            let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
+            let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
             self.currentHour = currentHour
             cutoff = currentHour.addingTimeInterval(-47 * 3_600)
+            maxDate = now.addingTimeInterval(86_400)
         }
 
         mutating func skipUnreadableDatabase() {
@@ -377,7 +389,8 @@ public struct AntigravityCollector: UsageCollector {
                 output: AntigravityCollector.count(usage.varint(9)),
                 reasoning: AntigravityCollector.count(usage.varint(10))
             )
-            guard counts.total != 0 else { return }
+            guard counts.input > 0 || counts.cacheRead > 0 || counts.cacheWrite > 0
+                || counts.output > 0 || counts.reasoning > 0 else { return }
 
             let responseID = usage.text(11)
             let identity: String
@@ -395,31 +408,52 @@ public struct AntigravityCollector: UsageCollector {
                 skipped += 1
                 return
             }
+            let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
+            guard date <= maxDate,
+                  let hour = calendar.dateInterval(of: .hour, for: date)?.start else {
+                skipped += 1
+                return
+            }
             // Deduplicate across every database of this run (CLI first): a conversation copied between the two
             // client stores must be counted once.
             guard seen.insert(identity).inserted else { return }
 
             let model = resolvedModel(chat: chat, models: models)
-            let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
             let day = UsageDay.string(from: date, in: timeZone)
             let key = Key(day: day, modelID: model)
             var record = daily[key] ?? UsageRecord(
                 day: day, timeZoneID: timeZone.identifier, deviceID: deviceID,
                 sourceID: AntigravityCollector.sourceID, modelID: model, rawModelID: model, counts: .zero
             )
-            record.counts += counts
+            record.counts = Self.clampedAdd(record.counts, counts)
             record.eventCount += 1
             daily[key] = record
 
-            let hour = calendar.dateInterval(of: .hour, for: date)!.start
             guard hour >= cutoff, hour <= currentHour else { return }
             var hourlyRow = hourly[hour] ?? HourlyUsage(
                 hourStart: hour, deviceID: deviceID, sourceID: AntigravityCollector.sourceID,
                 counts: .zero, eventCount: 0, reasoningKnown: true
             )
-            hourlyRow.counts += counts
+            hourlyRow.counts = Self.clampedAdd(hourlyRow.counts, counts)
             hourlyRow.eventCount += 1
             hourly[hour] = hourlyRow
+        }
+
+        private static func clampedAdd(_ lhs: Int64, _ rhs: Int64) -> Int64 {
+            let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+            return overflow ? Int64.max : sum
+        }
+
+        private static func clampedAdd(_ lhs: TokenCounts, _ rhs: TokenCounts) -> TokenCounts {
+            TokenCounts(
+                input: clampedAdd(lhs.input, rhs.input),
+                cacheRead: clampedAdd(lhs.cacheRead, rhs.cacheRead),
+                cacheWrite: clampedAdd(lhs.cacheWrite, rhs.cacheWrite),
+                output: clampedAdd(lhs.output, rhs.output),
+                reasoning: clampedAdd(lhs.reasoning, rhs.reasoning),
+                uncategorized: clampedAdd(lhs.uncategorized, rhs.uncategorized),
+                cacheWrite1h: clampedAdd(lhs.cacheWrite1h, rhs.cacheWrite1h)
+            )
         }
 
         /// `chatModel.#9.#4` explicit Timestamp, then `steps` by responseId, then by generation index, then the
@@ -531,7 +565,7 @@ private struct ProtoMessage {
             guard let tag = scalar(bytes, &position) else { return fields }
             let rawNumber = tag >> 3
             // Protobuf's field numbers stop at 2^29 - 1; anything above is a malformed tag, not a field.
-            guard rawNumber > 0, rawNumber <= 5_368_870_911 else { return fields }
+            guard rawNumber > 0, rawNumber <= 536_870_911 else { return fields }
             let number = Int(rawNumber)
             let wire = Int(tag & 0x07)
             switch wire {

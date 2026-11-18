@@ -22,13 +22,22 @@ Before building Token Taken, I tried several other usage trackers, only to run i
 - **Opt-in, aggregate-only sync** — iCloud Drive sync and the iPhone companion report are off by default. Synced data contains only aggregate usage metadata—no prompts, responses, file paths, project names, or credentials.
 - **Estimated costs** — Cost figures are read-time estimates from a bundled price table, never provider bills.
 
+See [PRIVACY.md](PRIVACY.md) for the full privacy policy.
+
 ## Status
 
 Only the source code is public for now—no release has been published yet. Packaged builds are coming soon; **Star** this repository if you'd like to be notified when the first release is out.
 
 ## Building from source
 
-Requires an Apple silicon Mac on macOS 26 or later, and Xcode. The iPhone companion lives in `ios/`. Architecture and design notes are in [`docs/`](docs/).
+Requires an Apple silicon Mac on macOS 26 or later, Xcode, and [XcodeGen](https://github.com/yonaskolb/XcodeGen). The iPhone companion lives in `ios/`. Architecture and design notes are in [`docs/`](docs/).
+
+```bash
+brew install xcodegen
+./scripts/fetch-engine.sh
+xcodegen generate
+open TokenTaken.xcodeproj
+```
 
 ## License
 

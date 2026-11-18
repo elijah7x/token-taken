@@ -270,7 +270,12 @@ final class AppUpdater {
         let destination = Bundle.main.bundleURL
         let parent = destination.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            let message = String(localized: "Token Taken cannot update itself in this folder. Move it to Applications or update manually.")
+            let message: String
+            if parent.standardizedFileURL.path == "/Applications" {
+                message = String(localized: "Token Taken lacks permission to write to /Applications. Update manually from the download page.")
+            } else {
+                message = String(localized: "Token Taken cannot update itself in this folder. Move it to Applications or update manually.")
+            }
             logger.error("Handoff refused: bundle parent is not writable")
             phase = .failed(message: message)
             return false
@@ -354,7 +359,12 @@ final class AppUpdater {
     }
 
     nonisolated private static func signatureRequirement(teamID: String) -> String {
-        "anchor apple generic and identifier \"\(bundleIdentifier)\" and certificate leaf[subject.OU] = \"\(teamID)\""
+        """
+        anchor apple generic and identifier "\(bundleIdentifier)" \
+        and certificate 1[field.1.2.840.113635.100.6.2.6] \
+        and certificate leaf[field.1.2.840.113635.100.6.1.13] \
+        and certificate leaf[subject.OU] = "\(teamID)"
+        """
     }
 
     nonisolated private static func verifyAndExtract(
@@ -723,33 +733,55 @@ final class AppUpdater {
       exit 1
     fi
 
-    BACKUP_DIR=$(mktemp -d "$(dirname "$DEST")/.TokenTaken-previous.XXXXXX") || {
-      echo "Could not create backup directory"
+    DEST_PARENT="$(dirname "$DEST")"
+    DEST_NAME="$(basename "$DEST")"
+
+    TMP_DIR=$(mktemp -d "$DEST_PARENT/.TokenTaken-staging.XXXXXX") || {
+      echo "Could not create staging directory"
       rm -rf "$NEW"
       reopen
       mark_complete
       exit 1
     }
-    BACKUP="$BACKUP_DIR/$(basename "$DEST")"
-    if [ -e "$DEST" ]; then
+    TMP="$TMP_DIR/$DEST_NAME"
+
+    if ! /usr/bin/ditto "$NEW" "$TMP"; then
+      echo "Could not copy staged bundle to destination volume"
+      rm -rf "$TMP_DIR" "$NEW"
+      reopen
+      mark_complete
+      exit 1
+    fi
+
+    BACKUP_DIR=$(mktemp -d "$DEST_PARENT/.TokenTaken-previous.XXXXXX") || {
+      echo "Could not create backup directory"
+      rm -rf "$TMP_DIR" "$NEW"
+      reopen
+      mark_complete
+      exit 1
+    }
+    BACKUP="$BACKUP_DIR/$DEST_NAME"
+
+    if [ -e "$DEST" ] || [ -L "$DEST" ]; then
       mv "$DEST" "$BACKUP" || {
         echo "Could not move current bundle aside"
+        rm -rf "$TMP_DIR" "$NEW"
         rmdir "$BACKUP_DIR" 2>/dev/null
-        rm -rf "$NEW"
         reopen
         mark_complete
         exit 1
       }
     fi
 
-    if mv "$NEW" "$DEST"; then
-      rm -rf "$BACKUP_DIR"
+    if mv "$TMP" "$DEST"; then
+      rm -rf "$BACKUP_DIR" "$TMP_DIR" "$NEW"
     else
       echo "Could not move staged bundle into place"
-      if [ -e "$BACKUP" ]; then
+      rm -rf "$DEST"
+      if [ -e "$BACKUP" ] || [ -L "$BACKUP" ]; then
         mv "$BACKUP" "$DEST" && rmdir "$BACKUP_DIR" 2>/dev/null
       fi
-      rm -rf "$NEW"
+      rm -rf "$TMP_DIR" "$NEW"
       reopen
       mark_complete
       exit 1

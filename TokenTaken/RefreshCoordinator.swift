@@ -31,6 +31,8 @@ final class RefreshCoordinator {
 
     private(set) var isRefreshing = false
     private(set) var lastRefresh: Date?
+    /// Timestamp of the most recent full scan that finished, even when every harness was `.notInstalled`.
+    private(set) var lastCompletedScan: Date?
     private(set) var health: [SourceHealth]
     private(set) var engineStatus: EngineStatus = .missing
     private(set) var remoteSnapshots: [RemoteDeviceSnapshot] = []
@@ -46,17 +48,20 @@ final class RefreshCoordinator {
     @ObservationIgnored let store: SQLiteUsageStore
     @ObservationIgnored var onChange: (() -> Void)?
     @ObservationIgnored private let settings: AppSettings
-    @ObservationIgnored private let device: Device
+    @ObservationIgnored private let deviceID: String
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var readRemotesTask: Task<Void, Never>?
     @ObservationIgnored private var syncTask: Task<Void, Never>?
     @ObservationIgnored private var remoteRetryTask: Task<Void, Never>?
     @ObservationIgnored private var remoteRetryAttempt = 0
-    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
-    @ObservationIgnored private var ubiquityIdentityObserver: NSObjectProtocol?
+    @ObservationIgnored private var didObserveWake = false
+    @ObservationIgnored private var didObserveUbiquityIdentity = false
+    @ObservationIgnored private let observerTokens = ObserverTokens()
     @ObservationIgnored private var lastUbiquityIdentityToken: (any NSCoding & NSCopying & NSObjectProtocol)?
     @ObservationIgnored private var lastAttempt: Date?
     @ObservationIgnored private let syncWorker = SyncWorker()
     @ObservationIgnored private var mobileReportTask: Task<Void, Never>?
+    @ObservationIgnored private var mobileReportActionTask: Task<Void, Never>?
     @ObservationIgnored private let mobileReportWorker = MobileReportWorker()
     /// Bumped by every real state change; `notifyIfChanged()` republishes once per phase of a refresh.
     @ObservationIgnored private var stateRevision = 0
@@ -65,19 +70,22 @@ final class RefreshCoordinator {
     init(settings: AppSettings) throws {
         self.settings = settings
         store = try SQLiteUsageStore(url: AppPaths.databaseURL)
-        device = LocalDevice.current()
+        deviceID = LocalDevice.current().id
         let token = FileManager.default.ubiquityIdentityToken
         lastUbiquityIdentityToken = token
         iCloudSignedIn = token != nil
         health = try store.health().map { $0.markingStale() }
         lastRefresh = health.compactMap(\.lastSuccess).max()
+        lastCompletedScan = lastRefresh ?? health.compactMap(\.lastAttempt).max()
         updateEngineStatus()
         settings.onSyncEnabledChange = { [weak self] in
             guard let self else { return }
+            self.readRemotesTask?.cancel()
+            self.readRemotesTask = nil
             self.syncTask?.cancel()
             self.cancelRemoteRetry()
             if self.settings.syncEnabled {
-                Task { [weak self] in await self?.readRemotes() }
+                self.runReadRemotes()
             } else {
                 if !self.remoteSnapshots.isEmpty {
                     self.remoteSnapshots = []
@@ -86,6 +94,9 @@ final class RefreshCoordinator {
                 self.setSyncReadFailed(false)
                 self.setSyncWriteFailed(false)
                 self.notifyIfChanged()
+                if self.settings.mobileReportEnabled {
+                    self.runMobileReportAction { await $0.publishMobileReport() }
+                }
             }
         }
         // Enabling account-wide collection is a user action worth a fresh read; disabling keeps the
@@ -98,14 +109,18 @@ final class RefreshCoordinator {
             guard let self else { return }
             if self.settings.mobileReportEnabled {
                 self.startMobileReportLoop()
-                Task { [weak self] in await self?.publishMobileReport() }
+                self.runMobileReportAction { await $0.publishMobileReport() }
             } else {
                 // Disabling deletes only this Mac's report; other Macs keep theirs.
                 self.mobileReportTask?.cancel()
                 self.mobileReportTask = nil
-                Task { [weak self] in await self?.removeMobileReport() }
+                self.runMobileReportAction { await $0.removeMobileReport() }
             }
         }
+    }
+
+    deinit {
+        observerTokens.removeAll()
     }
 
     func start() {
@@ -117,8 +132,7 @@ final class RefreshCoordinator {
         // A skipped launch refresh still reads the other Macs: their rows are not this Mac's logs, and
         // leaving them unread would hide synced devices until the next collection.
         if !refreshImmediately {
-            Task { [weak self] in
-                await self?.readRemotes()
+            runReadRemotes { [weak self] in
                 // Republish too, or Settings reports the iPhone report as unpublished until the hourly loop runs.
                 if self?.settings.mobileReportEnabled == true { await self?.publishMobileReport() }
             }
@@ -127,13 +141,13 @@ final class RefreshCoordinator {
     }
 
     /// Fresh data is reused at launch; a failed or stale source and an old success still collect. The
-    /// loop in `scheduleLoop` picks the deferred run up from `lastRefresh`.
+    /// loop in `scheduleLoop` picks the deferred run up from `lastCompletedScan`.
     private var needsLaunchRefresh: Bool {
         if health.contains(where: { $0.state == .failed || $0.state == .unavailable || $0.state == .stale }) {
             return true
         }
-        guard let lastRefresh else { return true }
-        return Date.now.timeIntervalSince(lastRefresh) >= Self.launchRefreshFreshness
+        guard let lastScan = lastCompletedScan ?? lastRefresh else { return true }
+        return Date.now.timeIntervalSince(lastScan) >= Self.launchRefreshFreshness
     }
 
     func updateEngineStatus() {
@@ -164,10 +178,13 @@ final class RefreshCoordinator {
             notifyIfChanged()
         }
         cancelRemoteRetry()
+        readRemotesTask?.cancel()
+        readRemotesTask = nil
         await readRemotes()
+        guard !Task.isCancelled else { return }
         let collectors = makeCollectors()
         let store = store
-        let device = device
+        let device = LocalDevice.device(withID: deviceID)
         let attemptedAt = Date.now
         lastAttempt = attemptedAt
         let runner = CollectionRunner(store: store, device: device, collectors: collectors)
@@ -187,6 +204,10 @@ final class RefreshCoordinator {
         }
         guard !Task.isCancelled else { return }
 
+        if lastCompletedScan != attemptedAt {
+            lastCompletedScan = attemptedAt
+            markChanged()
+        }
         let nextHealth = results.map { $0.markingStale() }
         if nextHealth != health {
             health = nextHealth
@@ -205,7 +226,18 @@ final class RefreshCoordinator {
         await publishMobileReport()
     }
 
+    private func runReadRemotes(afterRead: (@MainActor @Sendable () async -> Void)? = nil) {
+        readRemotesTask?.cancel()
+        readRemotesTask = Task { [weak self] in
+            guard let self else { return }
+            await self.readRemotes()
+            guard !Task.isCancelled else { return }
+            await afterRead?()
+        }
+    }
+
     private func readRemotes(isRetry: Bool = false) async {
+        guard !Task.isCancelled else { return }
         refreshICloudAvailability()
         guard settings.syncEnabled else { return }
         guard let root = ICloudSync.defaultRoot else {
@@ -214,7 +246,7 @@ final class RefreshCoordinator {
             notifyIfChanged()
             return
         }
-        let snapshots = await syncWorker.read(root: root, excludingDeviceID: device.id)
+        let snapshots = await syncWorker.read(root: root, excludingDeviceID: deviceID)
         guard settings.syncEnabled, !Task.isCancelled else { return }
         guard let snapshots else {
             markRemotesUnavailable()
@@ -292,6 +324,7 @@ final class RefreshCoordinator {
             return
         }
         let health = health
+        let deviceID = deviceID
         syncTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(1)) } catch { return }
             guard let self, self.settings.syncEnabled else { return }
@@ -302,7 +335,8 @@ final class RefreshCoordinator {
                 return
             }
             let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.1.0"
-            let succeeded = await self.syncWorker.write(store: snapshot, device: self.device, root: root,
+            let device = LocalDevice.device(withID: deviceID)
+            let succeeded = await self.syncWorker.write(store: snapshot, device: device, root: root,
                 appVersion: version, health: health)
             guard self.settings.syncEnabled else { return }
             self.setSyncWriteFailed(!succeeded)
@@ -357,18 +391,28 @@ final class RefreshCoordinator {
 
     // MARK: - Mobile report
 
+    private func runMobileReportAction(_ action: @escaping @MainActor @Sendable (RefreshCoordinator) async -> Void) {
+        mobileReportActionTask?.cancel()
+        mobileReportActionTask = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            await action(self)
+        }
+    }
+
     /// Publishes the merged view of every device this Mac can read. Sync off means this Mac only.
     private func publishMobileReport() async {
         guard settings.mobileReportEnabled else {
             mobileReportStatus = .disabled
             return
         }
+        let generation = await mobileReportWorker.nextGeneration()
+        guard settings.mobileReportEnabled else { return }
         let mergesRemotes = settings.syncEnabled
         let remotes = mergesRemotes ? remoteSnapshots.map(\.status) : []
         let store: any UsageStore = mergesRemotes
             ? MergedUsageStore(local: self.store, remote: remoteSnapshots)
             : self.store
-        let device = device
+        let device = LocalDevice.device(withID: deviceID)
         let localStatus = MobileReportBuilder.localStatus(health)
         let version = Self.appVersion
         // Reading every record and building the report is CPU work; keep it off the main actor.
@@ -389,11 +433,18 @@ final class RefreshCoordinator {
             mobileReportStatus = .failed("Could not read usage")
             return
         }
-        mobileReportStatus = await mobileReportWorker.publish(report)
+        if let status = await mobileReportWorker.publish(report, generation: generation),
+           settings.mobileReportEnabled {
+            mobileReportStatus = status
+        }
     }
 
     private func removeMobileReport() async {
-        mobileReportStatus = await mobileReportWorker.stop(deviceId: device.id)
+        guard !settings.mobileReportEnabled else { return }
+        if let status = await mobileReportWorker.stop(deviceId: deviceID),
+           !settings.mobileReportEnabled {
+            mobileReportStatus = status
+        }
     }
 
     /// Sleep-tolerant hourly timer: it refreshes, which publishes, so the report never lags one interval.
@@ -431,34 +482,41 @@ final class RefreshCoordinator {
                 executableURL: URL(fileURLWithPath: path),
                 configDirectory: AppPaths.tokscaleConfigDirectory,
                 clients: TokscaleCollector.defaultClients,
-                deviceID: device.id,
+                deviceID: deviceID,
                 stateDirectory: state
             ))
         } else {
-            collectors.append(UnavailableEngineCollector())
+            let message = switch engineStatus {
+            case .found, .missing: "Collection engine not found"
+            case .invalidOverride: "Invalid engine override"
+            }
+            collectors.append(UnavailableEngineCollector(message: message))
         }
-        collectors.append(ZcodeCollector(deviceID: device.id, stateDirectory: state))
-        collectors.append(PiCollector(deviceID: device.id, stateDirectory: state))
-        collectors.append(OmpCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(ZcodeCollector(deviceID: deviceID, stateDirectory: state))
+        collectors.append(PiCollector(deviceID: deviceID, stateDirectory: state))
+        collectors.append(OmpCollector(deviceID: deviceID, stateDirectory: state))
         // Native sources are collected whether or not the engine binary is installed.
-        collectors.append(DevinCollector(deviceID: device.id, stateDirectory: state))
-        collectors.append(AntigravityCollector(deviceID: device.id, stateDirectory: state))
-        collectors.append(MiniMaxCodeCollector(deviceID: device.id, stateDirectory: state))
-        collectors.append(DeepSeekCollector(deviceID: device.id, stateDirectory: state))
+        collectors.append(DevinCollector(deviceID: deviceID, stateDirectory: state))
+        collectors.append(AntigravityCollector(deviceID: deviceID, stateDirectory: state))
+        collectors.append(MiniMaxCodeCollector(deviceID: deviceID, stateDirectory: state))
+        collectors.append(DeepSeekCollector(deviceID: deviceID, stateDirectory: state))
         if settings.cursorAccountCollection {
-            collectors.append(CursorCollector(deviceID: device.id, stateDirectory: state))
+            collectors.append(CursorCollector(deviceID: deviceID, stateDirectory: state))
         }
         return collectors
     }
 
     private struct UnavailableEngineCollector: UsageCollector {
         let sourceIDs = TokscaleCollector.defaultSourceIDs
-        func collect() async throws -> CollectionBatch { throw CollectorError.sourceUnavailable }
+        let message: String
+        func collect() async throws -> CollectionBatch { throw CollectorError.engineUnavailable(message) }
     }
 
     private func observeWakeIfNeeded() {
-        guard wakeObserver == nil else { return }
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        guard !didObserveWake else { return }
+        didObserveWake = true
+        let center = NSWorkspace.shared.notificationCenter
+        let token = center.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
@@ -467,11 +525,14 @@ final class RefreshCoordinator {
                 self?.handleWake()
             }
         }
+        observerTokens.add(token, center: center)
     }
 
     private func observeUbiquityIdentityIfNeeded() {
-        guard ubiquityIdentityObserver == nil else { return }
-        ubiquityIdentityObserver = NotificationCenter.default.addObserver(
+        guard !didObserveUbiquityIdentity else { return }
+        didObserveUbiquityIdentity = true
+        let center = NotificationCenter.default
+        let token = center.addObserver(
             forName: .NSUbiquityIdentityDidChange,
             object: nil,
             queue: .main
@@ -480,6 +541,7 @@ final class RefreshCoordinator {
                 self?.handleUbiquityIdentityChange()
             }
         }
+        observerTokens.add(token, center: center)
     }
 
     private func handleUbiquityIdentityChange() {
@@ -494,11 +556,13 @@ final class RefreshCoordinator {
         remoteSnapshots = []
         markChanged()
         notifyIfChanged()
-        Task { [weak self] in
-            guard let self else { return }
+        if settings.syncEnabled {
             // Re-read first so the republished iPhone report includes the new account's Macs.
-            if self.settings.syncEnabled { await self.readRemotes() }
-            if self.settings.mobileReportEnabled { await self.publishMobileReport() }
+            runReadRemotes { [weak self] in
+                if self?.settings.mobileReportEnabled == true { await self?.publishMobileReport() }
+            }
+        } else if settings.mobileReportEnabled {
+            runMobileReportAction { await $0.publishMobileReport() }
         }
     }
 
@@ -515,7 +579,7 @@ final class RefreshCoordinator {
 
     private func handleWake() {
         guard !isRefreshing else { return }
-        if let reference = lastRefresh ?? lastAttempt,
+        if let reference = lastCompletedScan ?? lastRefresh ?? lastAttempt,
            Date.now.timeIntervalSince(reference) > Self.fallbackRefreshInterval {
             scheduleLoop(refreshImmediately: true)
         }
@@ -530,8 +594,8 @@ final class RefreshCoordinator {
             }
             while !Task.isCancelled {
                 let delay: TimeInterval
-                if let lastRefresh = self.lastRefresh {
-                    let remaining = Self.fallbackRefreshInterval - Date.now.timeIntervalSince(lastRefresh)
+                if let lastScan = self.lastCompletedScan ?? self.lastRefresh {
+                    let remaining = Self.fallbackRefreshInterval - Date.now.timeIntervalSince(lastScan)
                     delay = remaining > 0 ? remaining : Self.fallbackRefreshInterval
                 } else {
                     delay = Self.fallbackRefreshInterval
@@ -546,12 +610,34 @@ final class RefreshCoordinator {
                 }
                 guard !Task.isCancelled else { break }
                 guard !self.isRefreshing else { continue }
-                if let lastRefresh = self.lastRefresh,
-                   Date.now.timeIntervalSince(lastRefresh) < Self.fallbackRefreshInterval {
+                if let lastScan = self.lastCompletedScan ?? self.lastRefresh,
+                   Date.now.timeIntervalSince(lastScan) < Self.fallbackRefreshInterval {
                     continue
                 }
                 await self.refresh()
             }
+        }
+    }
+}
+
+private final class ObserverTokens: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [(center: NotificationCenter, observer: NSObjectProtocol)] = []
+
+    func add(_ observer: NSObjectProtocol, center: NotificationCenter) {
+        lock.withLock {
+            entries.append((center, observer))
+        }
+    }
+
+    func removeAll() {
+        let current = lock.withLock {
+            let copy = entries
+            entries.removeAll()
+            return copy
+        }
+        for entry in current {
+            entry.center.removeObserver(entry.observer)
         }
     }
 }
@@ -592,20 +678,44 @@ private actor SyncWorker {
 
 /// Keeps container resolution and report writes off the main actor.
 private actor MobileReportWorker {
-    /// Bumped by every stop. The actor is reentrant across the container lookup, so a publish that was
-    /// waiting when the setting turned off must not recreate the file the stop just removed.
+    /// Bumped by every publish and stop. The actor is reentrant across the container lookup, so a
+    /// stale publish or stop that resumes after a newer change must not write or remove the file.
     private var generation = 0
 
-    func publish(_ report: MobileReport) async -> MobileReportPublishStatus {
-        let started = generation
-        guard let container = await MobileReportPublisher.containerURL() else { return .unavailable }
-        guard started == generation else { return .disabled }
+    func nextGeneration() -> Int {
+        generation += 1
+        return generation
+    }
+
+    func publish(_ report: MobileReport, generation expected: Int) async -> MobileReportPublishStatus? {
+        guard expected == generation else { return nil }
+        guard let container = await MobileReportPublisher.containerURL() else {
+            return expected == generation ? .unavailable : nil
+        }
+        guard expected == generation else { return nil }
         // Synchronous from here: no suspension point between the check and the write.
         return MobileReportPublisher.publish(report, into: container)
     }
 
-    func stop(deviceId: String) async -> MobileReportPublishStatus {
+    func stop(deviceId: String) async -> MobileReportPublishStatus? {
         generation += 1
-        return await MobileReportPublisher.stop(deviceId: deviceId)
+        let started = generation
+        guard let container = await MobileReportPublisher.containerURL() else {
+            return started == generation ? .unavailable : nil
+        }
+        guard started == generation else { return nil }
+        // Synchronous from here: no suspension point between the check and the removal.
+        do {
+            try MobileReportPublisher.remove(deviceId: deviceId, from: container)
+            return .disabled
+        } catch let error as MobileReportPublishError {
+            switch error {
+            case .invalidDeviceId: return .failed("Invalid device ID")
+            case .reportTooLarge: return .failed("Report exceeds the 512 KB limit")
+            case .writeFailed: return .failed("Could not write the report")
+            }
+        } catch {
+            return .failed("Could not write the report")
+        }
     }
 }

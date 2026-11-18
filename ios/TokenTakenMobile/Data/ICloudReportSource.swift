@@ -16,34 +16,60 @@ struct ICloudReportSource: ReportSource {
         let folder = Self.folderComponents.reduce(container) {
             $0.appendingPathComponent($1, isDirectory: true)
         }
-        let candidates = await MetadataReportSearch.reportURLs(in: folder)
+        let candidates = Array(await MetadataReportSearch.reportURLs(in: folder).prefix(6))
         guard !candidates.isEmpty else {
             return ReportLoad(report: nil, state: .noReport)
         }
 
-        var newest: MobileReport?
-        var sawReadableData = false
-        var sawUndecodableData = false
-        for url in candidates.prefix(6) {
-            guard let data = await Self.readData(at: url) else { continue }
-            sawReadableData = true
-            guard let report = try? MobileReport.decode(data) else {
-                sawUndecodableData = true
-                continue
+        for url in candidates {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+        }
+
+        let deadline = ContinuousClock.now.advanced(by: Self.downloadTimeout)
+        let payloads: [Data?] = await withTaskGroup(of: (Int, Data?).self) { group in
+            for (index, url) in candidates.enumerated() {
+                group.addTask {
+                    guard await Self.waitForDownload(url, deadline: deadline) else {
+                        return (index, nil)
+                    }
+                    return (index, await Self.coordinatedRead(url))
+                }
             }
-            if let current = newest {
-                if report.generatedAt > current.generatedAt { newest = report }
-            } else {
-                newest = report
+            var results = [Data?](repeating: nil, count: candidates.count)
+            for await (index, data) in group {
+                results[index] = data
+            }
+            return results
+        }
+
+        var newest: MobileReport?
+        var sawUnsupportedVersion = false
+        var sawCorruptData = false
+        for data in payloads.compactMap({ $0 }) {
+            do {
+                let report = try MobileReport.decode(data)
+                if let current = newest {
+                    if report.generatedAt > current.generatedAt { newest = report }
+                } else {
+                    newest = report
+                }
+            } catch MobileReportError.unsupportedSchemaVersion {
+                sawUnsupportedVersion = true
+            } catch {
+                sawCorruptData = true
             }
         }
 
         if let newest {
             return ReportLoad(report: newest, state: ReportStateRules.state(for: newest))
         }
-        // Files exist but nothing downloaded in time: not an error, just nothing readable yet.
-        let state: ReportState = (sawReadableData || sawUndecodableData) ? .decodeFailed : .noReport
-        return ReportLoad(report: nil, state: state)
+        if sawCorruptData {
+            return ReportLoad(report: nil, state: .decodeFailed)
+        }
+        if sawUnsupportedVersion {
+            return ReportLoad(report: nil, state: .unsupportedVersion)
+        }
+        return ReportLoad(report: nil, state: .downloading)
     }
 
     /// Bridges the identity notification into a `Void` stream, so the `Notification` value
@@ -67,16 +93,11 @@ struct ICloudReportSource: ReportSource {
         }.value
     }
 
-    private static func readData(at url: URL) async -> Data? {
-        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-        guard await waitForDownload(url) else { return nil }
-        return await coordinatedRead(url)
-    }
-
-    private static func waitForDownload(_ url: URL, timeout: Duration = downloadTimeout) async -> Bool {
-        let deadline = ContinuousClock.now.advanced(by: timeout)
+    private static func waitForDownload(_ initialURL: URL, deadline: ContinuousClock.Instant) async -> Bool {
+        var url = initialURL
         let keys: Set<URLResourceKey> = [.ubiquitousItemDownloadingStatusKey, .isUbiquitousItemKey]
-        while ContinuousClock.now < deadline {
+        while true {
+            url.removeAllCachedResourceValues()
             let values = try? url.resourceValues(forKeys: keys)
             if values?.isUbiquitousItem != true {
                 return FileManager.default.fileExists(atPath: url.path)
@@ -84,10 +105,11 @@ struct ICloudReportSource: ReportSource {
             if values?.ubiquitousItemDownloadingStatus == .current {
                 return true
             }
-            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+            if ContinuousClock.now >= deadline || Task.isCancelled {
+                return false
+            }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        return false
     }
 
     private static func coordinatedRead(_ url: URL) async -> Data? {
@@ -119,10 +141,11 @@ private enum MetadataReportSearch {
         defer { query.stop() }
 
         let deadline = ContinuousClock.now.advanced(by: .seconds(6))
-        while query.isGathering, ContinuousClock.now < deadline {
+        while query.isGathering, ContinuousClock.now < deadline, !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(120))
         }
         query.disableUpdates()
+        guard !Task.isCancelled else { return [] }
 
         var urls: [URL] = []
         for index in 0..<query.resultCount {

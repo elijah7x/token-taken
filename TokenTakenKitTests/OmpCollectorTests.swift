@@ -349,4 +349,29 @@ extension OmpCollectorTests {
         XCTAssertEqual(batch.daily, fullBatch.daily)
         XCTAssertEqual(batch.daily.reduce(Int64(0)) { $0 + $1.eventCount }, 3)
     }
+
+    func testSharedScanSupportsHalfHourTimeZoneAndSkipsDisappearingFile() async throws {
+        let kolkata = try XCTUnwrap(TimeZone(identifier: "Asia/Kolkata"))
+        let root = directory.appendingPathComponent("omp-kolkata", isDirectory: true)
+        let dirA = root.appendingPathComponent("cwd-a", isDirectory: true)
+        let dirB = root.appendingPathComponent("cwd-b", isDirectory: true)
+        try FileManager.default.createDirectory(at: dirA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dirB, withIntermediateDirectories: true)
+        let entry = #"{"type":"message","id":"omp-ist-1","timestamp":"2026-11-11T05:45:00Z","message":{"role":"assistant","model":"gpt-5","usage":{"input":10,"output":4,"reasoningTokens":1}}}"# + "\n"
+        try Data(entry.utf8).write(to: dirA.appendingPathComponent("a.jsonl"))
+        let vanish = dirB.appendingPathComponent("vanish.jsonl")
+        try Data((ompIncrementalEntryTwo + "\n").utf8).write(to: vanish)
+
+        let batch = try PiFormatScan(
+            roots: [root],
+            sourceID: "omp",
+            deviceID: "device-a",
+            timeZone: kolkata,
+            stateDirectory: nil,
+            now: OmpCollectorTests.now,
+            beforeScan: { try? FileManager.default.removeItem(at: vanish) }
+        ).run()
+        XCTAssertEqual(batch.daily.map(\.modelID), ["gpt-5"])
+        XCTAssertEqual(batch.hourly.map { ISO8601DateFormatter().string(from: $0.hourStart) }, ["2026-11-11T05:30:00Z"])
+    }
 }

@@ -149,7 +149,7 @@ final class MiniMaxCodeCollectorTests: XCTestCase {
                     "input": "100", "cacheRead": 0, "cacheWrite": 0, "output": 0,
                 ]),
                 line(id: "message-missing", timestamp: milliseconds("2026-01-01T10:02:00Z"), usage: [
-                    "input": 10, "output": 5,
+                    "input": 10, "cacheRead": 0, "cacheWrite": 0,
                 ]),
                 line(id: "message-valid", timestamp: milliseconds("2026-01-01T10:03:00Z"), usage: [
                     "input": 100, "cacheRead": 0, "cacheWrite": 0, "output": 5,
@@ -221,5 +221,58 @@ final class MiniMaxCodeCollectorTests: XCTestCase {
             MiniMaxCodeCollector.sessionRoot(home: home, environment: [:]).path,
             home.appendingPathComponent(".minimax/v2/sessions").path
         )
+    }
+
+    func testMissingCacheKeysDefaultToZero() async throws {
+        let home = try makeHome([
+            session("a"): [
+                line(id: "message-no-cache", timestamp: milliseconds("2026-01-01T10:00:00Z"), usage: [
+                    "input": 10, "output": 5,
+                ]),
+                line(id: "message-bad-cache", timestamp: milliseconds("2026-01-01T10:01:00Z"), usage: [
+                    "input": 10, "output": 5, "cacheRead": -1,
+                ]),
+            ],
+        ])
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily[0].counts, TokenCounts(input: 10, cacheRead: 0, cacheWrite: 0, output: 5))
+    }
+
+    func testStripsLeadingUTF8BOMOnFirstLine() async throws {
+        let url = directory.appendingPathComponent(".minimax/v2/sessions", isDirectory: true)
+            .appendingPathComponent(session("bom"))
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        var data = Data([0xEF, 0xBB, 0xBF])
+        data.append(try JSONSerialization.data(withJSONObject: line(
+            id: "message-bom", timestamp: milliseconds("2026-01-01T10:00:00Z"),
+            usage: ["input": 25, "output": 5]
+        )))
+        data.append(0x0A)
+        try data.write(to: url)
+
+        let batch = try await collector(home: directory).collect()
+
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily[0].counts, TokenCounts(input: 25, output: 5))
+    }
+
+    func testFutureTimestampIsSkipped() async throws {
+        let home = try makeHome([
+            session("a"): [
+                line(id: "message-future", timestamp: milliseconds("2026-01-03T00:00:00Z"), usage: [
+                    "input": 10, "output": 5,
+                ]),
+            ],
+        ])
+
+        let batch = try await collector(home: home).collect()
+
+        XCTAssertTrue(batch.daily.isEmpty)
+        XCTAssertEqual(batch.skippedRecords, 1)
     }
 }

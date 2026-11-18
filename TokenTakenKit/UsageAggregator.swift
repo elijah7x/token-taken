@@ -21,8 +21,16 @@ public struct UsageAggregator: Sendable {
     private let now: Date
     private let priceTable: PriceTable
 
+    public static var defaultCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        calendar.locale = .current
+        calendar.firstWeekday = Calendar.current.firstWeekday
+        return calendar
+    }
+
     public init(
-        store: any UsageStore, rows: Rows? = nil, calendar: Calendar = .current, now: Date = .now,
+        store: any UsageStore, rows: Rows? = nil, calendar: Calendar = UsageAggregator.defaultCalendar, now: Date = .now,
         priceTable: PriceTable? = nil
     ) {
         self.store = store
@@ -114,10 +122,11 @@ public struct UsageAggregator: Sendable {
         let today = calendar.startOfDay(for: now)
         let starts = (0..<lastDays).map { addDays($0 - lastDays + 1, to: today) }
         let first = starts[0]
+        let indexByStart = Dictionary(starts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
         let spec = DailyBucketSpec(
             starts: starts,
             end: addDays(1, to: today),
-            index: { calendar.dateComponents([.day], from: first, to: $0).day ?? -1 },
+            index: { indexByStart[$0] ?? -1 },
             label: { String(calendar.component(.day, from: $0)) },
             isFuture: { _ in false }
         )
@@ -165,7 +174,7 @@ public struct UsageAggregator: Sendable {
         case .week: weekCalendar.dateInterval(of: .weekOfYear, for: now)!.start
         case .month: calendar.dateInterval(of: .month, for: now)!.start
         case .year: calendar.dateInterval(of: .year, for: now)!.start
-        case .all: entries.map(\.day).min() ?? today
+        case .all: entries.lazy.filter { $0.day < end }.map(\.day).min() ?? today
         }
         return PeriodWindow(
             start: start,
@@ -191,21 +200,24 @@ public struct UsageAggregator: Sendable {
             preconditionFailure("Day buckets use hourly partitioning")
         case .week:
             let starts = (0..<7).map { addDays($0, to: start) }
+            let indexByStart = Dictionary(starts.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
             let symbols = calendar.shortWeekdaySymbols
             return DailyBucketSpec(
                 starts: starts,
                 end: addDays(7, to: start),
-                index: { calendar.dateComponents([.day], from: start, to: $0).day ?? -1 },
+                index: { indexByStart[$0] ?? -1 },
                 label: { symbols[calendar.component(.weekday, from: $0) - 1] },
                 isFuture: { $0 > today }
             )
         case .month:
             let monthEnd = calendar.dateInterval(of: .month, for: start)!.end
             var starts: [Date] = []
-            var day = start
-            while day < monthEnd {
+            var offset = 0
+            while true {
+                let day = addDays(offset, to: start)
+                guard day < monthEnd else { break }
                 starts.append(day)
-                day = addDays(1, to: day)
+                offset += 1
             }
             return DailyBucketSpec(
                 starts: starts,
@@ -215,8 +227,8 @@ public struct UsageAggregator: Sendable {
                 isFuture: { $0 > today }
             )
         case .year:
-            let starts = (0..<12).map { calendar.date(byAdding: .month, value: $0, to: start)! }
-            let yearEnd = calendar.date(byAdding: .month, value: 12, to: start)!
+            let starts = (0..<12).map { calendar.startOfDay(for: calendar.date(byAdding: .month, value: $0, to: start)!) }
+            let yearEnd = calendar.startOfDay(for: calendar.date(byAdding: .month, value: 12, to: start)!)
             return DailyBucketSpec(
                 starts: starts,
                 end: yearEnd,
@@ -228,10 +240,12 @@ public struct UsageAggregator: Sendable {
             let firstMonth = calendar.dateInterval(of: .month, for: start)!.start
             let lastMonth = calendar.dateInterval(of: .month, for: now)!.start
             var starts: [Date] = []
+            var offset = 0
             var month = firstMonth
             while month <= lastMonth {
                 starts.append(month)
-                month = calendar.date(byAdding: .month, value: 1, to: month)!
+                offset += 1
+                month = calendar.startOfDay(for: calendar.date(byAdding: .month, value: offset, to: firstMonth)!)
             }
             return DailyBucketSpec(
                 starts: starts,
@@ -385,7 +399,7 @@ public struct UsageAggregator: Sendable {
                 cost: nil,
                 isFuture: bucket.isFuture,
                 isKnown: bucket.isKnown,
-                reasoningKnown: bucket.rows.allSatisfy(\.reasoningKnown)
+                reasoningKnown: !bucket.rows.isEmpty && bucket.rows.allSatisfy(\.reasoningKnown)
             )
         }
     }
@@ -521,7 +535,7 @@ public struct UsageAggregator: Sendable {
     }
 
     private func addDays(_ days: Int, to date: Date) -> Date {
-        calendar.date(byAdding: .day, value: days, to: date)!
+        calendar.startOfDay(for: calendar.date(byAdding: .day, value: days, to: date)!)
     }
 
     private static func resolvedBreakdowns(

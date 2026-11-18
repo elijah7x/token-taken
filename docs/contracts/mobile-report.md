@@ -21,8 +21,8 @@ Status: Accepted (2026-11-12)
 - The writer publishes after every successful refresh, and at least once per hour while the setting is enabled, so a report is never older than one refresh cycle plus iCloud latency.
 - Each publication writes a complete temporary file in the same folder and atomically replaces the destination inside an `NSFileCoordinator` write accessor, propagating both accessor and coordination errors and removing its own temporary file on exit.
 - Disabling the setting deletes the Mac's own report file through a coordinated write. It must not delete another device's report.
-- A publication that has no readable usage (an empty history or a failed collection) still writes a report with empty `days` and `months` and zero totals. Unreadable devices appear as `unavailable` or `partial` in `coverage`, and totals include only readable data; unknown usage is never published as zero on a device's behalf.
-- A device whose identity could not be read at all has no known last write. The writer leaves it out of `coverage` rather than publishing a fabricated timestamp; the reader treats a missing entry as unknown, never as zero usage.
+- A publication that has no readable usage (an empty history or a failed collection) still writes a report with empty `days` and `months` and zero totals. Devices with a readable identity whose usage is incomplete or unreadable appear as `partial` or `unavailable` in `coverage`, and totals include only readable data; unknown usage is never published as zero on a device's behalf.
+- A device whose identity could not be read at all has no known last write. The writer omits it from `coverage` rather than publishing `null` or a fabricated timestamp; the reader treats a missing entry as unknown, never as zero usage.
 - The writer validates JSON size before publication and refuses to truncate history to fit the budget.
 
 ## Reader rules
@@ -49,9 +49,9 @@ The encoded object is a single JSON object. All token counts are non-negative in
 | `generator.displayName` | string | Writing Mac's user-visible device name. |
 | `generator.appVersion` | string | Marketing version and build of the writing app, for example `0.1.0 (12)`. |
 | `timeZoneID` | string | IANA zone of the generating Mac. Every `today`, `last30Days`, `thisMonth`, `day`, and `month` value in this report is local to it. |
-| `coverage.devices` | array | Every device the writer could read, including itself. Ascending by `displayName`; ties broken by `lastWriteUTC`. |
+| `coverage.devices` | array | Every device the writer could read a sync identity for, including itself. The generating Mac is always first (`devices[0]`, with `lastWriteUTC` equal to `generatedAt`); remaining devices are sorted ascending by `displayName`, ties broken by `lastWriteUTC`. Devices without a readable identity are omitted. |
 | `coverage.devices[].displayName` | string | Device name. |
-| `coverage.devices[].lastWriteUTC` | string or null | That device's sync `lastWriteUTC`; `null` when no readable identity exists. |
+| `coverage.devices[].lastWriteUTC` | string | That device's sync `lastWriteUTC` (equal to `generatedAt` for `devices[0]`). Devices without a readable identity are omitted from `coverage.devices`. |
 | `coverage.devices[].status` | string | `ok`, `stale`, `partial`, or `unavailable`, with the meanings defined in [sync.md](sync.md). |
 | `totals.today` | TokenSummary | Generating Mac's current local calendar day. |
 | `totals.last30Days` | TokenSummary | The 30 local days ending today, inclusive. |
