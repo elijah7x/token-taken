@@ -118,8 +118,11 @@ struct FieldPeriodPicker: View {
                 } label: {
                     Text(period.title)
                         .font(FieldFont.serif(15))
+                        // English titles ("Month") must not wrap inside the narrow tray.
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                         .foregroundStyle(selected ? FieldPalette.ink : FieldPalette.muted)
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 6)
                         .padding(.top, 4)
                         .padding(.bottom, 9)
                         .overlay(alignment: .bottom) {
