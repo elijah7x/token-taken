@@ -388,6 +388,143 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         }
     }
 
+    /// Moves daily and hourly rows for `sourceID` from a superseded account device to `newDeviceID` when
+    /// `newDeviceID` has no rows for that day/hour, drops remaining legacy rows for that source, deletes the
+    /// legacy `history_epochs` row for `(legacyDeviceID, sourceID)`, and deletes the legacy `devices` row if no
+    /// rows remain for other sources.
+    public func migrateAccountDevice(from legacyDeviceID: String, to newDeviceID: String, sourceID: String) throws {
+        guard legacyDeviceID != newDeviceID,
+              AccountDeviceID.isAccount(legacyDeviceID),
+              AccountDeviceID.isAccount(newDeviceID) else {
+            return
+        }
+        try queue.sync {
+            try execute("BEGIN IMMEDIATE;")
+            do {
+                if let kind = try deviceKind(for: legacyDeviceID), kind != .account {
+                    try execute("COMMIT;")
+                    return
+                }
+                let existingDays = try storedDays(sourceID: sourceID, deviceID: newDeviceID)
+                let legacyDays = try storedDays(sourceID: sourceID, deviceID: legacyDeviceID)
+                let daysToMove = legacyDays.subtracting(existingDays).sorted()
+                try moveDailyDays(daysToMove, from: legacyDeviceID, to: newDeviceID, sourceID: sourceID)
+                try deleteDaily(deviceID: legacyDeviceID, sourceID: sourceID)
+
+                let existingHours = try storedHours(sourceID: sourceID, deviceID: newDeviceID)
+                let legacyHours = try storedHours(sourceID: sourceID, deviceID: legacyDeviceID)
+                let hoursToMove = legacyHours.subtracting(existingHours).sorted()
+                try moveHourlyBuckets(hoursToMove, from: legacyDeviceID, to: newDeviceID, sourceID: sourceID)
+                try deleteHourly(deviceID: legacyDeviceID, sourceID: sourceID)
+
+                try deleteHistoryEpochs(deviceID: legacyDeviceID, sourceID: sourceID)
+                try deleteUnusedAccountDevice(id: legacyDeviceID)
+                try execute("COMMIT;")
+            } catch {
+                try? execute("ROLLBACK;")
+                throw error
+            }
+        }
+    }
+
+    private func deviceKind(for deviceID: String) throws -> DeviceKind? {
+        let statement = try prepare("SELECT kind FROM devices WHERE id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        guard try next(statement) else { return nil }
+        return DeviceKind(rawValue: text(statement, 0)) ?? .mac
+    }
+
+    private func storedDays(sourceID: String, deviceID: String) throws -> Set<String> {
+        let statement = try prepare("SELECT DISTINCT day FROM daily_usage WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        var days = Set<String>()
+        while try next(statement) { days.insert(text(statement, 0)) }
+        return days
+    }
+
+    private func moveDailyDays(_ days: [String], from legacyDeviceID: String, to newDeviceID: String, sourceID: String) throws {
+        guard !days.isEmpty else { return }
+        let statement = try prepare("UPDATE daily_usage SET device_id = ? WHERE device_id = ? AND source_id = ? AND day = ?;")
+        defer { sqlite3_finalize(statement) }
+        for day in days {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            try bind(newDeviceID, to: statement, at: 1)
+            try bind(legacyDeviceID, to: statement, at: 2)
+            try bind(sourceID, to: statement, at: 3)
+            try bind(day, to: statement, at: 4)
+            try step(statement)
+        }
+    }
+
+    private func deleteDaily(deviceID: String, sourceID: String) throws {
+        let statement = try prepare("DELETE FROM daily_usage WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        try step(statement)
+    }
+
+    private func storedHours(sourceID: String, deviceID: String) throws -> Set<Int64> {
+        let statement = try prepare("SELECT hour_start FROM hourly_usage WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        var hours = Set<Int64>()
+        while try next(statement) { hours.insert(sqlite3_column_int64(statement, 0)) }
+        return hours
+    }
+
+    private func moveHourlyBuckets(_ hours: [Int64], from legacyDeviceID: String, to newDeviceID: String, sourceID: String) throws {
+        guard !hours.isEmpty else { return }
+        let statement = try prepare("UPDATE hourly_usage SET device_id = ? WHERE device_id = ? AND source_id = ? AND hour_start = ?;")
+        defer { sqlite3_finalize(statement) }
+        for hourStart in hours {
+            sqlite3_reset(statement)
+            sqlite3_clear_bindings(statement)
+            try bind(newDeviceID, to: statement, at: 1)
+            try bind(legacyDeviceID, to: statement, at: 2)
+            try bind(sourceID, to: statement, at: 3)
+            try check(sqlite3_bind_int64(statement, 4, hourStart))
+            try step(statement)
+        }
+    }
+
+    private func deleteHourly(deviceID: String, sourceID: String) throws {
+        let statement = try prepare("DELETE FROM hourly_usage WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        try step(statement)
+    }
+
+    private func deleteHistoryEpochs(deviceID: String, sourceID: String) throws {
+        let statement = try prepare("DELETE FROM history_epochs WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        try step(statement)
+    }
+
+    private func deleteUnusedAccountDevice(id: String) throws {
+        let statement = try prepare("""
+            DELETE FROM devices
+            WHERE id = ? AND kind = 'account'
+              AND NOT EXISTS (SELECT 1 FROM daily_usage WHERE device_id = ?)
+              AND NOT EXISTS (SELECT 1 FROM hourly_usage WHERE device_id = ?)
+              AND NOT EXISTS (SELECT 1 FROM history_epochs WHERE device_id = ?);
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(id, to: statement, at: 1)
+        try bind(id, to: statement, at: 2)
+        try bind(id, to: statement, at: 3)
+        try bind(id, to: statement, at: 4)
+        try step(statement)
+    }
+
     public func health() throws -> [SourceHealth] {
         try queue.sync {
             let statement = try prepare("""

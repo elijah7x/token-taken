@@ -36,6 +36,7 @@ final class RefreshCoordinator {
     private(set) var health: [SourceHealth]
     private(set) var engineStatus: EngineStatus = .missing
     private(set) var remoteSnapshots: [RemoteDeviceSnapshot] = []
+    private(set) var remoteRevision = 0
     private(set) var iCloudAvailable = ICloudSync.defaultRoot != nil
     private(set) var iCloudSignedIn = FileManager.default.ubiquityIdentityToken != nil
     /// Read and write failures are tracked separately so a later success of one clears only its own failure.
@@ -88,8 +89,7 @@ final class RefreshCoordinator {
                 self.runReadRemotes()
             } else {
                 if !self.remoteSnapshots.isEmpty {
-                    self.remoteSnapshots = []
-                    self.markChanged()
+                    self.setRemoteSnapshots([])
                 }
                 self.setSyncReadFailed(false)
                 self.setSyncWriteFailed(false)
@@ -256,8 +256,7 @@ final class RefreshCoordinator {
             return
         }
         setSyncReadFailed(false)
-        remoteSnapshots = RemoteDeviceSnapshot.mergingCache(snapshots, previous: remoteSnapshots)
-        markChanged()
+        setRemoteSnapshots(RemoteDeviceSnapshot.mergingCache(snapshots, previous: remoteSnapshots))
         updateRemoteRetry(isRetry: isRetry)
         notifyIfChanged()
     }
@@ -304,11 +303,15 @@ final class RefreshCoordinator {
     }
 
     private func markRemotesUnavailable() {
-        remoteSnapshots = remoteSnapshots.map { snapshot in
-            RemoteDeviceSnapshot(device: snapshot.device, daily: snapshot.daily, hourly: snapshot.hourly, status: RemoteDeviceStatus(
-                deviceID: snapshot.device.id, displayName: snapshot.device.name, lastWrite: snapshot.status.lastWrite, state: .unavailable), accounts: snapshot.accounts)
+        if !remoteSnapshots.isEmpty {
+            let unavailable = remoteSnapshots.map { snapshot in
+                RemoteDeviceSnapshot(device: snapshot.device, daily: snapshot.daily, hourly: snapshot.hourly, status: RemoteDeviceStatus(
+                    deviceID: snapshot.device.id, displayName: snapshot.device.name, lastWrite: snapshot.status.lastWrite, state: .unavailable), accounts: snapshot.accounts)
+            }
+            setRemoteSnapshots(unavailable)
+        } else {
+            markChanged()
         }
-        markChanged()
     }
 
     private func scheduleSyncWrite() async {
@@ -349,6 +352,12 @@ final class RefreshCoordinator {
     /// Records a real state change. Every mutation goes through here or a guarded setter, so a refresh
     /// that changes nothing stays silent.
     private func markChanged() { stateRevision &+= 1 }
+
+    private func setRemoteSnapshots(_ snapshots: [RemoteDeviceSnapshot]) {
+        remoteSnapshots = snapshots
+        remoteRevision &+= 1
+        markChanged()
+    }
 
     /// Publishes any pending change once. A refresh therefore notifies at most once after the remote
     /// reads and once after collection, instead of once per assignment.
@@ -553,8 +562,11 @@ final class RefreshCoordinator {
         }
         lastUbiquityIdentityToken = currentToken
         // Switching Apple ID points iCloud Drive at another account, so cached remote Macs no longer belong to this user.
-        remoteSnapshots = []
-        markChanged()
+        if !remoteSnapshots.isEmpty {
+            setRemoteSnapshots([])
+        } else {
+            markChanged()
+        }
         notifyIfChanged()
         if settings.syncEnabled {
             // Re-read first so the republished iPhone report includes the new account's Macs.

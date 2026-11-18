@@ -925,6 +925,77 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertEqual(results.first?.state, .failed)
         XCTAssertEqual(results.first?.errorMessage, "tokscale 4.99.0 does not match pinned 4.21.0")
     }
+
+    func testZeroUsageClientWithCachedZeroCoverageIsNotMarkedFailed() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let invocationsURL = dir.appendingPathComponent("invocations.log")
+        let scriptURL = dir.appendingPathComponent("mock-tokscale-zero-runner.sh")
+        let script = """
+            #!/bin/sh
+            echo "$*" >> "\(invocationsURL.path)"
+            if [ "$1" = "--version" ]; then
+              echo "tokscale \(TokscaleCollector.engineVersion)"
+              exit 0
+            elif [ "$1" = "graph" ]; then
+              out=""
+              while [ $# -gt 0 ]; do
+                if [ "$1" = "--output" ]; then shift; out="$1"; fi
+                shift
+              done
+              printf '%s' '{"contributions":[]}' > "$out"
+            else
+              printf '%s' '{"entries":[]}'
+            fi
+            """
+        try Data(script.utf8).write(to: scriptURL)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+
+        let sizes = FingerprintBox()
+        let stateDir = dir.appendingPathComponent("state", isDirectory: true)
+        let store = try SQLiteUsageStore(url: dir.appendingPathComponent("usage.sqlite"))
+        let device = Device(id: "device-a", name: "Test Mac")
+        let collector = TokscaleCollector(
+            executableURL: scriptURL,
+            configDirectory: dir.appendingPathComponent("config", isDirectory: true),
+            clients: ["fx"],
+            deviceID: device.id,
+            isClientAvailable: { _ in true },
+            stateDirectory: stateDir,
+            fingerprint: { sizes.fingerprint(for: $0) }
+        )
+        let now = ISO8601DateFormatter().date(from: "2026-11-09T10:30:00Z")!
+
+        // Initial zero-usage collection succeeds and commits fingerprint state.
+        let first = await CollectionRunner(store: store, device: device, collectors: [collector]).runAll(now: now)
+        XCTAssertEqual(first.first?.state, .ok)
+        XCTAssertEqual(first.first?.recordCount, 0)
+
+        // Second collection with unchanged inputs writes 48 zero-coverage hourly rows.
+        let second = await CollectionRunner(store: store, device: device, collectors: [collector])
+            .runAll(now: now.addingTimeInterval(60))
+        XCTAssertEqual(second.first?.state, .ok)
+        let cachedHours = try store.hourly()
+        XCTAssertEqual(cachedHours.count, 48)
+        XCTAssertTrue(cachedHours.allSatisfy { $0.counts == .zero && $0.eventCount == 0 })
+
+        // When inputs change later and tokscale still returns no rows, zero-coverage rows must not trigger .failed.
+        sizes.bump("fx")
+        let third = await CollectionRunner(store: store, device: device, collectors: [collector])
+            .runAll(now: now.addingTimeInterval(120))
+        XCTAssertEqual(third.first?.state, .ok)
+        XCTAssertNil(third.first?.errorMessage)
+        XCTAssertEqual(third.first?.recordCount, 0)
+
+        // State commit succeeded on the third run, so a fourth unchanged run skips invoking tokscale.
+        try? FileManager.default.removeItem(at: invocationsURL)
+        let fourth = await CollectionRunner(store: store, device: device, collectors: [collector])
+            .runAll(now: now.addingTimeInterval(180))
+        XCTAssertEqual(fourth.first?.state, .ok)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: invocationsURL.path))
+    }
 }
 
 private struct SuspendingCollector: UsageCollector {

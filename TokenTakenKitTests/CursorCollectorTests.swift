@@ -480,4 +480,50 @@ final class CursorCollectorTests: XCTestCase {
         XCTAssertEqual(batch.skippedRecords, 1)
         XCTAssertEqual(batch.authoritativeSourceIDs, [])
     }
+
+    func testSupersededLegacyAccountIDIsReportedOnlyWhenItDiffersForSameAccount() async throws {
+        let payload = Data(#"{"sub":"auth0|user_from_jwt","exp":1}"#.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let jwt = "header.\(payload).signature"
+
+        // Unnormalized auth0| prefix in cli-config userId produced a distinct legacy account ID for the same account.
+        try makeStateDatabase(token: jwt)
+        try writeCLIConfig(["authInfo": ["userId": "auth0|user_from_jwt"]])
+        let migratedFromJWT = try await collector(fetch: respond(export)).collect()
+        XCTAssertEqual(migratedFromJWT.accountDevice?.id, CursorCollector.accountID(identifier: "user_from_jwt"))
+        XCTAssertEqual(
+            migratedFromJWT.supersededAccountDeviceIDs,
+            [CursorCollector.accountID(identifier: "auth0|user_from_jwt")]
+        )
+
+        // Same when token is opaque and fallback userId gains normalization.
+        try makeStateDatabase(token: "synthetic-session-token-value")
+        try writeCLIConfig(["authInfo": ["userId": "auth0|user_from_cli"]])
+        let migratedFromFallback = try await collector(fetch: respond(export)).collect()
+        XCTAssertEqual(migratedFromFallback.accountDevice?.id, CursorCollector.accountID(identifier: "user_from_cli"))
+        XCTAssertEqual(
+            migratedFromFallback.supersededAccountDeviceIDs,
+            [CursorCollector.accountID(identifier: "auth0|user_from_cli")]
+        )
+
+        // When legacy and current IDs already match, nothing is reported as superseded.
+        try makeStateDatabase(token: jwt)
+        try writeCLIConfig(["authInfo": ["userId": "user_from_jwt"]])
+        let matching = try await collector(fetch: respond(export)).collect()
+        XCTAssertEqual(matching.supersededAccountDeviceIDs, [])
+
+        // A cli-config.json belonging to a genuinely different account must never be marked superseded.
+        try writeCLIConfig(["authInfo": ["userId": "user_different_account"]])
+        let differentAccount = try await collector(fetch: respond(export)).collect()
+        XCTAssertEqual(differentAccount.accountDevice?.id, CursorCollector.accountID(identifier: "user_from_jwt"))
+        XCTAssertEqual(differentAccount.supersededAccountDeviceIDs, [])
+
+        // Without cli-config.json, nothing is reported as superseded.
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent(".cursor/cli-config.json"))
+        let withoutCLIConfig = try await collector(fetch: respond(export)).collect()
+        XCTAssertEqual(withoutCLIConfig.supersededAccountDeviceIDs, [])
+    }
 }

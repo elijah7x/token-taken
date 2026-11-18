@@ -624,7 +624,8 @@ final class AppUpdater {
                         return false
                     }
                     if terminateEarly {
-                        Darwin.kill(pid, SIGTERM)
+                        // Cancelled before the pid was recorded; skip a tool that already exited and was reaped.
+                        if process.isRunning { Darwin.kill(pid, SIGTERM) }
                     } else {
                         timeoutTask = Task {
                             do {

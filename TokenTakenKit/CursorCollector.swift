@@ -48,9 +48,10 @@ public struct CursorCollector: UsageCollector {
     public func collect() async throws -> CollectionBatch {
         let started = Date.now
         let token = try sessionToken()
-        guard let identifier = identity(token: token) else {
+        guard let resolved = resolvedIdentity(token: token) else {
             throw CollectorError.invalidOutput("Cursor account identity unavailable")
         }
+        let identifier = resolved.identifier
         let accountDevice = Self.accountDevice(identifier: identifier)
 
         let (data, response) = try await fetch(Self.request(identifier: identifier, token: token))
@@ -75,6 +76,7 @@ public struct CursorCollector: UsageCollector {
         aggregator.add(export.rows)
         var batch = aggregator.batch()
         batch.accountDevice = accountDevice
+        batch.supersededAccountDeviceIDs = resolved.supersededDeviceIDs
         batch.skippedRecords = export.skipped + aggregator.skipped
         // A complete export is authoritative: every day it reports is adopted exactly (smaller values too). A
         // partial or empty export must leave stored history alone, so it is not authoritative.
@@ -129,21 +131,63 @@ public struct CursorCollector: UsageCollector {
         }
     }
 
+    private struct ResolvedIdentity {
+        let identifier: String
+        let supersededDeviceIDs: [String]
+    }
+
+    private func cliAuthInfo() -> (userId: String?, authId: String?) {
+        let url = home.appendingPathComponent(".cursor/cli-config.json")
+        guard let data = try? Data(contentsOf: url),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let authInfo = object["authInfo"] as? [String: Any] else {
+            return (nil, nil)
+        }
+        return (Self.text(authInfo["userId"]), Self.text(authInfo["authId"]))
+    }
+
     /// Cursor's own account id, preferring the active session token's `sub` claim and falling back to
     /// `cli-config.json`. Host names and random ids are never substitutes: either would split one account
     /// into several devices.
-    private func identity(token: String) -> String? {
-        if let subject = Self.jwtSubject(token) {
-            return Self.normalizeSubject(subject)
+    ///
+    /// Also computes the legacy id under the earlier rule (which preferred unnormalized `cli-config.json`
+    /// `authInfo.userId`). It marks the legacy account device as superseded only when both identifiers
+    /// provably belong to the same account, so a stale `cli-config.json` from a different Cursor account
+    /// can never have its history merged or deleted.
+    private func resolvedIdentity(token: String) -> ResolvedIdentity? {
+        let jwtSub = Self.jwtSubject(token)
+        let authInfo = cliAuthInfo()
+        guard let identifier = jwtSub.map(Self.normalizeSubject)
+            ?? authInfo.userId.map(Self.normalizeSubject)
+            ?? authInfo.authId.map(Self.normalizeSubject) else {
+            return nil
         }
-        let url = home.appendingPathComponent(".cursor/cli-config.json")
-        if let data = try? Data(contentsOf: url),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let authInfo = object["authInfo"] as? [String: Any] {
-            if let userId = Self.text(authInfo["userId"]) { return Self.normalizeSubject(userId) }
-            if let authId = Self.text(authInfo["authId"]) { return Self.normalizeSubject(authId) }
+
+        let legacyIdentifier = authInfo.userId
+            ?? authInfo.authId.map(Self.normalizeSubject)
+            ?? jwtSub.map(Self.normalizeSubject)
+
+        var superseded: [String] = []
+        if let legacyIdentifier,
+           legacyIdentifier != identifier,
+           Self.isSameAccount(legacyIdentifier: legacyIdentifier, cliAuthId: authInfo.authId, currentIdentifier: identifier) {
+            let legacyDeviceID = Self.accountID(identifier: legacyIdentifier)
+            let newDeviceID = Self.accountID(identifier: identifier)
+            if legacyDeviceID != newDeviceID {
+                superseded.append(legacyDeviceID)
+            }
         }
-        return nil
+        return ResolvedIdentity(identifier: identifier, supersededDeviceIDs: superseded)
+    }
+
+    private static func isSameAccount(legacyIdentifier: String, cliAuthId: String?, currentIdentifier: String) -> Bool {
+        if normalizeSubject(legacyIdentifier) == currentIdentifier {
+            return true
+        }
+        if let cliAuthId, normalizeSubject(cliAuthId) == currentIdentifier {
+            return true
+        }
+        return false
     }
 
     private static func text(_ value: Any?) -> String? {

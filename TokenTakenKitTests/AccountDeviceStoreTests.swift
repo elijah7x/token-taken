@@ -191,6 +191,141 @@ final class AccountDeviceStoreTests: XCTestCase {
         XCTAssertTrue(hours.allSatisfy { $0.deviceID == accountID && $0.counts == .zero && $0.reasoningKnown })
         XCTAssertEqual(try store.records().map(\.day), ["2026-10-01"])
     }
+
+    func testMigrateAccountDeviceMovesRowsResolvesConflictsToNewAndDeletesLegacyDevice() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let legacyID = "account-cursor-fedcba9876543210fedcba9876543210"
+        let legacyDevice = Device(id: legacyID, name: "Cursor", kind: .account)
+        try store.upsert(device: legacyDevice)
+        try store.upsert(device: accountDevice)
+        try store.record(health: SourceHealth(sourceID: "cursor", lastSuccess: now, recordCount: 1))
+
+        let hourMissingOnNew = Calendar.current.dateInterval(of: .hour, for: now.addingTimeInterval(-7_200))!.start
+        let hourConflict = Calendar.current.dateInterval(of: .hour, for: now.addingTimeInterval(-3_600))!.start
+        let legacyDayOnlyA = record("2026-11-01", input: 10, device: legacyID, model: "model-a")
+        let legacyDayOnlyB = record("2026-11-01", input: 20, device: legacyID, model: "model-b")
+        let legacyConflictDay = record("2026-11-02", input: 99, device: legacyID, model: "legacy-model")
+        let legacyHourMissing = HourlyUsage(
+            hourStart: hourMissingOnNew, deviceID: legacyID, sourceID: "cursor",
+            counts: TokenCounts(input: 15), eventCount: 1, reasoningKnown: true
+        )
+        let legacyHourConflict = HourlyUsage(
+            hourStart: hourConflict, deviceID: legacyID, sourceID: "cursor",
+            counts: TokenCounts(input: 999), eventCount: 9, reasoningKnown: true
+        )
+        try store.replace(
+            batch: CollectionBatch(
+                daily: [legacyDayOnlyA, legacyDayOnlyB, legacyConflictDay],
+                hourly: [legacyHourMissing, legacyHourConflict]
+            ),
+            sourceID: "cursor", deviceID: legacyID
+        )
+
+        let newConflictDay = record("2026-11-02", input: 50, device: accountID, model: "new-model")
+        let newHourConflict = HourlyUsage(
+            hourStart: hourConflict, deviceID: accountID, sourceID: "cursor",
+            counts: TokenCounts(input: 7), eventCount: 1, reasoningKnown: true
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [newConflictDay], hourly: [newHourConflict]),
+            sourceID: "cursor", deviceID: accountID, authoritative: true
+        )
+
+        try store.migrateAccountDevice(from: legacyID, to: accountID, sourceID: "cursor")
+
+        XCTAssertEqual(store.devices, [accountDevice])
+        XCTAssertEqual(try store.health().map(\.sourceID), ["cursor"])
+
+        let records = try store.records()
+        XCTAssertTrue(records.allSatisfy { $0.deviceID == accountID })
+        XCTAssertEqual(Set(records), Set([
+            record("2026-11-01", input: 10, device: accountID, model: "model-a"),
+            record("2026-11-01", input: 20, device: accountID, model: "model-b"),
+            newConflictDay,
+        ]))
+
+        let hours = try store.hourly()
+        XCTAssertTrue(hours.allSatisfy { $0.deviceID == accountID })
+        XCTAssertEqual(Set(hours), Set([
+            HourlyUsage(
+                hourStart: hourMissingOnNew, deviceID: accountID, sourceID: "cursor",
+                counts: TokenCounts(input: 15), eventCount: 1, reasoningKnown: true
+            ),
+            newHourConflict,
+        ]))
+
+        XCTAssertEqual(try historyEpochCount(deviceID: legacyID), 0)
+        XCTAssertEqual(try historyEpochCount(deviceID: accountID), 1)
+    }
+
+    func testMigrateAccountDeviceProtectsMacAndSelfDevices() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let macDevice = Device(id: "device-a", name: "Test Mac", kind: .mac)
+        try store.upsert(device: macDevice)
+        try store.upsert(device: accountDevice)
+        let macRow = record("2026-11-01", input: 10, device: macDevice.id)
+        let accountRow = record("2026-11-02", input: 20, device: accountID)
+        try store.replace(batch: CollectionBatch(daily: [macRow]), sourceID: "cursor", deviceID: macDevice.id)
+        try store.replace(batch: CollectionBatch(daily: [accountRow]), sourceID: "cursor", deviceID: accountID)
+
+        try store.migrateAccountDevice(from: macDevice.id, to: accountID, sourceID: "cursor")
+        try store.migrateAccountDevice(from: accountID, to: accountID, sourceID: "cursor")
+
+        XCTAssertEqual(Set(store.devices), Set([macDevice, accountDevice]))
+        XCTAssertEqual(Set(try store.records()), Set([macRow, accountRow]))
+    }
+
+    func testRunnerMigratesSupersededAccountDeviceAfterSuccessfulReplace() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let legacyID = "account-cursor-fedcba9876543210fedcba9876543210"
+        try store.upsert(device: Device(id: legacyID, name: "Cursor", kind: .account))
+        let oldDay = record("2026-11-01", input: 30, device: legacyID)
+        let overlapDay = record("2026-11-09", input: 40, device: legacyID)
+        try store.replace(batch: CollectionBatch(daily: [oldDay, overlapDay]), sourceID: "cursor", deviceID: legacyID)
+
+        let freshDay = record("2026-11-09", input: 75, device: accountID)
+        let batch = CollectionBatch(
+            daily: [freshDay],
+            accountDevice: accountDevice,
+            supersededAccountDeviceIDs: [legacyID],
+            authoritativeSourceIDs: ["cursor"]
+        )
+        let runner = CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [AccountBatchCollector(batch: batch)]
+        )
+
+        let results = await runner.runAll(now: now)
+        XCTAssertEqual(results.first?.state, .ok)
+        XCTAssertFalse(store.devices.contains { $0.id == legacyID })
+        XCTAssertEqual(Set(try store.records()), Set([
+            record("2026-11-01", input: 30, device: accountID),
+            freshDay,
+        ]))
+    }
+
+    private func historyEpochCount(deviceID: String) throws -> Int {
+        var handle: OpaquePointer?
+        guard sqlite3_open(databaseURL.path, &handle) == SQLITE_OK, let db = handle else {
+            throw TestError.sqlite("Could not open the store database")
+        }
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(
+            db, "SELECT COUNT(*) FROM history_epochs WHERE device_id = ?;", -1, &statement, nil
+        ) == SQLITE_OK, let statement else {
+            throw TestError.sqlite(String(cString: sqlite3_errmsg(db)))
+        }
+        defer { sqlite3_finalize(statement) }
+        _ = deviceID.withCString {
+            sqlite3_bind_text(statement, 1, $0, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        }
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            throw TestError.sqlite("Could not query history_epochs")
+        }
+        return Int(sqlite3_column_int64(statement, 0))
+    }
 }
 
 private struct AccountBatchCollector: UsageCollector {

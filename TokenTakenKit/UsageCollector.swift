@@ -16,6 +16,9 @@ public struct CollectionBatch: Sendable {
     /// Set by an account-scoped collector: its rows are stored under this synthetic account device instead of the
     /// collecting Mac (ADR-0010).
     public var accountDevice: Device?
+    /// Legacy account device IDs for the same account that should be migrated into `accountDevice` and removed
+    /// once this batch's rows are stored.
+    public var supersededAccountDeviceIDs: [String]
     /// Sources whose batch is a complete authoritative snapshot of their history, so days it reports are adopted
     /// exactly, including smaller corrections, from its earliest day on.
     public var authoritativeSourceIDs: Set<String>
@@ -29,6 +32,7 @@ public struct CollectionBatch: Sendable {
         unchangedSourceIDs: Set<String> = [],
         stateCommits: [@Sendable () throws -> Void] = [],
         accountDevice: Device? = nil,
+        supersededAccountDeviceIDs: [String] = [],
         authoritativeSourceIDs: Set<String> = []
     ) {
         self.daily = daily
@@ -39,6 +43,7 @@ public struct CollectionBatch: Sendable {
         self.unchangedSourceIDs = unchangedSourceIDs
         self.stateCommits = stateCommits
         self.accountDevice = accountDevice
+        self.supersededAccountDeviceIDs = supersededAccountDeviceIDs
         self.authoritativeSourceIDs = authoritativeSourceIDs
     }
 }

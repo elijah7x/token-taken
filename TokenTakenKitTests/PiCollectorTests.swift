@@ -406,6 +406,43 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertEqual(batch.daily.count, 1)
         XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 100, output: 30, reasoning: 10))
     }
+
+    func testControlAndNonCountedRecordsDecodeLeniently() async throws {
+        let root = directory.appendingPathComponent("lenient-non-counted", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"custom","id":"ctrl-1","timestamp":12345,"message":"text containing usage and assistant"}"#,
+            #"{"type":"session","version":3,"id":"s1","timestamp":1794297600000,"message":"text","usage":"ignored"}"#,
+            #"{"type":"message","id":"user-msg","timestamp":"2026-11-10T10:00:00Z","message":{"role":"user","timestamp":"2026-11-10T10:00:00Z","content":"usage","usage":"ignored"}}"#,
+            #"{"type":"model_change","id":99,"timestamp":12345,"modelId":"claude-sonnet-4-5","message":"note"}"#,
+            #"{"type":"usage","id":"seeded-after-mc","timestamp":"2026-11-10T10:05:00Z","usage":{"input":10,"output":2}}"#,
+            #"{"type":"message","id":"bad-model","timestamp":"2026-11-10T10:06:00Z","message":{"role":"assistant","model":123,"usage":{"input":5,"output":1}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(batch.daily.map(\.modelID), ["claude-sonnet-4-5"])
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 10, output: 2))
+        XCTAssertEqual(batch.daily.first?.eventCount, 1)
+    }
+
+    func testAssistantWithStringMessageTimestampUsesValidRootTimestamp() async throws {
+        let root = directory.appendingPathComponent("string-message-ts", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"message","id":"str-msg-ts","timestamp":"2026-11-10T09:15:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","timestamp":"2026-11-10T08:00:00Z","usage":{"input":20,"output":5}}}"#,
+            #"{"type":"message","id":"str-msg-ts-no-root","message":{"role":"assistant","model":"claude-sonnet-4-5","timestamp":"2026-11-10T08:00:00Z","usage":{"input":10,"output":2}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        let formatter = ISO8601DateFormatter()
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(batch.daily.count, 1)
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 20, output: 5))
+        XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, ["2026-11-10T09:00:00Z"])
+    }
 }
 
 // MARK: - Incremental collection

@@ -226,6 +226,24 @@ final class OmpCollectorTests: XCTestCase {
             TokenCounts(input: 9, output: 2)
         )
     }
+
+    func testNonCountedControlAndStringMessageTimestampDoNotMarkPartial() async throws {
+        let root = directory.appendingPathComponent("lenient-omp", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let lines = [
+            #"{"type":"custom","id":"omp-ctrl","message":"text mentioning usage","timestamp":12345}"#,
+            #"{"type":"message","id":"omp-str-ts","timestamp":"2026-11-10T10:15:00Z","message":{"role":"assistant","model":"gpt-5","timestamp":"2026-11-10T09:00:00Z","usage":{"input":14,"output":6,"reasoningTokens":2}}}"#,
+            #"{"type":"usage","id":"omp-bad-usage","timestamp":"2026-11-10T10:20:00Z","usage":"oops"}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        let formatter = ISO8601DateFormatter()
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(batch.daily.map(\.modelID), ["gpt-5"])
+        XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 14, output: 4, reasoning: 2))
+        XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, ["2026-11-10T10:00:00Z"])
+    }
 }
 
 // MARK: - Incremental collection

@@ -14,9 +14,9 @@ This privacy policy applies to **Token Taken** for macOS (including the `token-t
 
 On macOS, Token Taken reads coding-agent logs, local databases, and configuration files strictly read-only on your Mac. It never modifies or deletes your agent logs.
 
-- **Local usage database:** Aggregated token counts (by day, hour, model, source, and local device), source health status, and local cost estimates are stored locally in `~/Library/Application Support/Token Taken/`.
-- **Bundled pricing:** Cost estimates are computed locally from a price table bundled inside the app. No network request is made to fetch pricing.
-- **Excluded content:** Conversation prompts, model responses, file paths, project or repository names, and credentials are never stored in Token Taken's usage database, exports, or logs.
+- **Local usage database:** Aggregated token counts (by day, hour, model, source, and local device) and source health status are stored locally in `~/Library/Application Support/Token Taken/` (`usage.sqlite`). Cost estimates are not stored in the database.
+- **Bundled pricing:** Cost estimates are computed locally in memory from a price table bundled inside the app. No network request is made to fetch pricing.
+- **Excluded content:** Conversation prompts, model responses, file paths, project or repository names, and credentials are never stored in Token Taken's usage database or exports. The only exception in local logs is that during macOS self-updates, the updater writes `install.sh` output to a local file (`~/Library/Application Support/Token Taken/Updates/<version>-<build>/install.log`), which can contain file paths on this Mac; this log stays local only, is never transmitted, and is deleted on the next app launch cleanup.
 
 ## Data processed locally on your iPhone
 
@@ -30,7 +30,11 @@ The iOS companion app (`TokenTakenMobile`) is display-only. It performs no local
 iCloud Drive sync is opt-in and disabled by default. When you enable it in Token Taken on macOS:
 
 - Token Taken writes aggregate-only metadata to your personal iCloud Drive folder (`iCloud Drive/Token Taken/`), organized by a randomly generated per-install UUID (`deviceId`) rather than hardware identifiers.
-- Synced files contain only device display names, app version, daily and rolling 48-hour aggregate token counts by model and source, and sanitized source health states (never diagnostic error messages).
+- Synced files include:
+  - `device.json`: `schemaVersion`, `deviceId`, your Mac's `displayName` (device display name), `appVersion`, `lastWriteUTC`, `tombstone`, `files` (filename-to-SHA-256 map), `sources` (sanitized per-source health: `sourceID`, `lastSuccess`, `state`, and `skippedRecords` — never diagnostic error messages), and `accounts` (`deviceId`, `displayName`, `kind`, `sources`, `collectedAtUTC`, `files`).
+  - Monthly daily files (`usage-YYYY-MM.json`): `schemaVersion` and `records`, where each daily record encodes `day`, `timeZoneID`, `deviceID`, `sourceID`, `modelID`, `rawModelID`, `counts` (`input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`), and `eventCount`.
+  - Rolling 48-hour file (`hourly.json`): `schemaVersion` and `records`, where each hourly record encodes `hourStart`, `deviceID`, `sourceID`, `counts` (`input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`), `eventCount`, and `reasoningKnown`.
+  - Account publication files (`account-<shortID>-usage-YYYY-MM.json` and `account-<shortID>-hourly.json`): encode the same daily (`day`, `timeZoneID`, `deviceID`, `sourceID`, `modelID`, `rawModelID`, `counts` with `input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`, and `eventCount`) and hourly (`hourStart`, `deviceID`, `sourceID`, `counts` with `input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`, `eventCount`, and `reasoningKnown`) fields inside the publishing Mac's folder, keyed by the hashed `account-<source>-<hash32>` `deviceID`.
 - Synced files never contain prompts, responses, file paths, project or repository names, credentials, or cost figures.
 - Turning iCloud Drive sync off immediately stops reading and writing sync data; previously uploaded files remain in your iCloud Drive under your control.
 
@@ -49,14 +53,14 @@ Publishing a report for the iPhone companion is opt-in and disabled by default o
 Cursor account collection is opt-in and disabled by default on macOS.
 
 - When enabled, Token Taken reads your existing Cursor session token and local account identifier in memory only from Cursor's local files on your Mac. Credentials are never written to Token Taken's store, logs, or sync output, and Keychain decryption is not attempted.
-- Your Cursor session credential is sent exclusively to `https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens` over HTTPS (allowing at most one same-origin redirect) to retrieve your Cursor token usage export.
+- Your Cursor session credential is sent exclusively to `https://cursor.com/api/dashboard/export-usage-events-csv?strategy=tokens` over HTTPS (allowing at most one HTTPS redirect, and only to `cursor.com` or `www.cursor.com`) to retrieve your Cursor token usage export.
 - To prevent double counting the same Cursor account across multiple Macs without exposing your email or token, synced account rows are keyed by a one-way domain-separated hash of your local account identifier (`account-cursor-<hash32>`). Your email address, token, and host name are never included in sync output.
 
 ## Automatic and manual update checks (macOS release builds only)
 
 Release builds of Token Taken for macOS include an updater controlled by the **Keep Token Taken up to date automatically** setting (enabled by default). When disabled, no automatic or background update requests are made; manual **Check for Updates** in Settings remains available at your request. Debug/ad-hoc builds and the iOS app do not check for updates.
 
-- Update checks send an HTTPS `GET` request to `https://elijah.ac.cn/token-taken/updates.json` with a fallback to the GitHub Releases API for `elijah7x/token-taken`. Verified release downloads are fetched over HTTPS only from `elijah.ac.cn`, `github.com`, `objects.githubusercontent.com`, and `release-assets.githubusercontent.com`.
+- Each update check sends HTTPS `GET` requests in parallel to both `https://elijah.ac.cn/token-taken/updates.json` and the GitHub Releases API (`https://api.github.com/repos/elijah7x/token-taken/releases?per_page=10` on `api.github.com`). Verified update package downloads (and any download redirects) are fetched over HTTPS only from `elijah.ac.cn`, `github.com`, `objects.githubusercontent.com`, and `release-assets.githubusercontent.com`.
 - Update requests send only standard HTTP request headers and `User-Agent: TokenTaken/<version>`. They do not send device identifiers, hardware identifiers, user identifiers, usage data, or account data. Standard transport metadata inherent to HTTPS (such as your IP address) is processed by the hosting server or CDN to serve the request.
 
 ## Contact

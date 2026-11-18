@@ -84,7 +84,7 @@ struct PiFormatScan: Sendable {
     /// Placeholder epoch timestamps used to land usage in 1970; treated as missing.
     static let minimumTimestamp = Date(timeIntervalSince1970: 1_577_836_800)
     /// Bumped whenever the persisted incremental state layout or scan semantics change.
-    static let stateFormatVersion = 4
+    static let stateFormatVersion = 5
 
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
@@ -527,10 +527,65 @@ struct PiFormatScan: Sendable {
         }
     }
 
+    private struct LenientString: Decodable {
+        let value: String?
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.singleValueContainer()
+            if values.decodeNil() {
+                value = nil
+            } else {
+                value = try? values.decode(String.self)
+            }
+        }
+    }
+
+    private enum MessageTimestamp: Decodable {
+        case integer(Int64)
+        case invalidNumber
+        case wrongType
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.singleValueContainer()
+            if let exact = try? values.decode(Int64.self) {
+                self = .integer(exact)
+                return
+            }
+            if let number = try? values.decode(Double.self) {
+                guard number.isFinite else {
+                    self = .invalidNumber
+                    return
+                }
+                let rounded = number.rounded(.towardZero)
+                guard rounded > Double(Int64.min), rounded < 0x1p63 else {
+                    self = .invalidNumber
+                    return
+                }
+                self = .integer(Int64(rounded))
+                return
+            }
+            self = .wrongType
+        }
+    }
+
+    private enum RootTimestamp: Decodable {
+        case string(String)
+        case wrongType
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.singleValueContainer()
+            if let text = try? values.decode(String.self) {
+                self = .string(text)
+            } else {
+                self = .wrongType
+            }
+        }
+    }
+
     private struct ScanRecord: Decodable {
         let type: String?
         let id: String?
-        let timestamp: String?
+        let timestamp: RootTimestamp?
         let model: String?
         let modelId: String?
         let responseId: String?
@@ -543,35 +598,110 @@ struct PiFormatScan: Sendable {
 
         init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
-            type = try values.decodeIfPresent(String.self, forKey: .type)
-            id = try values.decodeIfPresent(String.self, forKey: .id)
-            timestamp = try values.decodeIfPresent(String.self, forKey: .timestamp)
-            model = try values.decodeIfPresent(String.self, forKey: .model)
-            modelId = try values.decodeIfPresent(String.self, forKey: .modelId)
-            responseId = try values.decodeIfPresent(String.self, forKey: .responseId)
-            message = try values.decodeIfPresent(ScanMessage.self, forKey: .message)
-            usage = try values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+            // Stage 1: decode only `type` and minimal discriminators leniently so non-counted
+            // records (e.g. control/custom lines matching a marker) never fail on field types.
+            let decodedType = try values.decodeIfPresent(LenientString.self, forKey: .type)?.value
+            type = decodedType
+
+            switch decodedType {
+            case "model_change":
+                id = nil
+                timestamp = nil
+                model = nil
+                modelId = try values.decodeIfPresent(LenientString.self, forKey: .modelId)?.value
+                responseId = nil
+                message = nil
+                usage = nil
+            case "message":
+                modelId = nil
+                usage = nil
+                guard let messageValues = try? values.nestedContainer(
+                    keyedBy: ScanMessage.CodingKeys.self, forKey: .message
+                ) else {
+                    id = nil
+                    timestamp = nil
+                    model = nil
+                    responseId = nil
+                    message = nil
+                    return
+                }
+                let role = try messageValues.decodeIfPresent(LenientString.self, forKey: .role)?.value
+                let hasUsage = try messageValues.contains(.usage) && !messageValues.decodeNil(forKey: .usage)
+                let isCountedMessage = hasUsage && (role == "assistant" || role == "toolResult")
+                if isCountedMessage {
+                    // Stage 2: strict decoding for billing-relevant fields on counted message records.
+                    id = try values.decodeIfPresent(LenientString.self, forKey: .id)?.value
+                    timestamp = try values.decodeIfPresent(RootTimestamp.self, forKey: .timestamp)
+                    model = nil
+                    responseId = try values.decodeIfPresent(LenientString.self, forKey: .responseId)?.value
+                    message = try ScanMessage(from: messageValues, role: role, strictBillingFields: true)
+                } else {
+                    id = nil
+                    timestamp = nil
+                    model = nil
+                    responseId = nil
+                    message = try ScanMessage(from: messageValues, role: role, strictBillingFields: false)
+                }
+            case "compaction", "branch_summary", "usage", "model_usage":
+                modelId = nil
+                message = nil
+                let hasUsage = try values.contains(.usage) && !values.decodeNil(forKey: .usage)
+                if hasUsage {
+                    // Stage 2: strict decoding for billing-relevant fields on counted root-usage records.
+                    id = try values.decodeIfPresent(LenientString.self, forKey: .id)?.value
+                    timestamp = try values.decodeIfPresent(RootTimestamp.self, forKey: .timestamp)
+                    model = try values.decodeIfPresent(String.self, forKey: .model)
+                    responseId = try values.decodeIfPresent(LenientString.self, forKey: .responseId)?.value
+                    usage = try values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+                } else {
+                    id = nil
+                    timestamp = nil
+                    model = nil
+                    responseId = nil
+                    usage = nil
+                }
+            default:
+                id = nil
+                timestamp = nil
+                model = nil
+                modelId = nil
+                responseId = nil
+                message = nil
+                usage = nil
+            }
         }
     }
 
-    private struct ScanMessage: Decodable {
+    private struct ScanMessage {
         let role: String?
         let model: String?
         let responseId: String?
-        let timestamp: JSONInteger?
+        let timestamp: MessageTimestamp?
         let usage: ScanUsage?
 
         enum CodingKeys: String, CodingKey {
             case role, model, responseId, timestamp, usage
         }
 
-        init(from decoder: Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            role = try values.decodeIfPresent(String.self, forKey: .role)
-            model = try values.decodeIfPresent(String.self, forKey: .model)
-            responseId = try values.decodeIfPresent(String.self, forKey: .responseId)
-            timestamp = try values.decodeIfPresent(JSONInteger.self, forKey: .timestamp)
-            usage = try values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+        init(
+            from values: KeyedDecodingContainer<CodingKeys>,
+            role: String?,
+            strictBillingFields: Bool
+        ) throws {
+            self.role = role
+            if strictBillingFields {
+                model = try values.decodeIfPresent(String.self, forKey: .model)
+                responseId = try values.decodeIfPresent(LenientString.self, forKey: .responseId)?.value
+                timestamp = try values.decodeIfPresent(MessageTimestamp.self, forKey: .timestamp)
+                usage = try values.decodeIfPresent(ScanUsage.self, forKey: .usage)
+            } else {
+                model = role == "assistant"
+                    ? try values.decodeIfPresent(LenientString.self, forKey: .model)?.value
+                    : nil
+                responseId = nil
+                timestamp = nil
+                usage = nil
+            }
         }
     }
 
@@ -1188,7 +1318,7 @@ struct PiFormatScan: Sendable {
             type: String,
             model: String?,
             usage: ScanUsage,
-            messageTimestamp: JSONInteger?,
+            messageTimestamp: MessageTimestamp?,
             line: Data,
             fallbackDate: Date,
             fractional: ISO8601DateFormatter,
@@ -1337,8 +1467,8 @@ struct PiFormatScan: Sendable {
         }
 
         static func sourceEventDate(
-            messageTimestamp: JSONInteger?,
-            recorded: String?,
+            messageTimestamp: MessageTimestamp?,
+            recorded: RootTimestamp?,
             fractional: ISO8601DateFormatter,
             plain: ISO8601DateFormatter,
             now: Date
@@ -1346,23 +1476,39 @@ struct PiFormatScan: Sendable {
             let maximumDate = now.addingTimeInterval(86_400)
             // An assistant message's own timestamp is the request start; the entry timestamp is
             // when the record was persisted, so the message timestamp wins when it is usable.
-            if let milliseconds = messageTimestamp?.value, milliseconds > 0 {
-                let date = Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
-                if date > maximumDate { return .invalid }
-                if date >= PiFormatScan.minimumTimestamp {
-                    guard let epochMs = safeEpochMs(date) else { return .invalid }
-                    return .valid(date, epochMs)
+            var messageTimestampHadWrongType = false
+            if let messageTimestamp {
+                switch messageTimestamp {
+                case .integer(let milliseconds):
+                    if milliseconds > 0 {
+                        let date = Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+                        if date > maximumDate { return .invalid }
+                        if date >= PiFormatScan.minimumTimestamp {
+                            guard let epochMs = safeEpochMs(date) else { return .invalid }
+                            return .valid(date, epochMs)
+                        }
+                    }
+                case .invalidNumber:
+                    return .invalid
+                case .wrongType:
+                    messageTimestampHadWrongType = true
                 }
             }
-            if let recorded,
-               let date = fractional.date(from: recorded) ?? plain.date(from: recorded) {
-                if date > maximumDate { return .invalid }
-                if date >= PiFormatScan.minimumTimestamp {
-                    guard let epochMs = safeEpochMs(date) else { return .invalid }
-                    return .valid(date, epochMs)
+            if let recorded {
+                switch recorded {
+                case .string(let recordedString):
+                    if let date = fractional.date(from: recordedString) ?? plain.date(from: recordedString) {
+                        if date > maximumDate { return .invalid }
+                        if date >= PiFormatScan.minimumTimestamp {
+                            guard let epochMs = safeEpochMs(date) else { return .invalid }
+                            return .valid(date, epochMs)
+                        }
+                    }
+                case .wrongType:
+                    return .invalid
                 }
             }
-            return .missing
+            return messageTimestampHadWrongType ? .invalid : .missing
         }
 
         private static func text(_ value: String?) -> String? {

@@ -76,8 +76,10 @@ public actor CollectionRunner {
                 }
                 let cachedCount = cached.count
                 // "Unavailable" protects cached data; a missing source with nothing cached is simply not installed,
-                // even if an older build recorded a successful empty collection for it.
-                let hasHistory = cachedCount > 0 || !cachedHourlyRows.isEmpty
+                // even if an older build recorded a successful empty collection for it. Zero-coverage hourly rows
+                // carry no tokens and no events, so they do not count as history on their own.
+                let hasHistory = cachedCount > 0
+                    || cachedHourlyRows.contains { $0.counts.total > 0 || $0.eventCount > 0 }
                 var health: SourceHealth
                 if let message = accountUpsertErrors[sourceID] {
                     health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
@@ -125,6 +127,11 @@ public actor CollectionRunner {
                             let scoped = sourceBatch(batch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
                             try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
                                 authoritative: batch.authoritativeSourceIDs.contains(sourceID))
+                            if accountDevices[sourceID] != nil {
+                                for supersededID in batch.supersededAccountDeviceIDs where supersededID != targetDeviceID {
+                                    try store.migrateAccountDevice(from: supersededID, to: targetDeviceID, sourceID: sourceID)
+                                }
+                            }
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
                                 recordCount: scoped.daily.count, skippedRecords: batch.skippedRecords)
                         } catch {

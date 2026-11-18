@@ -40,7 +40,19 @@ private struct CosmosShareSnapshotKey: Hashable {
     let end: Date
     let aspect: ShareAspect
     let dimension: BreakdownDimension
-    let periodTotal: Int64
+    let total: TokenCounts
+    let sourcesDigest: Int
+    let modelsDigest: Int
+
+    static func breakdownDigest(_ breakdowns: [Breakdown]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(breakdowns.count)
+        for item in breakdowns {
+            hasher.combine(item.id)
+            hasher.combine(item.counts.total)
+        }
+        return hasher.finalize()
+    }
 }
 
 private func cosmosShareSceneSize(for aspect: ShareAspect) -> CGSize {
@@ -71,7 +83,6 @@ struct ShareExportSheet: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     @State private var previewPeriod: Period?
-    @State private var capturedNow = Date.now
     @State private var scope: ShareScope = .overall
     @State private var aspect: ShareAspect = .portrait
     @State private var showCost = false
@@ -109,7 +120,9 @@ struct ShareExportSheet: View {
         let modelUnpricedTokens: Int64
         let syncEnabled: Bool
         let remoteCount: Int
+        let remoteRevision: Int
         let lastRefresh: Date?
+        let dayStart: Date
         let isLiquidLens: Bool
     }
 
@@ -161,7 +174,9 @@ struct ShareExportSheet: View {
             modelUnpricedTokens: model.summary.cost.unpricedTokens,
             syncEnabled: settings.syncEnabled,
             remoteCount: refreshCoordinator?.remoteSnapshots.count ?? 0,
+            remoteRevision: refreshCoordinator?.remoteRevision ?? 0,
             lastRefresh: refreshCoordinator?.lastRefresh,
+            dayStart: Calendar.current.startOfDay(for: .now),
             isLiquidLens: isLiquidLens
         )
     }
@@ -196,7 +211,9 @@ struct ShareExportSheet: View {
             end: sceneSummary.end,
             aspect: aspect,
             dimension: cosmosDimension(for: scope),
-            periodTotal: sceneSummary.total.total
+            total: sceneSummary.total,
+            sourcesDigest: CosmosShareSnapshotKey.breakdownDigest(sceneSummary.bySource),
+            modelsDigest: CosmosShareSnapshotKey.breakdownDigest(sceneSummary.byModel)
         )
     }
 
@@ -898,7 +915,7 @@ struct ShareExportSheet: View {
             let store: any UsageStore = settings.syncEnabled
                 ? MergedUsageStore(local: refreshCoordinator.store, remote: refreshCoordinator.remoteSnapshots)
                 : refreshCoordinator.store
-            return (store, capturedNow, isSynthetic ? .synthetic : .bundled)
+            return (store, .now, isSynthetic ? .synthetic : .bundled)
         } else if isSynthetic {
             return (SyntheticUsageStore(), SyntheticUsageStore.defaultToday, .synthetic)
         } else {
@@ -906,7 +923,7 @@ struct ShareExportSheet: View {
         }
     }
 
-    /// Queries summary, scoped summary, lens buckets, and 30-day rank from a single preload and captured `now`.
+    /// Queries summary, scoped summary, lens buckets, and 30-day rank from a single preload and query-time `now`.
     private func resolveShareSnapshot(for key: SnapshotQueryKey) -> ResolvedShareSnapshot {
         guard let context = resolveBaseStore(),
               let rows = try? UsageAggregator.preload(context.store) else {

@@ -65,6 +65,28 @@ public struct SyncBackend: Sendable {
         try result.get()
     }
 
+    public func remove(_ path: String) throws {
+        let url = try resolve(path)
+        let manager = FileManager.default
+        let placeholder = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).icloud")
+        for target in [url, placeholder] {
+            guard manager.fileExists(atPath: target.path) else { continue }
+            var coordinationError: NSError?
+            var result: Result<Void, any Error> = .success(())
+            NSFileCoordinator().coordinate(writingItemAt: target, options: [.forDeleting], error: &coordinationError) { coordinatedURL in
+                result = Result {
+                    do {
+                        try manager.removeItem(at: coordinatedURL)
+                    } catch CocoaError.fileNoSuchFile {
+                    } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileNoSuchFileError {
+                    }
+                }
+            }
+            if let coordinationError { throw coordinationError }
+            try result.get()
+        }
+    }
+
     private func resolve(_ path: String) throws -> URL {
         guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..") else { throw SyncError.invalidSnapshot }
         let url = root.appendingPathComponent(path).standardizedFileURL
@@ -110,16 +132,19 @@ public enum ICloudSync {
     }
 
     public static func write(local: any UsageStore, device: Device, root: URL, appVersion: String,
-                             health: [SourceHealth] = [], now: Date = .now) throws {
+                             health: [SourceHealth] = [], now: Date = .now,
+                             supersededAccountDeviceIDs: Set<String> = []) throws {
         guard validDeviceID(device.id) else { throw SyncError.invalidSnapshot }
         let backend = SyncBackend(root: root)
         let folder = "v1/devices/\(device.id)"
         let metadataPath = folder + "/device.json"
+        var previousSnapshot: DeviceSyncSnapshot?
         if let data = try? backend.read(metadataPath) {
             guard try schemaVersion(data) == 1 else { throw SyncError.unsupportedSchema }
             let previous = try SyncSnapshot.decode(DeviceSyncSnapshot.self, from: data)
             guard previous.deviceId == device.id else { throw SyncError.invalidSnapshot }
             guard !previous.tombstone else { throw SyncError.tombstoned }
+            previousSnapshot = previous
         } else if FileManager.default.fileExists(atPath: root.appendingPathComponent(folder).path) {
             // Do not overwrite an evicted or unreadable identity, which may contain a tombstone.
             let entries = try backend.list(folder)
@@ -148,6 +173,14 @@ public enum ICloudSync {
         let metadata = DeviceSyncSnapshot(device: device, appVersion: appVersion, lastWriteUTC: now,
             files: files, sources: health.map(SyncSourceHealth.init), accounts: accounts)
         try backend.write(SyncSnapshot.encode(metadata), to: metadataPath)
+        try removeSupersededAccountFiles(
+            previous: previousSnapshot,
+            currentAccounts: accounts,
+            localDevices: local.devices,
+            explicitSupersededIDs: supersededAccountDeviceIDs,
+            folder: folder,
+            backend: backend
+        )
     }
 
     /// Publishes account rows this Mac collected, inside its own folder: the device folder keeps exactly
@@ -199,6 +232,57 @@ public enum ICloudSync {
             if (try? backend.read(path)) != data { try backend.write(data, to: path) }
         }
         return files
+    }
+
+    /// Removes only account files written by this Mac inside its own folder for superseded account IDs.
+    private static func removeSupersededAccountFiles(
+        previous: DeviceSyncSnapshot?,
+        currentAccounts: [AccountPublication],
+        localDevices: [Device],
+        explicitSupersededIDs: Set<String>,
+        folder: String,
+        backend: SyncBackend
+    ) throws {
+        let activeAccountIDs = Set(currentAccounts.map(\.deviceId))
+        let localAccountIDs = Set(localDevices.filter { $0.kind == .account }.map(\.id))
+        let activeAccountSources = Set(currentAccounts.flatMap(\.sources))
+
+        var filesToRemove = Set<String>()
+        for oldPub in previous?.accounts ?? [] {
+            guard !activeAccountIDs.contains(oldPub.deviceId),
+                  let shortID = AccountDeviceID.shortID(oldPub.deviceId) else { continue }
+            let isSuperseded = explicitSupersededIDs.contains(oldPub.deviceId)
+                || (!localAccountIDs.contains(oldPub.deviceId)
+                    && !oldPub.sources.isEmpty
+                    && oldPub.sources.allSatisfy { activeAccountSources.contains($0) })
+            guard isSuperseded else { continue }
+            for name in oldPub.files.keys where isAccountFile(name, shortID: shortID) {
+                filesToRemove.insert(name)
+            }
+        }
+
+        let explicitShortIDs = explicitSupersededIDs
+            .filter { !activeAccountIDs.contains($0) && !localAccountIDs.contains($0) }
+            .compactMap(AccountDeviceID.shortID)
+        if !explicitShortIDs.isEmpty, let entries = try? backend.list(folder) {
+            for entry in entries {
+                let rawName = entry.lastPathComponent
+                let name = (rawName.hasPrefix(".") && rawName.hasSuffix(".icloud"))
+                    ? String(rawName.dropFirst().dropLast(".icloud".count))
+                    : rawName
+                if explicitShortIDs.contains(where: { isAccountFile(name, shortID: $0) }) {
+                    filesToRemove.insert(name)
+                }
+            }
+        }
+
+        for name in filesToRemove.sorted() {
+            try backend.remove(folder + "/" + name)
+        }
+    }
+
+    private static func isAccountFile(_ name: String, shortID: String) -> Bool {
+        name == "account-\(shortID)-hourly.json" || accountMonth(name, shortID: shortID) != nil
     }
 
     public static func readRemote(

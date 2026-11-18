@@ -162,6 +162,56 @@ final class AccountSyncTests: XCTestCase {
         ))
     }
 
+    func testSupersededAccountFilesAreRemovedFromPublishersOwnFolderOnly() throws {
+        let legacyAccount = Device(
+            id: "account-cursor-fedcba9876543210fedcba9876543210",
+            name: "Cursor",
+            kind: .account
+        )
+        let legacyShortID = String(legacyAccount.id.suffix(32))
+        let otherAccountShortID = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let health = [SourceHealth(sourceID: "cursor", lastSuccess: now, state: .ok)]
+        let macDay = record(deviceID: publisher.id, source: "claude")
+
+        // This Mac initially publishes under the legacy account ID.
+        try publish(
+            daily: [macDay, record(deviceID: legacyAccount.id)],
+            hourly: [hour(deviceID: legacyAccount.id)],
+            devices: [publisher, legacyAccount],
+            health: health
+        )
+        let legacyDailyFile = accountFile("account-\(legacyShortID)-usage-2026-11.json")
+        let legacyHourlyFile = accountFile("account-\(legacyShortID)-hourly.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyDailyFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyHourlyFile.path))
+
+        // Seed another Mac's folder and a different account's file to prove neither is touched.
+        let backend = SyncBackend(root: directory)
+        let peerLegacyPath = "v1/devices/\(otherPublisher.id)/account-\(legacyShortID)-usage-2026-11.json"
+        let otherAccountPath = "v1/devices/\(publisher.id)/account-\(otherAccountShortID)-usage-2026-11.json"
+        try backend.write(Data("{}".utf8), to: peerLegacyPath)
+        try backend.write(Data("{}".utf8), to: otherAccountPath)
+
+        // After migration, local devices hold the new account ID instead of the legacy one.
+        try publish(
+            daily: [macDay, record(deviceID: accountID)],
+            hourly: [hour(deviceID: accountID)],
+            devices: [publisher, account],
+            health: health,
+            at: now.addingTimeInterval(60)
+        )
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyDailyFile.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyHourlyFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountFile("account-\(shortID)-usage-2026-11.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: accountFile("account-\(shortID)-hourly.json").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(peerLegacyPath).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(otherAccountPath).path))
+
+        let remote = try XCTUnwrap(read().first)
+        XCTAssertEqual(remote.accounts.map(\.device.id), [accountID])
+    }
+
     // MARK: - Reader compatibility
 
     func testManifestWithoutAccountsDecodesAsEmpty() throws {
