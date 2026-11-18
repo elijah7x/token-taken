@@ -124,14 +124,16 @@ public actor CollectionRunner {
                                 recordCount: 0, skippedRecords: 0)
                     } else {
                         do {
-                            let scoped = sourceBatch(batch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
-                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
-                                authoritative: batch.authoritativeSourceIDs.contains(sourceID))
+                            // Move legacy account rows under the new ID first, so the batch is then merged
+                            // against them with the normal floor and authoritative rules.
                             if accountDevices[sourceID] != nil {
                                 for supersededID in batch.supersededAccountDeviceIDs where supersededID != targetDeviceID {
                                     try store.migrateAccountDevice(from: supersededID, to: targetDeviceID, sourceID: sourceID)
                                 }
                             }
+                            let scoped = sourceBatch(batch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
+                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
+                                authoritative: batch.authoritativeSourceIDs.contains(sourceID))
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
                                 recordCount: scoped.daily.count, skippedRecords: batch.skippedRecords)
                         } catch {

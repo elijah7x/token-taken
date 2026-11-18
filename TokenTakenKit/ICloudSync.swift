@@ -172,7 +172,8 @@ public enum ICloudSync {
         )
         let metadata = DeviceSyncSnapshot(device: device, appVersion: appVersion, lastWriteUTC: now,
             files: files, sources: health.map(SyncSourceHealth.init), accounts: accounts)
-        try backend.write(SyncSnapshot.encode(metadata), to: metadataPath)
+        // Clean up before replacing the manifest: if removal fails, the previous manifest still lists the
+        // retired account's files, so the next write retries the cleanup instead of orphaning them.
         try removeSupersededAccountFiles(
             previous: previousSnapshot,
             currentAccounts: accounts,
@@ -181,6 +182,7 @@ public enum ICloudSync {
             folder: folder,
             backend: backend
         )
+        try backend.write(SyncSnapshot.encode(metadata), to: metadataPath)
     }
 
     /// Publishes account rows this Mac collected, inside its own folder: the device folder keeps exactly
