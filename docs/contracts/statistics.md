@@ -36,7 +36,7 @@ Status: Implemented v1 (2026-11-11)
 | --- | --- | --- |
 | Claude Code | tokscale `claude` | Engine category and dedup rules; hourly reasoning unavailable |
 | Codex | tokscale `codex` | Engine splits reasoning from output and handles fork replay; genuinely total-only legacy records remain a known export gap |
-| Grok | native Swift (`~/.grok/sessions/**/updates.jsonl`, honours `GROK_HOME`) | Ignores `logs/unified.jsonl` to avoid single-call double counting (ADR-0014); `promptId` retransmission dedup; normalizes inclusive `input`/`output` by excluding `cacheRead` and `reasoning`; sibling `summary.json`/`events.jsonl`/`signals.json` model and compaction fallback; hourly reasoning available |
+| Grok | native Swift (`~/.grok/sessions/**/updates.jsonl`, honours `GROK_HOME`) | Ignores `logs/unified.jsonl` to avoid single-call double counting (ADR-0014); `promptId` retransmission dedup; normalizes inclusive `input`/`output` by excluding `cacheRead` and `reasoning`; sibling `summary.json`/`events.jsonl`/`signals.json` model and compaction fallback, stored as `input`; hourly reasoning available except for hours that include usage rebuilt from cumulative totals |
 | Kimi Code | tokscale `kimi` (`~/.kimi/sessions` and `~/.kimi-code/sessions`, honours `KIMI_CODE_HOME`) | Engine category and dedup rules, including usage records; hourly reasoning unavailable |
 | OpenCode | tokscale `opencode` | Engine category and dedup rules; hourly reasoning unavailable |
 | Gemini CLI | tokscale `gemini` | Engine category and dedup rules; hourly reasoning unavailable |

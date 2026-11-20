@@ -180,6 +180,8 @@ public struct GrokCollector: UsageCollector {
         var model: String
         var counts: TokenCounts
         var calls: Int64
+        /// False for rows rebuilt from cumulative totals, whose reasoning share is unknown.
+        var reasoningKnown = true
     }
 
     private struct Turn {
@@ -203,7 +205,7 @@ public struct GrokCollector: UsageCollector {
             let delta = t.max - t.base
             if delta > 0 {
                 let model = t.model.isEmpty ? "grok-unknown" : t.model
-                fallback.append(ParsedRow(ms: t.ms, model: model, counts: TokenCounts(input: delta), calls: 1))
+                fallback.append(ParsedRow(ms: t.ms, model: model, counts: TokenCounts(input: delta), calls: 1, reasoningKnown: false))
             }
         }
 
@@ -314,7 +316,7 @@ public struct GrokCollector: UsageCollector {
         }
         if fallback.isEmpty && usageRows.isEmpty, let lastTotal, lastTotal > 0 {
             let model = current.isEmpty ? "grok-unknown" : current
-            fallback.append(ParsedRow(ms: lastTotalMs, model: model, counts: TokenCounts(input: lastTotal), calls: 1))
+            fallback.append(ParsedRow(ms: lastTotalMs, model: model, counts: TokenCounts(input: lastTotal), calls: 1, reasoningKnown: false))
         }
 
         let rowsToEmit: [ParsedRow]
@@ -330,7 +332,7 @@ public struct GrokCollector: UsageCollector {
                 if effective > 0 && extra > 0 {
                     let sigMs = fallback.map(\.ms).max() ?? meta.ms
                     let sigModel = nonEmpty(signalsModel(signals)) ?? nonEmpty(meta.model) ?? current
-                    fallback.append(ParsedRow(ms: sigMs, model: sigModel, counts: TokenCounts(input: extra), calls: 1))
+                    fallback.append(ParsedRow(ms: sigMs, model: sigModel, counts: TokenCounts(input: extra), calls: 1, reasoningKnown: false))
                 }
             }
             rowsToEmit = fallback
@@ -340,7 +342,7 @@ public struct GrokCollector: UsageCollector {
         }
 
         for row in rowsToEmit {
-            aggregator.record(timestamp: row.ms, rawModelID: row.model, counts: row.counts, calls: row.calls)
+            aggregator.record(timestamp: row.ms, rawModelID: row.model, counts: row.counts, calls: row.calls, reasoningKnown: row.reasoningKnown)
         }
     }
 
@@ -536,7 +538,16 @@ public struct GrokCollector: UsageCollector {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Largest counter accepted from a log. Real values are many orders of magnitude smaller; anything above this is
+    /// malformed, and rejecting it keeps later sums from overflowing Int64 and trapping.
+    private static let maxCounter: Int64 = 1 << 50
+
     private static func asInt(_ value: Any?) -> Int64? {
+        guard let v = unboundedInt(value), v.magnitude <= UInt64(maxCounter) else { return nil }
+        return v
+    }
+
+    private static func unboundedInt(_ value: Any?) -> Int64? {
         guard let value, !(value is NSNull) else { return nil }
         if let number = value as? NSNumber {
             guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
@@ -651,7 +662,7 @@ public struct GrokCollector: UsageCollector {
             skipped += 1
         }
 
-        mutating func record(timestamp: Int64, rawModelID: String, counts: TokenCounts, calls: Int64) {
+        mutating func record(timestamp: Int64, rawModelID: String, counts: TokenCounts, calls: Int64, reasoningKnown: Bool = true) {
             guard timestamp > 0 else {
                 skipped += 1
                 return
@@ -693,6 +704,7 @@ public struct GrokCollector: UsageCollector {
             )
             hourRow.counts += counts
             hourRow.eventCount += calls
+            hourRow.reasoningKnown = hourRow.reasoningKnown && reasoningKnown
             hourly[hour] = hourRow
         }
 

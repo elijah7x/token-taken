@@ -197,7 +197,7 @@ public actor CollectionRunner {
                 if hours[start] == nil {
                     hours[start] = HourlyUsage(hourStart: start, deviceID: deviceID, sourceID: sourceID,
                         counts: .zero, eventCount: 0,
-                        reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode", "cursor"].contains(sourceID))
+                        reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode", "cursor", "grok"].contains(sourceID))
                 }
             }
         }

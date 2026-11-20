@@ -394,4 +394,46 @@ final class GrokCollectorTests: XCTestCase {
         XCTAssertTrue(third.unchangedSourceIDs.isEmpty)
         XCTAssertEqual(third.daily.first?.modelID, "grok-4.7")
     }
+
+    func testOversizedCountersAreIgnoredWithoutOverflow() async throws {
+        let huge = try turnCompletedLine(
+            promptID: "p-huge",
+            modelID: "grok-4.7",
+            timestampMs: ms("2026-11-19T10:00:00Z"),
+            usage: ["inputTokens": Int64.max, "outputTokens": 1, "totalTokens": Int64.max]
+        )
+        let normal = try turnCompletedLine(
+            promptID: "p-normal",
+            modelID: "grok-4.7",
+            timestampMs: ms("2026-11-19T10:05:00Z"),
+            usage: ["inputTokens": 100, "outputTokens": 10]
+        )
+        _ = try writeSession("session-huge", updates: [huge, normal])
+
+        let batch = try await collector().collect()
+        let total = batch.daily.reduce(Int64(0)) { $0 + $1.counts.total }
+        XCTAssertLessThan(total, 1 << 50)
+        // The out-of-range field is dropped on its own; the row's valid output (1) still counts.
+        let row = batch.daily.first(where: { $0.modelID == "grok-4.7" })
+        XCTAssertEqual(row?.counts.input, 100)
+        XCTAssertEqual(row?.counts.output, 11)
+    }
+
+    func testCumulativeOnlyHoursHaveUnknownReasoning() async throws {
+        let chunk = try jsonLine([
+            "params": [
+                "update": ["sessionUpdate": "user_message_chunk"],
+                "_meta": ["agentTimestampMs": ms("2026-11-19T09:00:00Z")],
+            ],
+        ])
+        let total = try jsonLine([
+            "params": ["_meta": ["agentTimestampMs": ms("2026-11-19T09:05:00Z"), "totalTokens": 500]],
+        ])
+        _ = try writeSession("session-cumulative", updates: [chunk, total], summary: ["current_model_id": "grok-4.7"])
+
+        let batch = try await collector().collect()
+        XCTAssertEqual(batch.hourly.count, 1)
+        XCTAssertEqual(batch.hourly.first?.counts.input, 500)
+        XCTAssertEqual(batch.hourly.first?.reasoningKnown, false)
+    }
 }
