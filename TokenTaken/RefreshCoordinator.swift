@@ -509,6 +509,7 @@ final class RefreshCoordinator {
         collectors.append(AntigravityCollector(deviceID: deviceID, stateDirectory: state))
         collectors.append(MiniMaxCodeCollector(deviceID: deviceID, stateDirectory: state))
         collectors.append(DeepSeekCollector(deviceID: deviceID, stateDirectory: state))
+        collectors.append(GrokCollector(deviceID: deviceID, stateDirectory: state))
         if settings.cursorAccountCollection {
             collectors.append(CursorCollector(deviceID: deviceID, stateDirectory: state))
         }

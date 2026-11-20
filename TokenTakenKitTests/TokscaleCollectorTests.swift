@@ -129,19 +129,16 @@ final class TokscaleCollectorTests: XCTestCase {
         // The expected source ids come from the collector's sourceMap, not from the client names.
         let mappedSources = TokscaleCollector(executableURL: URL(fileURLWithPath: "/unused"),
             configDirectory: URL(fileURLWithPath: "/unused"), clients: clients, deviceID: "device-a").sourceIDs
+        // Grok is native (ADR-0014); its engine rows are ignored here.
         let expected: [(day: String, sourceID: String, modelID: String, counts: TokenCounts, events: Int64)] = [
             ("2026-11-09", "codex", "gpt-6-astra",
                 TokenCounts(input: 1_000, cacheRead: 800, cacheWrite: 0, output: 400, reasoning: 250), 3),
-            ("2026-11-09", "grok", "grok-4.7",
-                TokenCounts(input: 500, cacheRead: 120, cacheWrite: 0, output: 180, reasoning: 0), 2),
             ("2026-11-09", "kimi", "k3.1-pro",
                 TokenCounts(input: 700, cacheRead: 300, cacheWrite: 0, output: 260, reasoning: 0), 4),
             ("2026-11-09", "opencode", "claude-opus-5-5",
                 TokenCounts(input: 900, cacheRead: 600, cacheWrite: 150, output: 320, reasoning: 0), 5),
             ("2026-11-10", "codex", "gpt-6-astra",
                 TokenCounts(input: 1_200, cacheRead: 950, cacheWrite: 0, output: 520, reasoning: 300), 4),
-            ("2026-11-10", "grok", "grok-4.7",
-                TokenCounts(input: 640, cacheRead: 160, cacheWrite: 0, output: 210, reasoning: 0), 1),
             ("2026-11-10", "kimi", "k3.1-pro",
                 TokenCounts(input: 880, cacheRead: 420, cacheWrite: 0, output: 300, reasoning: 0), 3),
             ("2026-11-10", "opencode", "claude-opus-5-5",
@@ -177,6 +174,7 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("omp"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("devin-cli"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("devin-desktop"))
+        XCTAssertFalse(TokscaleCollector.defaultClients.contains("grok"))
     }
 
     func testSubprocessErrorsDoNotIncludeStderrOrPaths() async throws {

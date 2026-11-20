@@ -4,17 +4,16 @@ import os
 
 public struct TokscaleCollector: UsageCollector {
     public static let defaultClients = [
-        "claude", "codex", "grok", "kimi", "opencode", "gemini", "droid",
+        "claude", "codex", "kimi", "opencode", "gemini", "droid",
         "dsh", "fx",
     ]
 
     /// Engine client id to Token Taken source id. Clients sharing a source are always collected in one engine run:
     /// tokscale deduplicates the Antigravity family by response id only across clients requested together.
-    /// Devin is collected natively (ADR-0009), so it is no longer an engine client.
+    /// Devin (ADR-0009) and Grok (ADR-0014) are collected natively, so they are no longer engine clients.
     private static let sourceMap = [
         "claude": "claude",
         "codex": "codex",
-        "grok": "grok",
         "kimi": "kimi",
         "opencode": "opencode",
         "gemini": "gemini",

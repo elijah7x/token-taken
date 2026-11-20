@@ -69,6 +69,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- Grok is now collected natively from session update logs and no longer double counts an inference that appears in both Grok Build logs ([ADR-0014](docs/decisions/0014-native-grok.md)).
 - Preserved historical daily usage across system time-zone changes instead of shrinking stored days (schema v6 collection-zone tracking).
 - Cancelled refreshes no longer mark sources as failed, and missing or invalid collection-engine status is now surfaced in the UI.
 - Improved Cosmos menu bar readability on light macOS menu bars.

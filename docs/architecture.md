@@ -40,7 +40,7 @@ TokenTakenCLI ────────┘
 
 - Runs the pinned usage engine and adapts its output into Token Taken's canonical model.
 - Returns `CollectionBatch` with complete-history local-day/model records, rolling 48-hour per-source records, and skipped-record counts. Daily records preserve collection-zone and raw-model identifiers; hourly instants are absolute and carry reasoning knowledge.
-- tokscale handles Claude Code, Codex, Grok, Kimi Code, OpenCode, Gemini CLI, and Factory Droid. Native Swift collectors handle Zcode, pi, and oh-my-pi; pi/oh-my-pi are not also counted by tokscale. The opt-in Cursor collector is native, account-level, and never requested from the engine.
+- tokscale handles Claude Code, Codex, Kimi Code, OpenCode, Gemini CLI, Factory Droid, DeepSeek Harness, and fx. Native Swift collectors handle Zcode, pi, oh-my-pi, Devin, Antigravity, MiniMax Code, DeepSeek CLI, and Grok; pi, oh-my-pi, Devin, Antigravity, and Grok are not also counted by tokscale. The opt-in Cursor collector is native, account-level, and never requested from the engine.
 - Explicitly sets the process `TZ` to the collecting device's current IANA zone, runs offline with an isolated config directory, and uses a 300-second timeout. Graph supplies daily/model totals; concurrent per-client hourly exports have merged models and omit reasoning.
 - Retains device attribution and device kinds (`mac`, `account`). Account-level usage is collected only for Cursor, only when the user opts in, and only by its native collector; its publications from several Macs collapse to one whole publication per account. Device-local sources are never cross-device deduplicated.
 - Reads agent logs read-only. Raw prompts, responses, paths, project names, and credentials do not enter sync output.
