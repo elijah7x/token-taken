@@ -15,6 +15,13 @@ Status: Implemented v1 (2026-11-11)
 - Total tokens are always `input + cacheRead + cacheWrite + output + reasoning + uncategorized` after normalization. An inclusive source count MUST be normalized before storage, not added twice at query time.
 - Missing or unparseable data is unknown, not zero. `reasoningKnown=false` distinguishes omitted hourly reasoning from a measured zero.
 
+### Cache hit rate and estimated savings
+
+- **Cache hit rate** (`TokenCounts.cacheHitRate`) is `Double(cacheRead) / Double(prompt)`, where `prompt = input + cacheRead + cacheWrite`. It is `nil` when `prompt == 0` or when `uncategorized * 2 > prompt + uncategorized` (most tokens have no category split, so the rate would be misleading).
+- Providers that do not report `cacheWrite` separately (for example, OpenAI-family models and some Cursor models) are not directly comparable to Anthropic models under this metric.
+- **Estimated cache savings** (`PriceTable.cacheSavings(model:counts:)`, exposed on model `Breakdown.cacheSavingsUSD`) is the read-side USD difference versus paying the uncached input rate: `Double(cacheRead) * (rates.input - rates.cacheRead) / 1_000_000`, using the same exact-then-alias lookup as `estimate(model:counts:)`. It does not subtract cache-write premiums, returns `nil` when the model has no rates or either `input` or `cacheRead` rate is `nil`, and returns `0` when both rates exist and `cacheRead == 0`.
+- Savings are an estimate from the versioned price table, not a billing figure.
+
 ## Source identity and deduplication
 
 - UI surfaces label an AI coding tool as `Harness` / `Harnesses` (`工具` in Simplified Chinese) where the data model, CLI, and report schemas keep `source` / `sourceID` / `sources`.

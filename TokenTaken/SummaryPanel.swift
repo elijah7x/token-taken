@@ -806,6 +806,7 @@ struct BreakdownCard: View {
 
     @State private var showsAllModels = false
     @State private var showsAllSources = false
+    @State private var cacheDetailModelID: String?
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -856,6 +857,9 @@ struct BreakdownCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: dimension) {
+            cacheDetailModelID = nil
+        }
     }
 
     private func rowList(
@@ -875,6 +879,7 @@ struct BreakdownCard: View {
         }
     }
 
+    @ViewBuilder
     private func row(_ item: Breakdown, modelColors: [String: Color], soleSource: String?) -> some View {
         let isModel = dimension == .models
         let color = isModel
@@ -882,7 +887,7 @@ struct BreakdownCard: View {
             : Palette.color(forSource: item.id)
         let secondary = isModel ? soleSource : nil
 
-        return Group {
+        let content = Group {
             if let secondary {
                 VStack(spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -990,10 +995,44 @@ struct BreakdownCard: View {
                 .frame(minHeight: 48)
             }
         }
-        .help(item.name)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Text(verbatim: item.name))
-        .accessibilityValue(rowAccessibilityValue(item, secondary: secondary))
+
+        if isModel {
+            Button {
+                cacheDetailModelID = item.id
+            } label: {
+                content
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(item.name)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: item.name))
+            .accessibilityValue(rowAccessibilityValue(item, secondary: secondary))
+            .accessibilityHint(Text("Shows cache details"))
+            .accessibilityAddTraits(.isButton)
+            .popover(isPresented: cacheDetailPresented(for: item.id), arrowEdge: .trailing) {
+                ModelCacheDetail(item: item, color: color)
+            }
+        } else {
+            content
+                .help(item.name)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(verbatim: item.name))
+                .accessibilityValue(rowAccessibilityValue(item, secondary: secondary))
+        }
+    }
+
+    private func cacheDetailPresented(for modelID: String) -> Binding<Bool> {
+        Binding(
+            get: { cacheDetailModelID == modelID },
+            set: { isPresented in
+                if isPresented {
+                    cacheDetailModelID = modelID
+                } else if cacheDetailModelID == modelID {
+                    cacheDetailModelID = nil
+                }
+            }
+        )
     }
 
     private func rowAccessibilityValue(_ item: Breakdown, secondary: String?) -> Text {
@@ -1082,5 +1121,125 @@ struct BreakdownCard: View {
         case .sources:
             String(localized: "Other \(remaining.count) harnesses (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
         }
+    }
+}
+
+private struct ModelCacheDetail: View {
+    let item: Breakdown
+    let color: Color
+
+    @Environment(\.locale) private var locale
+
+    private static let popoverWidth: CGFloat = 260
+    private static let popoverPadding: CGFloat = 14
+    private static let barWidth: CGFloat = popoverWidth - popoverPadding * 2
+
+    private var promptTokens: Int64 {
+        item.counts.input + item.counts.cacheRead + item.counts.cacheWrite
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(verbatim: item.name)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Palette.ink1)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Cache hit rate")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Palette.ink2)
+
+                if let rate = item.counts.cacheHitRate {
+                    Text(rate, format: .percent.precision(.fractionLength(0)))
+                        .font(.system(size: 22, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                        .foregroundStyle(Palette.ink1)
+                        .monospacedDigit()
+                } else {
+                    Text(verbatim: "-")
+                        .font(.system(size: 22, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                        .foregroundStyle(Palette.ink3)
+                        .monospacedDigit()
+
+                    Text(promptTokens == 0 && item.counts.uncategorized == 0
+                        ? LocalizedStringKey("No input tokens in this period.")
+                        : LocalizedStringKey("Most usage for this model has no category split."))
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.ink3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+            }
+
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 0.5)
+
+            VStack(alignment: .leading, spacing: 8) {
+                splitRow(title: "Uncached input", value: item.counts.input, barColor: color.opacity(0.45))
+                splitRow(title: "Cache read", value: item.counts.cacheRead, barColor: color)
+                splitRow(title: "Cache write", value: item.counts.cacheWrite, barColor: color.opacity(0.45))
+            }
+
+            Rectangle()
+                .fill(Palette.hairline)
+                .frame(height: 0.5)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("Estimated savings")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                Spacer(minLength: 8)
+                if let savings = item.cacheSavingsUSD {
+                    Text(verbatim: TokenFormat.usd(savings))
+                        .font(.system(size: 12, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                        .foregroundStyle(Palette.ink1)
+                        .monospacedDigit()
+                } else {
+                    Text("Unpriced")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Palette.ink3)
+                }
+            }
+            .accessibilityElement(children: .combine)
+
+            Text("Rate = cache read ÷ all input tokens. Providers report cache writes differently, so compare models from the same provider.")
+                .font(.system(size: 10.5))
+                .foregroundStyle(Palette.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Self.popoverPadding)
+        .frame(width: Self.popoverWidth, alignment: .leading)
+    }
+
+    private func splitRow(title: LocalizedStringKey, value: Int64, barColor: Color) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(verbatim: TokenFormat.short(value))
+                    .font(.system(size: 12, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                    .foregroundStyle(Palette.ink1)
+                    .monospacedDigit()
+                    .fixedSize()
+                Text(verbatim: Share.percent(value, of: promptTokens, locale: locale))
+                    .font(.system(size: 11.5, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .fixedSize()
+                    .frame(minWidth: 44, alignment: .trailing)
+            }
+
+            ProportionBar(
+                ratio: Share.ratio(value, of: promptTokens),
+                color: barColor,
+                width: Self.barWidth,
+                height: 4
+            )
+        }
+        .accessibilityElement(children: .combine)
     }
 }

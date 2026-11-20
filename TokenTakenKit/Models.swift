@@ -87,6 +87,17 @@ public struct TokenCounts: Hashable, Codable, Sendable {
     }
 }
 
+extension TokenCounts {
+    /// Share of prompt tokens (`input + cacheRead + cacheWrite`) served from cache (`cacheRead / prompt`).
+    /// Returns `nil` when `prompt == 0` or when uncategorized tokens exceed half of `prompt + uncategorized`
+    /// (`uncategorized * 2 > prompt + uncategorized`).
+    public var cacheHitRate: Double? {
+        let prompt = input + cacheRead + cacheWrite
+        guard prompt > 0, uncategorized <= prompt else { return nil }
+        return Double(cacheRead) / Double(prompt)
+    }
+}
+
 public struct UsageRecord: Hashable, Codable, Sendable {
     public var day: String
     public var timeZoneID: String
@@ -177,11 +188,13 @@ public struct Breakdown: Hashable, Sendable, Identifiable {
     public let id: String
     public let name: String
     public let counts: TokenCounts
+    public let cacheSavingsUSD: Double?
 
-    public init(id: String, name: String, counts: TokenCounts) {
+    public init(id: String, name: String, counts: TokenCounts, cacheSavingsUSD: Double? = nil) {
         self.id = id
         self.name = name
         self.counts = counts
+        self.cacheSavingsUSD = cacheSavingsUSD
     }
 }
 

@@ -361,6 +361,70 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertFalse(buckets[7].reasoningKnown)
         XCTAssertFalse(agg.lensSlice(buckets, range: 7...7, period: .day).reasoningKnown)
     }
+
+    func testTokenCountsCacheHitRateAndNilRules() throws {
+        XCTAssertNil(TokenCounts.zero.cacheHitRate)
+        XCTAssertNil(TokenCounts(output: 500, reasoning: 200).cacheHitRate)
+        XCTAssertEqual(
+            try XCTUnwrap(TokenCounts(input: 200, cacheRead: 600, cacheWrite: 200, output: 999).cacheHitRate),
+            0.6,
+            accuracy: 1e-9
+        )
+        // Boundary: uncategorized == prompt (100 * 2 == 100 + 100) still yields a rate; strictly greater yields nil.
+        XCTAssertEqual(
+            try XCTUnwrap(TokenCounts(input: 50, cacheRead: 50, uncategorized: 100).cacheHitRate),
+            0.5,
+            accuracy: 1e-9
+        )
+        XCTAssertNil(TokenCounts(input: 50, cacheRead: 50, uncategorized: 101).cacheHitRate)
+    }
+
+    func testBreakdownCacheSavingsPopulatedForModelsOnly() throws {
+        let viewer = calendar("UTC")
+        let now = UsageDay.date(from: "2026-11-09", in: viewer.timeZone)!.addingTimeInterval(12 * 3_600)
+        let prices = PriceTable(version: "fixture", rates: [
+            "priced-model": .init(input: 4, cacheRead: 0.4, cacheWrite: 5, output: 16),
+        ])
+        let store = GranularityStore(daily: [
+            UsageRecord(
+                day: "2026-11-09",
+                timeZoneID: "UTC",
+                deviceID: "dev-1",
+                sourceID: "claude",
+                modelID: "priced-model",
+                counts: TokenCounts(input: 100_000, cacheRead: 1_000_000, cacheWrite: 200_000, output: 50_000)
+            ),
+            UsageRecord(
+                day: "2026-11-09",
+                timeZoneID: "UTC",
+                deviceID: "dev-1",
+                sourceID: "claude",
+                modelID: "unpriced-model",
+                counts: TokenCounts(input: 10_000, cacheRead: 500_000)
+            ),
+        ])
+        let agg = UsageAggregator(store: store, calendar: viewer, now: now, priceTable: prices)
+        let summary = try agg.summary(for: .month)
+        XCTAssertEqual(
+            try XCTUnwrap(summary.byModel.first { $0.id == "priced-model" }?.cacheSavingsUSD),
+            3.6,
+            accuracy: 1e-9
+        )
+        XCTAssertNil(summary.byModel.first { $0.id == "unpriced-model" }?.cacheSavingsUSD)
+        XCTAssertTrue(summary.bySource.allSatisfy { $0.cacheSavingsUSD == nil })
+        XCTAssertTrue(summary.byDevice.allSatisfy { $0.cacheSavingsUSD == nil })
+
+        let buckets = try agg.lensBuckets(for: .month)
+        let slice = agg.lensSlice(buckets, range: 0...(buckets.count - 1), period: .month)
+        XCTAssertEqual(
+            try XCTUnwrap(slice.byModel.first { $0.id == "priced-model" }?.cacheSavingsUSD),
+            3.6,
+            accuracy: 1e-9
+        )
+        XCTAssertNil(slice.byModel.first { $0.id == "unpriced-model" }?.cacheSavingsUSD)
+        XCTAssertTrue(slice.bySource.allSatisfy { $0.cacheSavingsUSD == nil })
+        XCTAssertTrue(slice.byDevice.allSatisfy { $0.cacheSavingsUSD == nil })
+    }
 }
 
 private struct GranularityStore: UsageStore {

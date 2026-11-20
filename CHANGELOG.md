@@ -6,8 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-20
+
 ### Added
 
+- Added a per-model cache detail popover when clicking rows in the Models breakdown list, showing cache hit rate, input split, and estimated cache savings.
 - Added `--help` / `-h` usage output (globally and per subcommand) to the `token-taken` CLI, and added CLI installation status and an **Uninstall** action in Settings.
 - Bundled third-party notices (`THIRD_PARTY_NOTICES.md`) inside the macOS app and added a button to open them from Settings → About.
 - Added the Liquid Glass `Lens` share card graphic (`LensShareGraphic`): when **View** is set to `Lens`, share cards render a pure-`Canvas` stacked time-bar chart with a hand-drawn glass lens capsule frozen on the peak bucket, a single peak-value pill above the lens, `Peak · {time}` in the card header, portrait (`2:3`), square (`1:1`), and landscape (`3:2`) layouts, and a Tide vessel fallback for single-model day cards where hourly buckets have no model breakdown.

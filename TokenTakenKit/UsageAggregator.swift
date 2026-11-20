@@ -71,7 +71,8 @@ public struct UsageAggregator: Sendable {
             sources: sources,
             models: models,
             devices: deviceTotals,
-            deviceList: devices
+            deviceList: devices,
+            priceTable: priceTable
         )
         return UsageSummary(
             period: period,
@@ -102,6 +103,7 @@ public struct UsageAggregator: Sendable {
             range: range,
             period: period,
             devices: rows?.devices ?? store.devices,
+            priceTable: priceTable,
             emptyDate: now
         )
     }
@@ -110,9 +112,26 @@ public struct UsageAggregator: Sendable {
         _ buckets: [LensBucket],
         range: ClosedRange<Int>,
         period: Period,
-        devices: [Device]
+        devices: [Device],
+        priceTable: PriceTable? = nil
     ) -> LensSlice {
-        lensSlice(buckets, range: range, period: period, devices: devices, emptyDate: .now)
+        // Savings must come from the table that produced the buckets' cost estimates. Without an explicit
+        // table, only the two known tables can be matched by version; any other version leaves savings nil.
+        let resolvedPriceTable: PriceTable? = priceTable ?? {
+            switch buckets.lazy.compactMap({ $0.cost?.priceTableVersion }).first {
+            case PriceTable.synthetic.version: return .synthetic
+            case PriceTable.bundled.version: return .bundled
+            default: return nil
+            }
+        }()
+        return lensSlice(
+            buckets,
+            range: range,
+            period: period,
+            devices: devices,
+            priceTable: resolvedPriceTable,
+            emptyDate: .now
+        )
     }
 
     /// One point per day for the last `lastDays` days, ending today.
@@ -411,6 +430,7 @@ public struct UsageAggregator: Sendable {
         range: ClosedRange<Int>,
         period: Period,
         devices: [Device],
+        priceTable: PriceTable?,
         emptyDate: Date
     ) -> LensSlice {
         let hasModelDetail = period != .day
@@ -490,6 +510,7 @@ public struct UsageAggregator: Sendable {
             models: hasModelDetail ? models : [:],
             devices: deviceTotals,
             deviceList: devices,
+            priceTable: priceTable,
             excludeZero: true
         )
 
@@ -543,12 +564,18 @@ public struct UsageAggregator: Sendable {
         models: [String: TokenCounts],
         devices deviceTotals: [String: TokenCounts],
         deviceList: [Device],
+        priceTable: PriceTable?,
         excludeZero: Bool = false
     ) -> (bySource: [Breakdown], byModel: [Breakdown], byDevice: [Breakdown]) {
         let deviceNames = Dictionary(deviceList.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         return (
             bySource: breakdowns(sources, excludeZero: excludeZero) { SourceCatalog.info(for: $0).name },
-            byModel: breakdowns(models, excludeZero: excludeZero) { $0 },
+            byModel: breakdowns(
+                models,
+                excludeZero: excludeZero,
+                name: { $0 },
+                cacheSavingsUSD: { priceTable?.cacheSavings(model: $0, counts: $1) }
+            ),
             byDevice: breakdowns(deviceTotals, excludeZero: excludeZero) { deviceNames[$0] ?? $0 }
         )
     }
@@ -556,11 +583,19 @@ public struct UsageAggregator: Sendable {
     private static func breakdowns(
         _ groups: [String: TokenCounts],
         excludeZero: Bool = false,
-        name: (String) -> String
+        name: (String) -> String,
+        cacheSavingsUSD: (String, TokenCounts) -> Double? = { _, _ in nil }
     ) -> [Breakdown] {
         groups
             .filter { !excludeZero || $0.value.total > 0 }
-            .map { Breakdown(id: $0.key, name: name($0.key), counts: $0.value) }
+            .map {
+                Breakdown(
+                    id: $0.key,
+                    name: name($0.key),
+                    counts: $0.value,
+                    cacheSavingsUSD: cacheSavingsUSD($0.key, $0.value)
+                )
+            }
             .sorted { $0.counts.total != $1.counts.total ? $0.counts.total > $1.counts.total : $0.id < $1.id }
     }
 }

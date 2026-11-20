@@ -931,6 +931,22 @@
         }
       }
     },
+    "Cache hit rate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cache hit rate"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "缓存命中率"
+          }
+        }
+      }
+    },
     "Cache is not netted out of the total" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1602,6 +1618,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "估算费用"
+          }
+        }
+      }
+    },
+    "Estimated savings" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Estimated savings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "估算节省"
           }
         }
       }
@@ -2428,6 +2460,22 @@
         }
       }
     },
+    "Most usage for this model has no category split." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Most usage for this model has no category split."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该模型的大部分用量没有分类明细。"
+          }
+        }
+      }
+    },
     "Move Token Taken to your Applications folder before installing the command-line tool." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2444,6 +2492,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "新输入"
+          }
+        }
+      }
+    },
+    "No input tokens in this period." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No input tokens in this period."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本时段没有输入 token。"
           }
         }
       }
@@ -3122,6 +3186,22 @@
         }
       }
     },
+    "Rate = cache read ÷ all input tokens. Providers report cache writes differently, so compare models from the same provider." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rate = cache read ÷ all input tokens. Providers report cache writes differently, so compare models from the same provider."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "命中率 = 缓存读取 ÷ 全部输入 token。各厂商对缓存写入的统计口径不同，请在同一厂商的模型之间比较。"
+          }
+        }
+      }
+    },
     "Read failed" : {
       "localizations" : {
         "en" : {
@@ -3688,6 +3768,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已显示全部 %lld 个"
+          }
+        }
+      }
+    },
+    "Shows cache details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows cache details"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示缓存详情"
           }
         }
       }
@@ -4558,6 +4654,22 @@
         }
       }
     },
+    "Uncached input" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uncached input"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未缓存输入"
+          }
+        }
+      }
+    },
     "Uncategorized" : {
       "localizations" : {
         "zh-Hans" : {
@@ -4590,6 +4702,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未知 Mac"
+          }
+        }
+      }
+    },
+    "Unpriced" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unpriced"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未定价"
           }
         }
       }

@@ -82,6 +82,21 @@ public struct PriceTable: Sendable {
         return result.unpricedTokens == 0 ? result.usd : nil
     }
 
+    /// Estimated USD saved by cache reads compared with paying the uncached `input` rate:
+    /// `Double(counts.cacheRead) * (inputRate - cacheReadRate) / 1_000_000`.
+    /// This is a read-side saving only and does not subtract cache-write premiums.
+    /// Returns `nil` when the model has no entry or either `input` or `cacheRead` rate is `nil`,
+    /// and returns `0` when both rates exist and `counts.cacheRead == 0`.
+    public func cacheSavings(model: String, counts: TokenCounts) -> Double? {
+        guard let r = rates(for: model),
+              let inputRate = r.input,
+              let cacheReadRate = r.cacheRead else {
+            return nil
+        }
+        if counts.cacheRead == 0 { return 0 }
+        return Double(counts.cacheRead) * (inputRate - cacheReadRate) / 1_000_000
+    }
+
     /// Alias table v3: lowercase, drop the provider prefix up to the last `/` and any `:` suffix,
     /// then apply only reviewed variant mappings. Unknown variant suffixes remain unpriced.
     /// A `:free` suffix is kept, so a free variant never resolves to a paid model; it prices only

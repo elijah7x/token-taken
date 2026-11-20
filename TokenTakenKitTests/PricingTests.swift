@@ -234,4 +234,24 @@ final class PricingTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(PriceTable.synthetic.cost(model: "claude-sonnet-5-5", counts: TokenCounts(input: 1_000_000))), 3, accuracy: 1e-9)
         XCTAssertNil(PriceTable.synthetic.cost(model: "kimi-k3.1-pro", counts: TokenCounts(input: 1_000_000)))
     }
+
+    func testCacheSavingsCoversRatesAliasesMissingAndZeroReads() throws {
+        // claude-sonnet-4-5: input 3.0, cacheRead 0.30, cacheWrite 3.75 -> read-side saving ignores cacheWrite.
+        let counts = TokenCounts(input: 500_000, cacheRead: 2_000_000, cacheWrite: 1_000_000, output: 100_000)
+        XCTAssertEqual(try XCTUnwrap(table.cacheSavings(model: "claude-sonnet-4-5", counts: counts)), 5.4, accuracy: 1e-9)
+        // Alias + provider prefix resolves through the same lookup as estimate(model:counts:).
+        XCTAssertEqual(try XCTUnwrap(table.cacheSavings(model: "router/claude-4-5-sonnet", counts: counts)), 5.4, accuracy: 1e-9)
+        // Zero cache reads with valid rates returns 0 rather than nil.
+        XCTAssertEqual(try XCTUnwrap(table.cacheSavings(model: "claude-sonnet-4-5", counts: TokenCounts(input: 1_000_000))), 0, accuracy: 1e-9)
+        // Unknown model returns nil.
+        XCTAssertNil(table.cacheSavings(model: "no-such-model-99", counts: counts))
+
+        let missingRates = PriceTable(version: "fixture", rates: [
+            "no-input": .init(input: nil, cacheRead: 0.1, cacheWrite: nil, output: 1),
+            "no-cache-read": .init(input: 2, cacheRead: nil, cacheWrite: nil, output: 1),
+        ])
+        XCTAssertNil(missingRates.cacheSavings(model: "no-input", counts: counts))
+        XCTAssertNil(missingRates.cacheSavings(model: "no-cache-read", counts: counts))
+        XCTAssertNil(missingRates.cacheSavings(model: "no-cache-read", counts: .zero))
+    }
 }

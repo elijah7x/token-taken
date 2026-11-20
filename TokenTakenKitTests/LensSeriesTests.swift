@@ -270,8 +270,8 @@ final class LensSeriesTests: XCTestCase {
             Breakdown(id: "kimi", name: "Kimi Code", counts: TokenCounts(input: 400_000)),
         ])
         XCTAssertEqual(subSlice.byModel, [
-            Breakdown(id: "model-fast", name: "model-fast", counts: TokenCounts(input: 2_000_000, output: 1_000_000)),
-            Breakdown(id: "model-deep", name: "model-deep", counts: TokenCounts(input: 600_000)),
+            Breakdown(id: "model-fast", name: "model-fast", counts: TokenCounts(input: 2_000_000, output: 1_000_000), cacheSavingsUSD: 0),
+            Breakdown(id: "model-deep", name: "model-deep", counts: TokenCounts(input: 600_000), cacheSavingsUSD: 0),
             Breakdown(id: "model-unpriced", name: "model-unpriced", counts: TokenCounts(input: 400_000)),
         ])
         XCTAssertEqual(subSlice.byDevice, [
