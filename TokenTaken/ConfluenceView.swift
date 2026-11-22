@@ -23,11 +23,14 @@ struct ConfluenceView: View {
     @Environment(\.controlActiveState) private var controlActiveState
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var hover: ConfluenceHover?
     /// Particles follow the final geometry, so they are hidden while the ribbons spring to new values.
     @State private var particlesSettled = true
     /// Values the scene last settled on; nil until the first mount has run.
     @State private var settledValues: ConfluenceValues?
+    @State private var windowVisible = true
+    @State private var layoutCache = ConfluenceLayoutCache()
     @FocusState private var focused: ConfluenceTarget?
 
     private let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
@@ -36,9 +39,15 @@ struct ConfluenceView: View {
         let isLiquidGlass = settings.map { $0.theme == .liquidGlass }
             ?? (!ThemeRuntime.isField && !ThemeRuntime.isCosmos)
         let vesselBodyStyle: LiquidGlassVessel.BodyStyle = isLiquidGlass ? .prismatic : .solid
+        let increasedContrast = contrast == .increased
 
         GeometryReader { proxy in
-            let layout = ConfluenceLayout(summary: summary, dimension: dimension, size: proxy.size)
+            let layout = layoutCache.layout(
+                summary: summary,
+                dimension: dimension,
+                size: proxy.size,
+                isLiquidGlass: isLiquidGlass
+            )
             let rawTarget = hover?.target ?? focused
             let activeTarget = rawTarget.flatMap { layout.stream(for: $0) != nil ? $0 : nil }
             let values = layout.animationValues
@@ -58,7 +67,9 @@ struct ConfluenceView: View {
                     values: values,
                     activeTarget: activeTarget,
                     isDark: scheme == .dark,
+                    increasedContrast: increasedContrast,
                     reduceTransparency: reduceTransparency,
+                    windowVisible: windowVisible,
                     vesselBodyStyle: vesselBodyStyle,
                     focused: $focused
                 )
@@ -108,12 +119,18 @@ struct ConfluenceView: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let point):
-                    hover = layout.hitTest(point).map { ConfluenceHover(target: $0, location: point) }
+                    let next = layout.hitTest(point).map { ConfluenceHover(target: $0, location: point) }
+                    if hover != next { hover = next }
                 case .ended:
-                    hover = nil
+                    if hover != nil { hover = nil }
                 }
             }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: activeTarget)
+        }
+        .background {
+            WindowVisibilityProbe { visible in
+                windowVisible = visible
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
@@ -170,7 +187,9 @@ private struct ConfluenceScene: View, @MainActor Animatable {
     var values: ConfluenceValues
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
+    let increasedContrast: Bool
     let reduceTransparency: Bool
+    let windowVisible: Bool
     let vesselBodyStyle: LiquidGlassVessel.BodyStyle
     var focused: FocusState<ConfluenceTarget?>.Binding
 
@@ -187,6 +206,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
         let current = layout.interpolated(with: values)
         let wobbleActive = controlActiveState == .key
             && appearsActive
+            && windowVisible
             && !reduceMotion
             && !reduceTransparency
             && !current.isEmpty
@@ -197,6 +217,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     layout: current,
                     activeTarget: activeTarget,
                     isDark: isDark,
+                    increasedContrast: increasedContrast,
                     reduceTransparency: reduceTransparency,
                     vesselBodyStyle: vesselBodyStyle
                 )
@@ -245,6 +266,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                 layout: current,
                 activeTarget: activeTarget,
                 isDark: isDark,
+                increasedContrast: increasedContrast,
                 reduceTransparency: reduceTransparency,
                 vesselBodyStyle: vesselBodyStyle
             )
@@ -269,6 +291,7 @@ private struct ConfluenceScene: View, @MainActor Animatable {
                     total: current.totalTokens,
                     activeTarget: activeTarget,
                     isDark: isDark,
+                    increasedContrast: increasedContrast,
                     focused: focused
                 )
                 // Switching dimension replaces every label id; a fade keeps SwiftUI from running
@@ -524,6 +547,7 @@ private struct ConfluenceStreamLabel: View {
     let total: Int64
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
+    let increasedContrast: Bool
     var focused: FocusState<ConfluenceTarget?>.Binding
 
     private var highlighted: Bool { activeTarget == stream.target }
@@ -556,12 +580,13 @@ private struct ConfluenceStreamLabel: View {
     }
 
     private var sourceLane: some View {
-        HStack(alignment: .center, spacing: 8) {
+        let dimmedBadgeOpacity = increasedContrast ? 0.68 : 0.45
+        return HStack(alignment: .center, spacing: 8) {
             if stream.dimension == .models {
                 Circle()
                     .fill(stream.color)
                     .frame(width: 8, height: 8)
-                    .opacity(dimmed ? 0.45 : 1)
+                    .opacity(dimmed ? dimmedBadgeOpacity : 1)
             } else {
                 RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
                     .fill(stream.color.opacity(isDark ? 0.18 : 0.14))
@@ -571,7 +596,7 @@ private struct ConfluenceStreamLabel: View {
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundStyle(stream.color)
                     }
-                    .opacity(dimmed ? 0.45 : 1)
+                    .opacity(dimmed ? dimmedBadgeOpacity : 1)
             }
 
             if stream.isCollapsedLabel {
@@ -629,7 +654,7 @@ private func confluenceName(_ stream: ConfluenceLayout.Stream) -> Text {
     if let category = stream.category { return Text(category.title) }
     if stream.isUncategorized { return Text("Uncategorized") }
     if stream.isOther {
-        if stream.dimension == .models, stream.otherCount > 0 {
+        if stream.otherCount > 0 {
             return Text("Other \(stream.otherCount)")
         }
         return Text("Other")
@@ -669,6 +694,46 @@ private struct ConfluenceTooltip: View {
 }
 
 // MARK: - Data-to-form mapping
+
+/// Keeps the settled layout and particle curves between hover evaluations so pointer movement does
+/// not rebuild descriptors, Bezier ribbons, or 33-sample particle paths every pixel.
+@MainActor
+private final class ConfluenceLayoutCache {
+    private struct Key: Equatable {
+        let dimension: BreakdownDimension
+        let total: TokenCounts
+        let bySource: [Breakdown]
+        let byModel: [Breakdown]
+        let size: CGSize
+        let isLiquidGlass: Bool
+    }
+
+    private var cachedKey: Key?
+    private var cachedLayout: ConfluenceLayout?
+
+    func layout(
+        summary: UsageSummary,
+        dimension: BreakdownDimension,
+        size: CGSize,
+        isLiquidGlass: Bool
+    ) -> ConfluenceLayout {
+        let key = Key(
+            dimension: dimension,
+            total: summary.total,
+            bySource: summary.bySource,
+            byModel: summary.byModel,
+            size: size,
+            isLiquidGlass: isLiquidGlass
+        )
+        if let cachedLayout, cachedKey == key {
+            return cachedLayout
+        }
+        let built = ConfluenceLayout(summary: summary, dimension: dimension, size: size)
+        cachedKey = key
+        cachedLayout = built
+        return built
+    }
+}
 
 /// A shared vertical scale maps tokens to ribbon thickness on both sides. Every non-zero
 /// stream keeps at least 4.5pt thickness (4.5–7pt under 2%); labels occupy independent lanes
@@ -847,7 +912,7 @@ private struct ConfluenceLayout {
                 sourceID: nil,
                 name: "Other",
                 tokens: otherTokens,
-                color: Palette.ink3.opacity(0.5),
+                color: Palette.ink3,
                 category: nil,
                 isOther: true,
                 otherCount: otherCount,
@@ -1603,6 +1668,7 @@ private struct ConfluenceRenderer {
     let layout: ConfluenceLayout
     let activeTarget: ConfluenceTarget?
     let isDark: Bool
+    let increasedContrast: Bool
     let reduceTransparency: Bool
     let vesselBodyStyle: LiquidGlassVessel.BodyStyle
 
@@ -1620,18 +1686,23 @@ private struct ConfluenceRenderer {
             guard let leader = stream.leader else { continue }
             context.stroke(
                 leader,
-                with: .color(stream.color.opacity(0.5)),
-                style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [2.5, 2.5])
+                with: .color(stream.color.opacity(increasedContrast ? 0.85 : 0.5)),
+                style: StrokeStyle(
+                    lineWidth: increasedContrast ? 1.5 : 1,
+                    lineCap: .round,
+                    dash: [2.5, 2.5]
+                )
             )
         }
     }
 
     func drawVessel(in context: inout GraphicsContext, wobblePhase: Double?) {
+        let dimmedInflowOpacity = increasedContrast ? 0.42 : 0.22
         let inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)] =
             (layout.sources + layout.categories).compactMap { stream in
                 guard stream.value > 0, stream.innerHeight > 0 else { return nil }
                 let dimmed = activeTarget != nil && activeTarget != stream.target
-                let color = dimmed ? stream.color.opacity(0.22) : stream.color
+                let color = dimmed ? stream.color.opacity(dimmedInflowOpacity) : stream.color
                 return (
                     color: color,
                     y: stream.innerTop,
@@ -1650,14 +1721,16 @@ private struct ConfluenceRenderer {
             reduceTransparency: reduceTransparency,
             inflows: inflows,
             wobblePhase: wobblePhase,
-            bodyStyle: vesselBodyStyle
+            bodyStyle: vesselBodyStyle,
+            increasedContrast: increasedContrast
         )
     }
 
     private func draw(_ stream: ConfluenceLayout.Stream, in context: inout GraphicsContext) {
         let highlighted = activeTarget == stream.target
         let dimmed = activeTarget != nil && !highlighted
-        let alpha = (highlighted ? 0.96 : isDark ? 0.78 : 0.72) * (dimmed ? 0.2 : 1)
+        let dimmedFactor = increasedContrast ? 0.42 : 0.2
+        let alpha = (highlighted ? 0.96 : isDark ? 0.78 : 0.72) * (dimmed ? dimmedFactor : 1)
         let fillColor = dimmed && reduceTransparency ? Palette.ink3 : stream.color
         let wall = LiquidGlassVessel.wallThickness(for: layout.reservoir)
         let startX = stream.side == .source ? stream.outerFrame.minX : layout.reservoir.maxX - wall
@@ -1693,7 +1766,11 @@ private struct ConfluenceRenderer {
         }
 
         if highlighted && !reduceTransparency {
-            context.stroke(stream.ribbon, with: .color(.white.opacity(0.5)), lineWidth: 0.8)
+            context.stroke(
+                stream.ribbon,
+                with: .color(.white.opacity(increasedContrast ? 0.78 : 0.5)),
+                lineWidth: increasedContrast ? 1.2 : 0.8
+            )
         }
     }
 }

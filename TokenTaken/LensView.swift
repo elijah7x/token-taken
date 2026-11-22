@@ -63,10 +63,12 @@ struct LensView: View {
     @State private var lastStepDate: Date?
     @State private var windowVisible = true
     @State private var layoutCache = LensBarLayoutCache()
+    @State private var sliceCache = LensSliceCache()
 
     @FocusState private var isChartFocused: Bool
 
     private static let readoutHeight: CGFloat = 104
+    private static let readoutHeightWithUncategorized: CGFloat = 122
 
     private var canAnimate: Bool {
         appearsActive && controlActiveState == .key && windowVisible && !reduceMotion
@@ -127,21 +129,33 @@ struct LensView: View {
         if let slice {
             return slice(range)
         }
-        return model.lensSlice(range)
+        return sliceCache.slice(
+            for: range,
+            period: period,
+            buckets: buckets,
+            devices: model.summary.devices,
+            compute: { model.lensSlice($0) }
+        )
     }
 
     var body: some View {
+        let activeSlice = activeSliceRange.map(resolveSlice)
+        let hasUncategorized = model.summary.total.uncategorized > 0
+            || (activeSlice?.counts.uncategorized ?? 0) > 0
+        let cardHeight = hasUncategorized ? Self.readoutHeightWithUncategorized : Self.readoutHeight
+
         VStack(alignment: .leading, spacing: 10) {
             LensReadoutCard(
                 summary: model.summary,
                 period: period,
                 dimension: dimension,
                 buckets: buckets,
-                activeSlice: activeSliceRange.map(resolveSlice),
+                activeSlice: activeSlice,
                 isPinned: pinnedRange != nil,
+                increasedContrast: contrast == .increased,
                 onRelease: { releasePin() }
             )
-            .frame(height: Self.readoutHeight)
+            .frame(height: cardHeight)
 
             timeBarStage
                 .frame(maxWidth: .infinity, minHeight: 110, maxHeight: .infinity)
@@ -181,30 +195,6 @@ struct LensView: View {
 
     // MARK: - Time Bar Stage
 
-    private var sourceOrder: [String] {
-        let fromSummary = model.summary.bySource.map(\.id)
-        if !fromSummary.isEmpty { return fromSummary }
-        var totals: [String: Int64] = [:]
-        for bucket in buckets where !bucket.isFuture {
-            for (id, counts) in bucket.bySource {
-                totals[id, default: 0] += counts.total
-            }
-        }
-        return totals.sorted { $0.value > $1.value }.map(\.key)
-    }
-
-    private var modelOrder: [String] {
-        let fromSummary = model.summary.byModel.map(\.id)
-        if !fromSummary.isEmpty { return fromSummary }
-        var totals: [String: Int64] = [:]
-        for bucket in buckets where !bucket.isFuture {
-            for (id, counts) in bucket.byModel {
-                totals[id, default: 0] += counts.total
-            }
-        }
-        return totals.sorted { $0.value > $1.value }.map(\.key)
-    }
-
     private var timeBarStage: some View {
         GeometryReader { proxy in
             let layout = layoutCache.layout(
@@ -212,8 +202,8 @@ struct LensView: View {
                 dimension: dimension,
                 period: period,
                 size: proxy.size,
-                sourceOrder: sourceOrder,
-                modelOrder: modelOrder
+                summarySources: model.summary.bySource,
+                summaryModels: model.summary.byModel
             )
             let lensRange = visualLensRange
             let targetFrame = lensRange.map { targetLensMetrics(for: $0, in: layout) }
@@ -722,7 +712,8 @@ struct LensView: View {
                     verticalScale: 1.0,
                     opacity: baseOpacity,
                     isHighlighted: false,
-                    isDark: isDark
+                    isDark: isDark,
+                    increasedContrast: increased
                 )
             }
         }
@@ -768,7 +759,9 @@ struct LensView: View {
 
             // Refracted horizontal gridlines inside the lens.
             let gridMag = isRange ? LensBarLayout.rangeMagnification : LensBarLayout.singleMagnification
-            let gridColor = isDark ? Color.white.opacity(0.09) : Color(hex: "#0F172A").opacity(0.075)
+            let gridColor = isDark
+                ? Color.white.opacity(increased ? 0.20 : 0.09)
+                : Color(hex: "#0F172A").opacity(increased ? 0.18 : 0.075)
             for s in 0...4 {
                 let gy = plot.maxY - ((plot.height * CGFloat(s)) / 4.0) * gridMag
                 guard gy >= lensRect.minY - 4 else { continue }
@@ -778,7 +771,7 @@ struct LensView: View {
                     to: CGPoint(x: lensRect.maxX + 4, y: gy),
                     control: CGPoint(x: lensCx, y: gy + (s == 0 ? 0 : -1.2))
                 )
-                mag.stroke(curve, with: .color(gridColor), lineWidth: 1)
+                mag.stroke(curve, with: .color(gridColor), lineWidth: increased ? 1.2 : 1)
             }
 
             // Magnified vector bars.
@@ -818,7 +811,7 @@ struct LensView: View {
                     }
                 }
 
-                let barOpacity = inRange ? 0.96 : 0.44
+                let barOpacity = inRange ? 0.96 : (increased ? 0.62 : 0.44)
                 let topY = drawBucketBar(
                     in: &mag,
                     bar: bar,
@@ -829,7 +822,8 @@ struct LensView: View {
                     verticalScale: vScale,
                     opacity: barOpacity,
                     isHighlighted: inRange,
-                    isDark: isDark
+                    isDark: isDark,
+                    increasedContrast: increased
                 )
 
                 if inRange && !bar.isFuture && bar.total > 0 {
@@ -921,7 +915,9 @@ struct LensView: View {
             )
 
             let rimStroke: Color = if isPinned {
-                Palette.roleAccent.opacity(isDark ? 0.78 : 0.58)
+                Palette.roleAccent.opacity(increased ? (isDark ? 0.95 : 0.88) : (isDark ? 0.78 : 0.58))
+            } else if increased {
+                isDark ? Color.white.opacity(0.65) : Palette.ink1.opacity(0.55)
             } else {
                 Color.white.opacity(isDark ? (isResting ? 0.28 : 0.38) : 0.92)
             }
@@ -940,15 +936,19 @@ struct LensView: View {
                 let handlePath = Path(roundedRect: handleRect, cornerRadius: 4, style: .continuous)
                 context.fill(
                     handlePath,
-                    with: .color(isDark ? Color(hex: "#42567A").opacity(0.95) : Color.white.opacity(0.96))
+                    with: .color(
+                        isDark
+                            ? Color(hex: "#42567A").opacity(increased ? 1.0 : 0.95)
+                            : Color.white.opacity(increased ? 1.0 : 0.96)
+                    )
                 )
                 context.stroke(
                     handlePath,
-                    with: .color(Palette.roleAccent.opacity(isDark ? 0.70 : 0.50)),
-                    lineWidth: 1
+                    with: .color(Palette.roleAccent.opacity(increased ? 0.95 : (isDark ? 0.70 : 0.50))),
+                    lineWidth: increased ? 1.5 : 1
                 )
 
-                let grooveColor = Palette.roleAccent.opacity(isDark ? 0.85 : 0.70)
+                let grooveColor = Palette.roleAccent.opacity(increased ? 1.0 : (isDark ? 0.85 : 0.70))
                 let g1 = CGRect(x: edgeX - 1.5, y: lensRect.midY - 4.5, width: 1, height: 9)
                 let g2 = CGRect(x: edgeX + 0.5, y: lensRect.midY - 4.5, width: 1, height: 9)
                 context.fill(Path(roundedRect: g1, cornerRadius: 0.5), with: .color(grooveColor))
@@ -978,12 +978,16 @@ struct LensView: View {
 
             context.fill(
                 pillPath,
-                with: .color(isDark ? Color(hex: "#182130").opacity(0.94) : Color.white.opacity(0.95))
+                with: .color(
+                    isDark
+                        ? Color(hex: "#182130").opacity(increased ? 0.98 : 0.94)
+                        : Color.white.opacity(increased ? 1.0 : 0.95)
+                )
             )
             context.stroke(
                 pillPath,
-                with: .color(Palette.roleAccent.opacity(isDark ? 0.48 : 0.34)),
-                lineWidth: 1
+                with: .color(Palette.roleAccent.opacity(increased ? (isDark ? 0.90 : 0.82) : (isDark ? 0.48 : 0.34))),
+                lineWidth: increased ? 1.5 : 1
             )
             context.draw(resolved, at: CGPoint(x: clampedX, y: pillRect.midY), anchor: .center)
         }
@@ -1000,7 +1004,8 @@ struct LensView: View {
         verticalScale: CGFloat,
         opacity: Double,
         isHighlighted: Bool,
-        isDark: Bool
+        isDark: Bool,
+        increasedContrast: Bool
     ) -> CGFloat {
         let bottomY = plotRect.maxY
         let x = centerX - barWidth * 0.5
@@ -1010,7 +1015,11 @@ struct LensView: View {
             let grooveRect = CGRect(x: x, y: bottomY - 2.5, width: barWidth, height: 2.5)
             context.fill(
                 Path(roundedRect: grooveRect, cornerRadius: 1.25, style: .continuous),
-                with: .color(isDark ? Color.white.opacity(0.13) : Color(hex: "#0F172A").opacity(0.11))
+                with: .color(
+                    isDark
+                        ? Color.white.opacity(increasedContrast ? 0.24 : 0.13)
+                        : Color(hex: "#0F172A").opacity(increasedContrast ? 0.22 : 0.11)
+                )
             )
             return bottomY
         }
@@ -1019,7 +1028,13 @@ struct LensView: View {
         if !bar.isKnown && bar.total <= 0 {
             let slotH: CGFloat = min(14, max(9, plotRect.height * 0.11)) * min(verticalScale, 1.2)
             let slotRect = CGRect(x: x, y: bottomY - slotH, width: barWidth, height: slotH)
-            drawHatchedPlaceholder(in: &context, rect: slotRect, isDark: isDark, isHighlighted: isHighlighted)
+            drawHatchedPlaceholder(
+                in: &context,
+                rect: slotRect,
+                isDark: isDark,
+                isHighlighted: isHighlighted,
+                increasedContrast: increasedContrast
+            )
             return slotRect.minY
         }
 
@@ -1028,24 +1043,42 @@ struct LensView: View {
             let zeroRect = CGRect(x: x, y: bottomY - 1.5, width: barWidth, height: 1.5)
             context.fill(
                 Path(roundedRect: zeroRect, cornerRadius: 0.75),
-                with: .color(Palette.ink3.opacity(isHighlighted ? 0.55 : 0.30))
+                with: .color(Palette.ink3.opacity(increasedContrast ? (isHighlighted ? 0.85 : 0.55) : (isHighlighted ? 0.55 : 0.30)))
             )
             return bottomY
         }
 
-        // 4. Stacked positive segments.
+        // 4. Stacked positive segments: preserve the bucket's proportional height while giving
+        // sub-1pt segments 1pt whenever taller segments have enough surplus above 1pt.
         var currentY = bottomY
         let validSegments = bar.segments.filter { $0.tokens > 0 }
+        let rawHeights = validSegments.map {
+            (CGFloat($0.tokens) / CGFloat(max(1, yMax))) * plotRect.height * verticalScale
+        }
+        let minSegmentH: CGFloat = 1.0
+        let deficit = rawHeights.reduce(CGFloat(0)) { $0 + max(0, minSegmentH - $1) }
+        let surplus = rawHeights.reduce(CGFloat(0)) { $0 + max(0, $1 - minSegmentH) }
+        let segmentHeights: [CGFloat]
+        if deficit > 0, surplus >= deficit {
+            let keepRatio = (surplus - deficit) / surplus
+            segmentHeights = rawHeights.map { rawH in
+                rawH < minSegmentH ? minSegmentH : minSegmentH + (rawH - minSegmentH) * keepRatio
+            }
+        } else {
+            segmentHeights = rawHeights
+        }
+
+        let gap: CGFloat = isHighlighted ? 0.6 : 0.3
         for (segIdx, segment) in validSegments.enumerated() {
-            let rawH = (CGFloat(segment.tokens) / CGFloat(max(1, yMax))) * plotRect.height * verticalScale
-            guard rawH > 0.35 else { continue }
-            let nextY = max(plotRect.minY - 4, currentY - rawH)
-            let segH = currentY - nextY
-            guard segH > 0.25 else { continue }
+            let segH = segmentHeights[segIdx]
+            guard segH > 0 else { continue }
+            let nextY = currentY - segH
 
             let isTop = segIdx == validSegments.count - 1 && bar.isKnown
-            let drawH = max(0.6, segH - (isHighlighted ? 0.6 : 0.3))
-            let segRect = CGRect(x: x, y: nextY, width: barWidth, height: drawH)
+            let applyGap = !isTop && segH > minSegmentH + gap
+            let drawH = applyGap ? (segH - gap) : segH
+            let drawY = applyGap ? (nextY + gap) : nextY
+            let segRect = CGRect(x: x, y: drawY, width: barWidth, height: drawH)
             let topR = min(5, barWidth * 0.5)
             let path = isTop
                 ? Path(
@@ -1063,9 +1096,10 @@ struct LensView: View {
             context.fill(path, with: .color(segment.color.opacity(opacity)))
 
             if isHighlighted && isTop {
-                let capRect = CGRect(x: x + 0.5, y: nextY, width: max(0, barWidth - 1), height: 1.2)
+                let capH = min(1.2, drawH)
+                let capRect = CGRect(x: x + 0.5, y: drawY, width: max(0, barWidth - 1), height: capH)
                 context.fill(
-                    Path(roundedRect: capRect, cornerRadius: 0.6),
+                    Path(roundedRect: capRect, cornerRadius: min(0.6, capH * 0.5)),
                     with: .color(Color.white.opacity(isDark ? 0.28 : 0.55))
                 )
             }
@@ -1077,7 +1111,13 @@ struct LensView: View {
         if !bar.isKnown {
             let capH: CGFloat = 5
             let capRect = CGRect(x: x, y: max(plotRect.minY, currentY - capH - 1), width: barWidth, height: capH)
-            drawHatchedPlaceholder(in: &context, rect: capRect, isDark: isDark, isHighlighted: isHighlighted)
+            drawHatchedPlaceholder(
+                in: &context,
+                rect: capRect,
+                isDark: isDark,
+                isHighlighted: isHighlighted,
+                increasedContrast: increasedContrast
+            )
             currentY = capRect.minY
         }
 
@@ -1088,10 +1128,13 @@ struct LensView: View {
         in context: inout GraphicsContext,
         rect: CGRect,
         isDark: Bool,
-        isHighlighted: Bool
+        isHighlighted: Bool,
+        increasedContrast: Bool
     ) {
         let shape = Path(roundedRect: rect, cornerRadius: min(3, rect.width * 0.4), style: .continuous)
-        let strokeAlpha = isHighlighted ? 0.52 : (isDark ? 0.28 : 0.26)
+        let strokeAlpha = increasedContrast
+            ? (isHighlighted ? 0.85 : 0.58)
+            : (isHighlighted ? 0.52 : (isDark ? 0.28 : 0.26))
         let strokeColor = Palette.ink3.opacity(strokeAlpha)
 
         context.drawLayer { layer in
@@ -1183,15 +1226,52 @@ struct LensView: View {
 
 // MARK: - Pure-Value Bar Layout
 
+/// Caches the resolved active slice so the 120fps spring does not re-aggregate buckets every frame.
+@MainActor
+private final class LensSliceCache {
+    private struct Key: Equatable {
+        let range: ClosedRange<Int>
+        let period: Period
+        let buckets: [LensBucket]
+        let devices: [Device]
+    }
+
+    private var cachedKey: Key?
+    private var cachedSlice: LensSlice?
+
+    func slice(
+        for range: ClosedRange<Int>,
+        period: Period,
+        buckets: [LensBucket],
+        devices: [Device],
+        compute: (ClosedRange<Int>) -> LensSlice
+    ) -> LensSlice {
+        let key = Key(
+            range: range,
+            period: period,
+            buckets: buckets,
+            devices: devices
+        )
+        if let cachedSlice, cachedKey == key {
+            return cachedSlice
+        }
+        let resolved = compute(range)
+        cachedKey = key
+        cachedSlice = resolved
+        return resolved
+    }
+}
+
 /// Keeps the stacked bar layout and model palette between body passes so hover and spring frames
-/// do not rebuild segment geometry or model colors when `buckets`, `dimension`, and `size` stay fixed.
+/// do not rebuild segment geometry, source/model rank orders, or model colors when inputs stay fixed.
+@MainActor
 private final class LensBarLayoutCache {
     private var buckets: [LensBucket] = []
     private var dimension: BreakdownDimension = .sources
     private var period: Period = .day
     private var size: CGSize = .zero
-    private var sourceOrder: [String] = []
-    private var modelOrder: [String] = []
+    private var summarySources: [Breakdown] = []
+    private var summaryModels: [Breakdown] = []
     private var valid = false
     private var cached: LensBarLayout?
 
@@ -1206,8 +1286,8 @@ private final class LensBarLayoutCache {
         dimension: BreakdownDimension,
         period: Period,
         size: CGSize,
-        sourceOrder: [String],
-        modelOrder: [String]
+        summarySources: [Breakdown],
+        summaryModels: [Breakdown]
     ) -> LensBarLayout {
         if valid,
            let cached,
@@ -1215,10 +1295,13 @@ private final class LensBarLayoutCache {
            self.dimension == dimension,
            self.period == period,
            self.size == size,
-           self.sourceOrder == sourceOrder,
-           self.modelOrder == modelOrder {
+           self.summarySources == summarySources,
+           self.summaryModels == summaryModels {
             return cached
         }
+
+        let sourceOrder = Self.resolveOrder(summary: summarySources, buckets: buckets, keyPath: \.bySource)
+        let modelOrder = Self.resolveOrder(summary: summaryModels, buckets: buckets, keyPath: \.byModel)
 
         let degraded = period == .day && dimension == .models
         let resolvedModelPalette: [String: Color]
@@ -1253,11 +1336,27 @@ private final class LensBarLayoutCache {
         self.dimension = dimension
         self.period = period
         self.size = size
-        self.sourceOrder = sourceOrder
-        self.modelOrder = modelOrder
+        self.summarySources = summarySources
+        self.summaryModels = summaryModels
         self.cached = built
         self.valid = true
         return built
+    }
+
+    private static func resolveOrder(
+        summary: [Breakdown],
+        buckets: [LensBucket],
+        keyPath: KeyPath<LensBucket, [String: TokenCounts]>
+    ) -> [String] {
+        let fromSummary = summary.map(\.id)
+        if !fromSummary.isEmpty { return fromSummary }
+        var totals: [String: Int64] = [:]
+        for bucket in buckets where !bucket.isFuture {
+            for (id, counts) in bucket[keyPath: keyPath] {
+                totals[id, default: 0] += counts.total
+            }
+        }
+        return totals.sorted { $0.value > $1.value }.map(\.key)
     }
 }
 
@@ -1528,23 +1627,9 @@ struct LensBarLayout {
     }
 
     static func axisLabel(_ value: Double) -> String {
-        let v = abs(value)
-        guard v >= 0.5 else { return "0" }
-        func clean(_ n: Double) -> String {
-            abs(n - n.rounded()) < 0.05
-                ? String(Int(n.rounded()))
-                : String(format: "%.1f", n)
-        }
-        if TokenFormat.unitStyle == .chinese {
-            if v >= 1e8 { return clean(value / 1e8) + "亿" }
-            if v >= 1e4 { return clean(value / 1e4) + "万" }
-            return String(Int(value.rounded()))
-        } else {
-            if v >= 1e9 { return clean(value / 1e9) + "B" }
-            if v >= 1e6 { return clean(value / 1e6) + "M" }
-            if v >= 1e3 { return clean(value / 1e3) + "K" }
-            return String(Int(value.rounded()))
-        }
+        guard value.isFinite, abs(value) >= 0.5 else { return "0" }
+        let clamped = min(max(value.rounded(), Double(Int64.min)), Double(Int64.max))
+        return TokenFormat.short(Int64(clamped))
     }
 }
 
@@ -1557,6 +1642,7 @@ private struct LensReadoutCard: View {
     let buckets: [LensBucket]
     let activeSlice: LensSlice?
     let isPinned: Bool
+    let increasedContrast: Bool
     let onRelease: () -> Void
 
     @Environment(\.locale) private var locale
@@ -1625,13 +1711,18 @@ private struct LensReadoutCard: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .modifier(LensReadoutSurface(reduceTransparency: reduceTransparency, isDark: scheme == .dark, shape: shape))
+        .modifier(LensReadoutSurface(
+            reduceTransparency: reduceTransparency,
+            isDark: scheme == .dark,
+            increasedContrast: increasedContrast,
+            shape: shape
+        ))
     }
 
     private var columnDivider: some View {
         Rectangle()
             .fill(Palette.hairline)
-            .frame(width: 1)
+            .frame(width: increasedContrast ? 1.5 : 1)
             .padding(.vertical, 2)
             .accessibilityHidden(true)
     }
@@ -1663,7 +1754,12 @@ private struct LensReadoutCard: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background {
-                            Capsule().fill(Palette.roleAccent.opacity(0.12))
+                            Capsule().fill(Palette.roleAccent.opacity(increasedContrast ? 0.22 : 0.12))
+                        }
+                        .overlay {
+                            if increasedContrast {
+                                Capsule().strokeBorder(Palette.roleAccent, lineWidth: 1)
+                            }
                         }
                         .contentShape(Capsule())
                     }
@@ -1897,11 +1993,12 @@ private struct LensReadoutCard: View {
                         .fill(Palette.barTrack)
                         .frame(width: width, height: 6)
                 } else {
+                    let uncategorizedColor = Palette.ink3.opacity(increasedContrast ? 0.80 : 0.45)
                     let activeParts: [(id: String, value: Int64, color: Color)] = categories.compactMap { cat in
                         let v = displayCounts[cat]
                         return v > 0 ? (cat.rawValue, v, Palette.color(for: cat)) : nil
                     } + (displayCounts.uncategorized > 0
-                        ? [("uncategorized", displayCounts.uncategorized, Palette.ink3.opacity(0.45))]
+                        ? [("uncategorized", displayCounts.uncategorized, uncategorizedColor)]
                         : [])
                     let gaps = CGFloat(max(0, activeParts.count - 1)) * 1.5
                     let usable = max(0, width - gaps)
@@ -1921,11 +2018,12 @@ private struct LensReadoutCard: View {
 
             // Compact 2x2 + reasoning legend for the 5 categories (+ uncategorized when present).
             let gridCategories: [TokenCategory] = [.input, .cacheRead, .cacheWrite, .output]
+            let uncategorizedLegendColor = Palette.ink3.opacity(increasedContrast ? 0.80 : 0.45)
             let legendItems: [(id: String, title: LocalizedStringKey, color: Color, value: Int64)] =
                 gridCategories.map { category in
                     (category.rawValue, category.title, Palette.color(for: category), displayCounts[category])
                 } + (total > 0 && displayCounts.uncategorized > 0
-                    ? [("uncategorized", LocalizedStringKey("Uncategorized"), Palette.ink3.opacity(0.45), displayCounts.uncategorized)]
+                    ? [("uncategorized", LocalizedStringKey("Uncategorized"), uncategorizedLegendColor, displayCounts.uncategorized)]
                     : [])
             LazyVGrid(
                 columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
@@ -1984,18 +2082,22 @@ private struct LensMiniBar: View {
 private struct LensReadoutSurface<S: InsettableShape>: ViewModifier {
     let reduceTransparency: Bool
     let isDark: Bool
+    let increasedContrast: Bool
     let shape: S
 
     func body(content: Content) -> some View {
         if reduceTransparency {
             content
                 .background { shape.fill(Palette.cardSurface) }
-                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 1) }
+                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: increasedContrast ? 1.5 : 1) }
         } else {
+            let tintOpacity = isDark
+                ? (increasedContrast ? 0.68 : 0.45)
+                : (increasedContrast ? 0.65 : 0.38)
             content
-                .background { shape.fill(Palette.cardSurface.opacity(isDark ? 0.45 : 0.38)) }
+                .background { shape.fill(Palette.cardSurface.opacity(tintOpacity)) }
                 .glassEffect(.regular, in: shape)
-                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 0.5) }
+                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: increasedContrast ? 1.25 : 0.5) }
         }
     }
 }

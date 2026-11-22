@@ -65,11 +65,11 @@ struct FieldColors {
 enum FieldPalette {
     static let paper = Color(light: "#F5F1E6", dark: "#1E211C")
     static let panel = Color(light: "#FBF8F0", dark: "#262A23")
-    static let ink = Color(light: "#2B2A24", dark: "#ECE6D6")
-    static let muted = Color(light: "#6B675B", dark: "#A9A392")
-    static let rule = Color(light: "#D9D2C0", dark: "#3E4337")
-    static let accent = Color(light: "#A94E2A", dark: "#E28A62")
-    static let hedge = Color(light: "#6A7A4F", dark: "#9BAE78")
+    static let ink = Color(light: "#2B2A24", dark: "#ECE6D6", contrastLight: "#161511", contrastDark: "#FBF7EC")
+    static let muted = Color(light: "#6B675B", dark: "#A9A392", contrastLight: "#454239", contrastDark: "#CFC9B8")
+    static let rule = Color(light: "#D9D2C0", dark: "#3E4337", contrastLight: "#9F9680", contrastDark: "#6A725E")
+    static let accent = Color(light: "#A94E2A", dark: "#E28A62", contrastLight: "#873818", contrastDark: "#F0A27D")
+    static let hedge = Color(light: "#6A7A4F", dark: "#9BAE78", contrastLight: "#475531", contrastDark: "#BDD09B")
 }
 
 enum FieldCrop: Int, CaseIterable {
@@ -215,8 +215,8 @@ enum FieldTreemap {
 
 // MARK: - App icon
 
-/// Themes with their own artwork ship it as a bundled icns, so every size, including the simplified 16 and 32 pt
-/// cuts, reaches the Dock and Finder. Liquid Glass and Cosmos use the bundle's AppIcon.
+/// Themes with their own artwork (Field and Cosmos) ship it as a bundled icns, so every size, including the
+/// simplified 16 and 32 pt cuts, reaches the Dock and Finder. Liquid Glass uses the bundle's AppIcon.
 @MainActor
 enum ThemeAppIcon {
     private static let fieldImage = bundledIcon("FieldAppIcon")

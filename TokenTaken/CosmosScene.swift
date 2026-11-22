@@ -4,12 +4,18 @@ import simd
 import TokenTakenKit
 
 struct CosmosCategory: Equatable, Identifiable {
-    let category: TokenCategory
+    let category: TokenCategory?
     let value: Int64
     var share: Double
     var edge: Double
 
-    var id: String { category.rawValue }
+    var id: String { category?.rawValue ?? "uncategorized" }
+    var isUncategorized: Bool { category == nil }
+
+    func value(in counts: TokenCounts) -> Int64 {
+        if let category { return counts[category] }
+        return counts.uncategorized
+    }
 }
 
 struct CosmosBody: Equatable, Identifiable {
@@ -60,21 +66,30 @@ struct CosmosScene: Equatable {
         total = summary.total.total
         let denominator = total == 0 ? 1.0 : Double(total)
         var cursor = Self.inner
-        categories = Self.categoryOrder.map { category in
+        var builtCategories: [CosmosCategory] = Self.categoryOrder.map { category in
             let value = summary.total[category]
             let share = Double(value) / denominator
             cursor += (Self.outer - Self.inner) * share
             return CosmosCategory(category: category, value: value, share: share, edge: cursor)
         }
+        if summary.total.uncategorized > 0 {
+            let value = summary.total.uncategorized
+            let share = Double(value) / denominator
+            cursor += (Self.outer - Self.inner) * share
+            builtCategories.append(CosmosCategory(category: nil, value: value, share: share, edge: cursor))
+        }
+        categories = builtCategories
         particleShares = categories.map(\.share)
 
         let hours = Self.elapsedHours(for: summary)
         elapsedHours = hours
         tokensPerHour = Double(total) / Double(hours)
         let sourceItems = dimension == .sources ? summary.bySource : summary.byModel
-        let items = sourceItems.sorted { lhs, rhs in
-            lhs.counts.total == rhs.counts.total ? lhs.id < rhs.id : lhs.counts.total > rhs.counts.total
-        }
+        let items = sourceItems
+            .filter { $0.counts.total > 0 }
+            .sorted { lhs, rhs in
+                lhs.counts.total == rhs.counts.total ? lhs.id < rhs.id : lhs.counts.total > rhs.counts.total
+            }
         let activeSources = summary.bySource.filter { $0.counts.total > 0 }
         let soleSourceName = activeSources.count == 1 ? activeSources[0].name : nil
         if total > 0 {
@@ -549,6 +564,9 @@ struct CosmosFrame {
         for (index, category) in scene.categories.enumerated() where radius <= category.edge {
             return (index, world)
         }
+        if let lastIndex = scene.categories.indices.last {
+            return (lastIndex, world)
+        }
         return nil
     }
 
@@ -587,7 +605,7 @@ struct CosmosFrame {
         return segments
     }
 
-    func layingOutLabels(sizes: [String: CGSize]) -> CosmosFrame {
+    func layingOutLabels(sizes: [String: CGSize], exclusionZones: [CGRect] = []) -> CosmosFrame {
         var result = self
         let original = placements
         let shadow = (
@@ -630,6 +648,7 @@ struct CosmosFrame {
                     if rectangle.minX < 8 || rectangle.maxX > Double(size.width) - 8
                         || rectangle.minY < 8 || rectangle.maxY > Double(size.height) - 44 { continue }
                     if Self.rectCircleOverlap(rectangle, center: shadow.center, radius: shadow.radius) { continue }
+                    if exclusionZones.contains(where: { Self.rectsOverlap(rectangle, $0.insetBy(dx: -4, dy: -4)) }) { continue }
                     var overlapsBody = false
                     for (otherIndex, other) in original.enumerated() where otherIndex != index && other.isVisible {
                         if let otherPoint = other.point,

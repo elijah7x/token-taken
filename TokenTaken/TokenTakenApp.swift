@@ -188,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        settings?.applyAppearance()
         if dayChangedObserver == nil {
             dayChangedObserver = NotificationCenter.default.addObserver(
                 forName: .NSCalendarDayChanged,

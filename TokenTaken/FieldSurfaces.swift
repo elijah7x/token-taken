@@ -11,31 +11,60 @@ enum ThemeRuntime {
 
 /// Solid paper button with a ruled edge, replacing `.glass` under the Field theme.
 struct FieldButtonStyle: ButtonStyle {
+    var horizontalPadding: CGFloat = 12
+    var verticalPadding: CGFloat = 5
+
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(configuration.isPressed ? FieldPalette.rule : FieldPalette.panel)
-            )
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        StyledBody(
+            configuration: configuration,
+            horizontalPadding: horizontalPadding,
+            verticalPadding: verticalPadding
+        )
+    }
+
+    private struct StyledBody: View {
+        let configuration: Configuration
+        let horizontalPadding: CGFloat
+        let verticalPadding: CGFloat
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .padding(.horizontal, horizontalPadding)
+                .padding(.vertical, verticalPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(configuration.isPressed && isEnabled ? FieldPalette.rule : FieldPalette.panel)
+                )
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .opacity(isEnabled ? (configuration.isPressed ? 0.92 : 1) : 0.45)
+        }
     }
 }
 
 struct CosmosButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(CosmosPalette.ink2)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                Rectangle()
-                    .fill(configuration.isPressed ? CosmosPalette.selection : CosmosPalette.background)
-            )
-            .overlay(Rectangle().stroke(CosmosPalette.controlRule, lineWidth: 1))
-            .contentShape(Rectangle())
+        StyledBody(configuration: configuration)
+    }
+
+    private struct StyledBody: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(CosmosPalette.ink2)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    Rectangle()
+                        .fill(configuration.isPressed && isEnabled ? CosmosPalette.selection : CosmosPalette.background)
+                )
+                .overlay(Rectangle().stroke(CosmosPalette.controlRule, lineWidth: 1))
+                .contentShape(Rectangle())
+                .opacity(isEnabled ? (configuration.isPressed ? 0.92 : 1) : 0.45)
+        }
     }
 }
 
@@ -108,11 +137,17 @@ extension FieldCrop {
 /// Field period picker: serif labels with a hand-drawn furrow under the selected period.
 struct FieldPeriodPicker: View {
     @Environment(AppModel.self) private var model
+    @FocusState private var focusedPeriod: Period?
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 0) {
             ForEach(Period.allCases) { period in
                 let selected = model.period == period
+                // Natural widths spread with flexible gaps, so long English titles never truncate
+                // while the short Chinese titles still span the tray.
+                if period != Period.allCases.first {
+                    Spacer(minLength: 2)
+                }
                 Button {
                     model.period = period
                 } label: {
@@ -120,27 +155,46 @@ struct FieldPeriodPicker: View {
                         .font(FieldFont.serif(15))
                         // English titles ("Month") must not wrap inside the narrow tray.
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.75)
                         .foregroundStyle(selected ? FieldPalette.ink : FieldPalette.muted)
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 4)
                         .padding(.top, 4)
                         .padding(.bottom, 9)
+                        .fixedSize()
                         .overlay(alignment: .bottom) {
                             FieldFurrow()
                                 .stroke(FieldPalette.accent, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
                                 .frame(height: 5)
-                                .padding(.horizontal, 5)
+                                .padding(.horizontal, 4)
                                 .opacity(selected ? 1 : 0)
                         }
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(period.shortcutKey, modifiers: .command)
+                .focused($focusedPeriod, equals: period)
+                .onKeyPress(.leftArrow) {
+                    moveSelection(by: -1)
+                    return .handled
+                }
+                .onKeyPress(.rightArrow) {
+                    moveSelection(by: 1)
+                    return .handled
+                }
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
+        .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Usage period"))
+    }
+
+    private func moveSelection(by offset: Int) {
+        let periods = Period.allCases
+        guard let index = periods.firstIndex(of: model.period) else { return }
+        let newIndex = min(max(index + offset, 0), periods.count - 1)
+        model.period = periods[newIndex]
+        focusedPeriod = periods[newIndex]
     }
 }
 
@@ -229,6 +283,7 @@ struct FieldShareCard: View {
     let aspect: ShareAspect
     let showCost: Bool
     let showComposition: Bool
+    var dimension: BreakdownDimension = .sources
     var rank: Double? = nil
     var inscription = ""
     var signature = ""
@@ -238,55 +293,121 @@ struct FieldShareCard: View {
     private var quote: String { inscription.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var signer: String { signature.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private var items: [Breakdown] {
-        if case .model = data.kind { return data.summary.byModel }
-        return data.summary.bySource
-    }
+    private var sceneSummary: UsageSummary { data.cosmosSceneSummary }
 
-    private var focusID: String? {
+    private var sceneDimension: BreakdownDimension {
         switch data.kind {
-        case .overall: nil
-        case .source(let id, _), .model(let id, _): id
+        case .overall: dimension
+        case .source: .models
+        case .model: .sources
         }
     }
 
+    private var items: [Breakdown] {
+        let raw = sceneDimension == .sources ? sceneSummary.bySource : sceneSummary.byModel
+        return raw.filter { $0.counts.total > 0 }
+    }
+
     var body: some View {
-        let size = aspect.canvasSize, portrait = aspect == .portrait, margin: CGFloat = 80
+        let size = aspect.canvasSize
         ZStack(alignment: .topLeading) {
             FieldPalette.paper
-            if portrait {
+            switch aspect {
+            case .portrait:
+                let margin: CGFloat = 80
                 VStack(alignment: .leading, spacing: 0) {
-                    header
+                    header(logoSize: 84, titleSize: 36, periodSize: 28)
                     headline(numberSize: 168, portrait: true).padding(.top, 48)
-                    facts(vertical: false).padding(.top, 30)
-                    if let rank { rankLine(rank).padding(.top, 24) }
-                    if !quote.isEmpty { inscriptionLine.padding(.top, 24) }
+                    facts(vertical: false, compact: false).padding(.top, 30)
+                    if let rank { rankLine(rank, fontSize: 28).padding(.top, 24) }
+                    if !quote.isEmpty { inscriptionLine(fontSize: 34).padding(.top, 24) }
                     Spacer(minLength: 16)
                     field.frame(width: size.width - margin * 2)
-                    if showComposition { composition.padding(.top, 24) }
+                    if showComposition { composition(compact: false).padding(.top, 24) }
                     Spacer(minLength: 16)
-                    footer
+                    footer(compact: false)
                 }
                 .padding(margin)
-            } else {
+
+            case .square:
+                let margin: CGFloat = 60
                 VStack(alignment: .leading, spacing: 0) {
-                    header
+                    header(logoSize: 56, titleSize: 30, periodSize: 24)
+
+                    data.headlineText(locale: locale)
+                        .font(FieldFont.serif(36))
+                        .foregroundStyle(FieldPalette.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .truncationMode(.middle)
+                        .padding(.top, 18)
+
+                    HStack(alignment: .top, spacing: 28) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                                Text(verbatim: TokenFormat.short(data.counts.total))
+                                    .font(FieldFont.serif(112))
+                                    .foregroundStyle(FieldPalette.ink)
+                                    .minimumScaleFactor(0.5)
+                                    .lineLimit(1)
+                                Text("Token")
+                                    .font(FieldFont.serif(30))
+                                    .foregroundStyle(FieldPalette.muted)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                            }
+                            if showCost {
+                                costLine(amountSize: 26, noteSize: 22, unpricedSize: 20)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        facts(vertical: true, compact: true)
+                            .frame(width: 390, alignment: .leading)
+                            .padding(.top, 8)
+                    }
+                    .padding(.top, 4)
+
+                    if let rank {
+                        rankLine(rank, fontSize: 22).padding(.top, 10)
+                    }
+                    if !quote.isEmpty {
+                        inscriptionLine(fontSize: 24).padding(.top, 10)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    field
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+
+                    if showComposition {
+                        composition(compact: true).padding(.top, 14)
+                    }
+
+                    footer(compact: true).padding(.top, 14)
+                }
+                .padding(margin)
+
+            case .landscape:
+                let margin: CGFloat = 80
+                VStack(alignment: .leading, spacing: 0) {
+                    header(logoSize: 84, titleSize: 36, periodSize: 28)
                     HStack(alignment: .top, spacing: 52) {
                         VStack(alignment: .leading, spacing: 0) {
                             headline(numberSize: 150, portrait: false)
-                            facts(vertical: true).padding(.top, 28)
-                            if let rank { rankLine(rank).padding(.top, 22) }
-                            if !quote.isEmpty { inscriptionLine.padding(.top, 24) }
+                            facts(vertical: true, compact: false).padding(.top, 28)
+                            if let rank { rankLine(rank, fontSize: 28).padding(.top, 22) }
+                            if !quote.isEmpty { inscriptionLine(fontSize: 34).padding(.top, 24) }
                         }
                         .frame(width: 560, alignment: .leading)
                         VStack(alignment: .leading, spacing: 26) {
                             field
-                            if showComposition { composition }
+                            if showComposition { composition(compact: false) }
                         }
                     }
                     .padding(.top, 40)
                     Spacer(minLength: 16)
-                    footer
+                    footer(compact: false)
                 }
                 .padding(margin)
             }
@@ -294,21 +415,14 @@ struct FieldShareCard: View {
         .frame(width: size.width, height: size.height)
     }
 
-    private var dateRange: String {
-        let style = Date.FormatStyle.dateTime.locale(locale).year().month().day()
-        let last = data.summary.end.addingTimeInterval(-1)
-        let start = data.summary.start.formatted(style), end = last.formatted(style)
-        return start == end ? start : "\(start) – \(end)"
-    }
-
-    private var header: some View {
-        HStack(spacing: 22) {
-            ShareBrandLogo(theme: .field, size: 84)
+    private func header(logoSize: CGFloat, titleSize: CGFloat, periodSize: CGFloat) -> some View {
+        HStack(spacing: logoSize > 64 ? 22 : 16) {
+            ShareBrandLogo(theme: .field, size: logoSize)
                 .accessibilityHidden(true)
-            Text(verbatim: "Token Taken").font(FieldFont.serif(36)).foregroundStyle(FieldPalette.ink)
+            Text(verbatim: "Token Taken").font(FieldFont.serif(titleSize)).foregroundStyle(FieldPalette.ink)
             Spacer()
-            Text(verbatim: dateRange)
-                .font(FieldFont.serif(28))
+            Text(data.periodDescription(locale: locale))
+                .font(FieldFont.serif(periodSize))
                 .foregroundStyle(FieldPalette.muted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.80)
@@ -330,47 +444,56 @@ struct FieldShareCard: View {
                     .foregroundStyle(FieldPalette.ink)
                     .minimumScaleFactor(0.5)
                     .lineLimit(1)
-                Text(verbatim: "Token")
+                Text("Token")
                     .font(FieldFont.serif(portrait ? 38 : 34))
                     .foregroundStyle(FieldPalette.muted)
                     .lineLimit(1)
                     .fixedSize()
             }
             if showCost {
-                if data.unpricedTokens > 0, data.unpricedTokens >= data.counts.total {
-                    Text("No prices for these models")
-                        .font(FieldFont.serif(30))
-                        .foregroundStyle(FieldPalette.accent)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(verbatim: TokenFormat.usd(data.estimatedUSD)).font(FieldFont.serif(32)).foregroundStyle(FieldPalette.accent)
-                        Text("estimate, not a bill").font(FieldFont.serif(28)).foregroundStyle(FieldPalette.accent)
-                        if data.unpricedTokens > 0 {
-                            Text(verbatim: "· ")
-                                .font(FieldFont.serif(26))
-                                .foregroundStyle(FieldPalette.muted)
-                            Text("\(TokenFormat.short(data.unpricedTokens)) unpriced")
-                                .font(FieldFont.serif(26))
-                                .foregroundStyle(FieldPalette.muted)
-                        }
-                    }
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                }
+                costLine(amountSize: 32, noteSize: 28, unpricedSize: 26)
             }
         }
     }
 
-    private func factItem(_ fact: ShareCardData.SupportingFact) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    @ViewBuilder
+    private func costLine(amountSize: CGFloat, noteSize: CGFloat, unpricedSize: CGFloat) -> some View {
+        if data.unpricedTokens > 0, data.unpricedTokens >= data.counts.total {
+            Text("No prices for these models")
+                .font(FieldFont.serif(noteSize))
+                .foregroundStyle(FieldPalette.muted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(verbatim: TokenFormat.usd(data.estimatedUSD))
+                    .font(FieldFont.serif(amountSize))
+                    .foregroundStyle(FieldPalette.accent)
+                Text("estimate, not a bill")
+                    .font(FieldFont.serif(noteSize))
+                    .foregroundStyle(FieldPalette.muted)
+                if data.unpricedTokens > 0 {
+                    Text(verbatim: "·")
+                        .font(FieldFont.serif(unpricedSize))
+                        .foregroundStyle(FieldPalette.muted)
+                    Text("\(TokenFormat.short(data.unpricedTokens)) unpriced")
+                        .font(FieldFont.serif(unpricedSize))
+                        .foregroundStyle(FieldPalette.muted)
+                }
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+        }
+    }
+
+    private func factItem(_ fact: ShareCardData.SupportingFact, compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 4 : 6) {
             Text(fact.label)
-                .font(FieldFont.serif(26))
+                .font(FieldFont.serif(compact ? 21 : 26))
                 .foregroundStyle(FieldPalette.muted)
                 .lineLimit(1)
             Text(verbatim: fact.value)
-                .font(FieldFont.serif(34))
+                .font(FieldFont.serif(compact ? 27 : 34))
                 .foregroundStyle(FieldPalette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
@@ -379,44 +502,46 @@ struct FieldShareCard: View {
     }
 
     @ViewBuilder
-    private func facts(vertical: Bool) -> some View {
+    private func facts(vertical: Bool, compact: Bool) -> some View {
         let items = data.supportingFacts
+        let rowSpacing: CGFloat = compact ? 14 : 22
+        let colSpacing: CGFloat = compact ? 32 : 48
         if vertical {
             if items.count == 3 {
-                VStack(alignment: .leading, spacing: 22) {
-                    HStack(alignment: .top, spacing: 48) {
-                        factItem(items[0])
-                        factItem(items[1])
+                VStack(alignment: .leading, spacing: rowSpacing) {
+                    HStack(alignment: .top, spacing: colSpacing) {
+                        factItem(items[0], compact: compact)
+                        factItem(items[1], compact: compact)
                     }
-                    factItem(items[2])
+                    factItem(items[2], compact: compact)
                 }
             } else {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: rowSpacing) {
                     ForEach(items) { fact in
-                        factItem(fact)
+                        factItem(fact, compact: compact)
                     }
                 }
             }
         } else {
-            HStack(alignment: .top, spacing: 48) {
+            HStack(alignment: .top, spacing: colSpacing) {
                 ForEach(items) { fact in
-                    factItem(fact)
+                    factItem(fact, compact: compact)
                         .layoutPriority(fact.isMonospacedValue ? 0 : 1)
                 }
             }
         }
     }
 
-    private func rankLine(_ rank: Double) -> some View {
+    private func rankLine(_ rank: Double, fontSize: CGFloat) -> some View {
         Text("Last 30 days · about top \(UsageRank.formatted(rank))")
-            .font(FieldFont.serif(28))
+            .font(FieldFont.serif(fontSize))
             .foregroundStyle(FieldPalette.ink)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
     }
 
     private var field: some View {
-        FieldLandscapeView(items: items, highlight: .constant(focusID), interactive: false)
+        FieldLandscapeView(items: items, highlight: .constant(nil), interactive: false)
     }
 
     private struct CompositionPart: Identifiable {
@@ -427,19 +552,29 @@ struct FieldShareCard: View {
     }
 
     @ViewBuilder
-    private var composition: some View {
+    private func composition(compact: Bool) -> some View {
         let total = data.counts.total
         let divisor = max(total, 1)
         let parts: [CompositionPart] = TokenCategory.allCases.compactMap { category in
             let value = data.counts[category]
             return value > 0
-                ? CompositionPart(id: category.rawValue, label: category.title, tokens: value, color: Palette.color(for: category))
+                ? CompositionPart(id: category.rawValue, label: category.title, tokens: value, color: FieldCrop.color(for: category))
                 : nil
         } + (data.counts.uncategorized > 0
-            ? [CompositionPart(id: "uncategorized", label: "Uncategorized", tokens: data.counts.uncategorized, color: Palette.ink3.opacity(0.45))]
+            ? [CompositionPart(id: "uncategorized", label: "Uncategorized", tokens: data.counts.uncategorized, color: FieldPalette.muted.opacity(0.45))]
             : [])
+        let rows: [[CompositionPart]] = parts.count >= 4
+            ? [
+                Array(parts.prefix((parts.count + 1) / 2)),
+                Array(parts.dropFirst((parts.count + 1) / 2)),
+            ]
+            : (parts.isEmpty ? [] : [parts])
+        let barHeight: CGFloat = compact ? 14 : 18
+        let swatchSize: CGFloat = compact ? 9.5 : 11
+        let fontSize: CGFloat = compact ? 19.5 : 22
+
         if !parts.isEmpty {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: compact ? 10 : 14) {
                 GeometryReader { proxy in
                     let gap: CGFloat = 3
                     let usable = max(0, proxy.size.width - CGFloat(max(0, parts.count - 1)) * gap)
@@ -450,37 +585,46 @@ struct FieldShareCard: View {
                                 .fill(part.color)
                                 .frame(
                                     width: isLast ? nil : max(2, usable * CGFloat(part.tokens) / CGFloat(divisor)),
-                                    height: 18
+                                    height: barHeight
                                 )
                                 .frame(maxWidth: isLast ? .infinity : nil, alignment: .leading)
                         }
                     }
-                    .frame(width: proxy.size.width, height: 18, alignment: .leading)
+                    .frame(width: proxy.size.width, height: barHeight, alignment: .leading)
                     .background(FieldPalette.rule.opacity(0.35))
                     .clipShape(Capsule())
                 }
-                .frame(height: 18)
-                HStack(spacing: 18) {
-                    ForEach(parts) { part in
-                        HStack(spacing: 6) {
-                            Text(part.label)
-                            Text(verbatim: Share.percent(part.tokens, of: total))
+                .frame(height: barHeight)
+
+                VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        HStack(spacing: compact ? 14 : 18) {
+                            ForEach(row) { part in
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(part.color)
+                                        .frame(width: swatchSize, height: swatchSize)
+                                        .accessibilityHidden(true)
+                                    Text(part.label)
+                                    Text(verbatim: Share.percent(part.tokens, of: total))
+                                }
+                                .font(FieldFont.serif(fontSize))
+                                .foregroundStyle(FieldPalette.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                            }
                         }
-                        .font(FieldFont.serif(22))
-                        .foregroundStyle(FieldPalette.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
                     }
                 }
             }
         }
     }
 
-    private var inscriptionLine: some View {
-        HStack(alignment: .top, spacing: 18) {
+    private func inscriptionLine(fontSize: CGFloat) -> some View {
+        HStack(alignment: .top, spacing: fontSize > 28 ? 18 : 14) {
             Rectangle().fill(FieldPalette.accent).frame(width: 3)
             Text(verbatim: quote)
-                .font(FieldFont.serif(34))
+                .font(FieldFont.serif(fontSize))
                 .foregroundStyle(FieldPalette.ink)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -488,14 +632,14 @@ struct FieldShareCard: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var footer: some View {
-        VStack(alignment: .leading, spacing: 14) {
+    private func footer(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 14) {
             Rectangle().fill(FieldPalette.rule).frame(height: 2)
             if rank != nil || !signer.isEmpty {
                 HStack(alignment: .firstTextBaseline, spacing: 24) {
                     if rank != nil {
                         Text("Rank is an estimate derived from public usage sources.")
-                            .font(FieldFont.serif(24))
+                            .font(FieldFont.serif(compact ? 21 : 24))
                             .foregroundStyle(FieldPalette.muted)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
@@ -503,7 +647,7 @@ struct FieldShareCard: View {
                     Spacer(minLength: 0)
                     if !signer.isEmpty {
                         Text(verbatim: "— " + signer)
-                            .font(FieldFont.serif(28))
+                            .font(FieldFont.serif(compact ? 24 : 28))
                             .foregroundStyle(FieldPalette.ink)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)

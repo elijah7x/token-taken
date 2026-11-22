@@ -122,7 +122,8 @@ struct LiquidGlassVessel: Sendable {
         isDark: Bool,
         reduceTransparency: Bool,
         inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)] = [],
-        bodyStyle: BodyStyle = .solid
+        bodyStyle: BodyStyle = .solid,
+        increasedContrast: Bool = false
     ) {
         draw(
             in: &context,
@@ -134,7 +135,8 @@ struct LiquidGlassVessel: Sendable {
             reduceTransparency: reduceTransparency,
             inflows: inflows,
             wobblePhase: nil,
-            bodyStyle: bodyStyle
+            bodyStyle: bodyStyle,
+            increasedContrast: increasedContrast
         )
     }
 
@@ -148,7 +150,8 @@ struct LiquidGlassVessel: Sendable {
         reduceTransparency: Bool,
         inflows: [(color: Color, y: CGFloat, height: CGFloat, fromLeft: Bool)],
         wobblePhase: Double?,
-        bodyStyle: BodyStyle = .solid
+        bodyStyle: BodyStyle = .solid,
+        increasedContrast: Bool = false
     ) {
         guard rect.width > 4, rect.height > 4 else { return }
         let isPrismatic = bodyStyle == .prismatic && !reduceTransparency
@@ -646,13 +649,17 @@ struct LiquidGlassVessel: Sendable {
             )
         }
 
-        let outerStrokeWidth = 1.0 * unitScale
+        let outerStrokeWidth = (increasedContrast ? 1.5 : 1.0) * unitScale
         let outerRimRect = rect.insetBy(dx: outerStrokeWidth * 0.5, dy: outerStrokeWidth * 0.5)
         let outerRimPath = RoundedRectangle(
             cornerRadius: max(1, m.outerCornerRadius - outerStrokeWidth * 0.5),
             style: .continuous
         ).path(in: outerRimRect)
-        let outerRimColor = isDark ? Color.white.opacity(0.16) : Palette.ink1.opacity(0.12)
+        let outerRimColor: Color = if increasedContrast {
+            isDark ? Color.white.opacity(0.45) : Palette.ink1.opacity(0.42)
+        } else {
+            isDark ? Color.white.opacity(0.16) : Palette.ink1.opacity(0.12)
+        }
         context.stroke(outerRimPath, with: .color(outerRimColor), lineWidth: outerStrokeWidth)
     }
 

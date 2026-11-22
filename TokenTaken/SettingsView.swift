@@ -3,8 +3,27 @@ import ServiceManagement
 import SwiftUI
 import TokenTakenKit
 
+private func settingsFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    if ThemeRuntime.isField {
+        let nsWeight: NSFont.Weight = switch weight {
+        case .ultraLight: .ultraLight
+        case .thin: .thin
+        case .light: .light
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        default: .regular
+        }
+        return FieldFont.serif(size, weight: nsWeight)
+    }
+    return .system(size: size, weight: weight)
+}
+
 /// The selected settings section on the themed window base; the tray carries the section list.
 struct SettingsView: View {
+    @Environment(AppSettings.self) private var settings
     @Environment(MainWindowRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -19,8 +38,9 @@ struct SettingsView: View {
                 .id(router.settingsSection)
                 .transition(.opacity)
         }
+        .font(settings.theme == .field ? FieldFont.serif(13) : nil)
         .scrollIndicators(.automatic)
-        .background(ThemeRuntime.isCosmos ? CosmosPalette.background : .clear)
+        .background(settings.theme == .cosmos ? CosmosPalette.background : .clear)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: router.settingsSection)
     }
 
@@ -41,6 +61,7 @@ struct SettingsView: View {
 
 /// Settings section list shown in the tray, with a way back to the dashboard.
 struct SettingsSidebar: View {
+    @Environment(AppSettings.self) private var settings
     @Environment(MainWindowRouter.self) private var router
     @FocusState private var focusedSection: SettingsSection?
     @State private var isBackHovered = false
@@ -56,7 +77,7 @@ struct SettingsSidebar: View {
                         .font(.system(size: 11, weight: .semibold))
                         .accessibilityHidden(true)
                     Text("Overview")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(settingsFont(13, weight: .medium))
                 }
                 .foregroundStyle(isBackHovered ? Palette.ink1 : Palette.ink2)
                 .padding(.horizontal, 10)
@@ -69,7 +90,7 @@ struct SettingsSidebar: View {
             .help(Text("Back to the overview (Esc)"))
 
             Text("Settings")
-                .font(.system(size: 22, weight: .bold))
+                .font(settingsFont(22, weight: .bold))
                 .foregroundStyle(Palette.ink1)
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
@@ -103,11 +124,12 @@ struct SettingsSidebar: View {
                 Text("Local data · Read-only")
                     .lineLimit(1)
             }
-            .font(.system(size: 11.5))
+            .font(settingsFont(11.5))
             .foregroundStyle(Palette.ink3)
             .padding(.horizontal, 10)
             .accessibilityElement(children: .combine)
         }
+        .font(settings.theme == .field ? FieldFont.serif(13) : nil)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .onAppear { focusedSection = router.settingsSection }
     }
@@ -130,6 +152,7 @@ private struct SettingsNavigationButton: View {
     private var isSelected: Bool { selection == section }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : 8, style: .continuous)
         Button {
             selection = section
         } label: {
@@ -141,17 +164,27 @@ private struct SettingsNavigationButton: View {
                 Text(section.title)
                 Spacer()
             }
-            .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
+            .font(settingsFont(13, weight: isSelected ? .semibold : .medium))
             .foregroundStyle(isSelected ? Palette.roleAccent : (isHovered ? Palette.ink1 : Palette.ink2))
             .padding(.horizontal, 10)
             .frame(height: 36)
             .background {
-                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : 8, style: .continuous)
-                    .fill(
+                if ThemeRuntime.isCosmos {
+                    shape.fill(isSelected ? CosmosPalette.selection : (isHovered ? CosmosPalette.track : .clear))
+                } else if ThemeRuntime.isField {
+                    shape.fill(isSelected || isHovered ? FieldPalette.paper : .clear)
+                } else {
+                    shape.fill(
                         isSelected
-                            ? (ThemeRuntime.isCosmos ? CosmosPalette.selection : Palette.roleAccent.opacity(contrast == .increased ? 0.18 : 0.12))
-                            : (isHovered ? (ThemeRuntime.isCosmos ? CosmosPalette.track : Palette.ink1.opacity(0.05)) : .clear)
+                            ? Palette.roleAccent.opacity(contrast == .increased ? 0.18 : 0.12)
+                            : (isHovered ? Palette.ink1.opacity(0.05) : .clear)
                     )
+                }
+            }
+            .overlay {
+                if ThemeRuntime.isField && isSelected {
+                    shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
+                }
             }
             .overlay(alignment: .leading) {
                 Rectangle()
@@ -219,6 +252,12 @@ struct GlassToggleStyle: ToggleStyle {
             Rectangle()
                 .fill(isOn ? CosmosPalette.accent : CosmosPalette.track)
                 .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if ThemeRuntime.isField {
+            Capsule()
+                .fill(isOn ? FieldPalette.accent : FieldPalette.paper)
+                .overlay {
+                    Capsule().strokeBorder(isOn ? FieldPalette.accent : FieldPalette.rule, lineWidth: 1)
+                }
         } else if reduceTransparency {
             Capsule()
                 .fill(isOn ? Palette.roleAccent : Palette.sidebarSurface)
@@ -247,6 +286,13 @@ struct GlassToggleStyle: ToggleStyle {
                 .fill(isOn ? CosmosPalette.page : CosmosPalette.ink3)
                 .frame(width: 16, height: 16)
                 .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if ThemeRuntime.isField {
+            Circle()
+                .fill(Color(hex: "#FBF8F0"))
+                .frame(width: 20, height: 20)
+                .overlay {
+                    Circle().strokeBorder(FieldPalette.rule, lineWidth: 0.75)
+                }
         } else if reduceTransparency {
             Circle()
                 .fill(Color.white)
@@ -270,6 +316,7 @@ private struct GlassMenuPicker<SelectionValue: Hashable, CurrentLabel: View, Opt
     let options: Options
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.isEnabled) private var isEnabled
 
     init(
         _ title: LocalizedStringKey,
@@ -293,7 +340,7 @@ private struct GlassMenuPicker<SelectionValue: Hashable, CurrentLabel: View, Opt
         } label: {
             HStack(spacing: 6) {
                 currentLabel
-                    .font(.system(size: 13))
+                    .font(settingsFont(13))
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
@@ -309,6 +356,7 @@ private struct GlassMenuPicker<SelectionValue: Hashable, CurrentLabel: View, Opt
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize(horizontal: true, vertical: false)
+        .opacity(isEnabled ? 1 : 0.45)
         .accessibilityLabel(Text(title))
     }
 }
@@ -334,11 +382,11 @@ private struct SettingsGroupCaption<Trailing: View>: View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(settingsFont(15, weight: .semibold))
                     .foregroundStyle(Palette.ink1)
                 if let description {
                     Text(description)
-                        .font(.system(size: 12))
+                        .font(settingsFont(12))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -375,11 +423,19 @@ private struct SettingsRowsGroup<Content: View>: View {
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            shape.fill(ThemeRuntime.isCosmos ? CosmosPalette.panel : (reduceTransparency ? Palette.cardSurface : Palette.ink1.opacity(0.025)))
+            if ThemeRuntime.isCosmos {
+                shape.fill(CosmosPalette.panel)
+            } else if ThemeRuntime.isField {
+                shape.fill(FieldPalette.panel)
+            } else {
+                shape.fill(reduceTransparency ? Palette.cardSurface : Palette.ink1.opacity(0.025))
+            }
         }
         .overlay {
             if ThemeRuntime.isCosmos {
                 shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
+            } else if ThemeRuntime.isField {
+                shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
             } else if reduceTransparency {
                 shape.strokeBorder(Palette.hairline, lineWidth: 1)
             }
@@ -405,6 +461,7 @@ private struct SettingsScanActionPill: View {
                 if isRefreshing && reduceMotion {
                     ProgressView()
                         .controlSize(.small)
+                        .tint(Palette.roleAccent)
                 } else {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11.5, weight: .medium))
@@ -418,7 +475,7 @@ private struct SettingsScanActionPill: View {
                 }
 
                 Text(isRefreshing ? "Scanning…" : "Scan now")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(settingsFont(12, weight: .medium))
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
             }
@@ -471,11 +528,11 @@ private struct SettingsControlRow<Accessory: View>: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 13, weight: .regular))
+                    .font(settingsFont(13))
                     .foregroundStyle(Palette.ink1)
                 if let help {
                     Text(help)
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -484,9 +541,11 @@ private struct SettingsControlRow<Accessory: View>: View {
             Spacer(minLength: 12)
             if let help {
                 accessory
+                    .accessibilityLabel(Text(title))
                     .accessibilityHint(Text(help))
             } else {
                 accessory
+                    .accessibilityLabel(Text(title))
             }
         }
         .padding(.vertical, 8)
@@ -531,7 +590,7 @@ private struct SettingsSecondaryButton: View {
     }
 
     var body: some View {
-        if reduceTransparency && !ThemeRuntime.isCosmos {
+        if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
             Button(title, action: action)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -585,7 +644,7 @@ private struct GeneralSettingsTab: View {
                         help: settings.theme == .cosmos ? LocalizedStringKey("Cosmos is dark only.") : nil
                     ) {
                         GlassMenuPicker("Light or dark", selection: $settings.appearance) {
-                            Text(settings.appearance.title)
+                            Text(settings.theme == .cosmos ? AppAppearance.dark.title : settings.appearance.title)
                         } options: {
                             ForEach(AppAppearance.allCases) { appearance in
                                 Text(appearance.title).tag(appearance)
@@ -621,11 +680,11 @@ private struct GeneralSettingsTab: View {
                         SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Some text changes language after relaunch.")
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.ink3)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 12)
-                            if reduceTransparency && !ThemeRuntime.isCosmos {
+                            if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
                                 Button("Relaunch") { settings.relaunch() }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
@@ -669,7 +728,7 @@ private struct GeneralSettingsTab: View {
                     if let error = settings.launchAtLoginError {
                         SettingsHairline()
                         Text(error)
-                            .font(.system(size: 11.5))
+                            .font(settingsFont(11.5))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
                             .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -679,10 +738,10 @@ private struct GeneralSettingsTab: View {
                         SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Allow Token Taken in System Settings › Login Items to finish.")
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.ink3)
                             Spacer(minLength: 12)
-                            if reduceTransparency && !ThemeRuntime.isCosmos {
+                            if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
                                 Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
@@ -701,11 +760,11 @@ private struct GeneralSettingsTab: View {
                     TimelineView(.everyMinute) { context in
                         HStack(spacing: 16) {
                             Text("Last updated")
-                                .font(.system(size: 13, weight: .regular))
+                                .font(settingsFont(13))
                                 .foregroundStyle(Palette.ink1)
                             Spacer(minLength: 12)
                             lastUpdatedText(now: context.date)
-                                .font(.system(size: 13))
+                                .font(settingsFont(13))
                                 .foregroundStyle(Palette.ink2)
                                 .monospacedDigit()
                         }
@@ -717,7 +776,7 @@ private struct GeneralSettingsTab: View {
                     if let error = model.storageError {
                         SettingsHairline()
                         Text(error)
-                            .font(.system(size: 11.5))
+                            .font(settingsFont(11.5))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
                             .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -782,7 +841,7 @@ private struct InterfaceTransparencySlider: View {
                 .help(reduceTransparency ? Text(reduceTransparencyHelp) : Text("Transparent"))
                 .accessibilityHidden(true)
             Text(value, format: .percent.precision(.fractionLength(0)))
-                .font(.system(size: 13))
+                .font(settingsFont(13))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .frame(width: 40, alignment: .trailing)
@@ -850,7 +909,7 @@ private struct SourcesSettingsTab: View {
                     SettingsRowsGroup {
                         if ledger.installed.isEmpty {
                             Text("No installed harnesses found")
-                                .font(.system(size: 13))
+                                .font(settingsFont(13))
                                 .foregroundStyle(Palette.ink3)
                                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                         } else {
@@ -902,13 +961,14 @@ private struct SourcesSettingsTab: View {
                                         refreshCoordinator?.updateEngineStatus()
                                     }
                                 }
+                                .accessibilityElement(children: .contain)
                             }
                         }
                     }
                 }
 
                 Text("Harnesses are identified automatically from local logs; no manual setup is needed.")
-                    .font(.system(size: 11.5))
+                    .font(settingsFont(11.5))
                     .foregroundStyle(Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1034,7 +1094,7 @@ private struct SourcesSettingsTab: View {
                 HStack(spacing: 9) {
                     SourceMonogramBadge(sourceID: entry.source.id, name: entry.source.name)
                     Text(verbatim: entry.source.name)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(settingsFont(13))
                         .foregroundStyle(Palette.ink1)
                         .lineLimit(1)
                 }
@@ -1043,12 +1103,12 @@ private struct SourcesSettingsTab: View {
                 Group {
                     if monthTokens > 0 {
                         Text("\(TokenFormat.short(monthTokens)) tokens")
-                            .font(.system(size: 13))
+                            .font(settingsFont(13))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                     } else {
                         Text("No usage this month")
-                            .font(.system(size: 11.5))
+                            .font(settingsFont(11.5))
                             .foregroundStyle(Palette.ink3)
                     }
                 }
@@ -1058,7 +1118,7 @@ private struct SourcesSettingsTab: View {
                 HStack(spacing: 8) {
                     SourceHealthLabel(state: entry.health.state)
                     Text(verbatim: entry.health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -1068,7 +1128,7 @@ private struct SourcesSettingsTab: View {
 
             if let errorMessage {
                 Text(verbatim: errorMessage)
-                    .font(.system(size: 11.5))
+                    .font(settingsFont(11.5))
                     .foregroundStyle(entry.health.state == .failed ? SourceHealth.State.failed.dotColor : Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1084,23 +1144,17 @@ private struct SourcesSettingsTab: View {
         let source = SourceCatalog.info(for: "cursor")
         let health = refreshCoordinator?.health.first(where: { $0.sourceID == source.id })?.markingStale(now: now)
         let errorMessage = health.flatMap { visibleErrorMessage(for: $0) }
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
                     SourceMonogramBadge(sourceID: source.id, name: source.name)
                     Text(verbatim: source.name)
-                        .font(.system(size: 13, weight: .regular))
+                        .font(settingsFont(13))
                         .foregroundStyle(Palette.ink1)
                         .lineLimit(1)
                 }
-                .frame(width: 176, alignment: .leading)
 
-                Text("Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Palette.ink3)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Spacer(minLength: 12)
 
                 HStack(spacing: 8) {
                     HStack(spacing: 8) {
@@ -1108,22 +1162,21 @@ private struct SourcesSettingsTab: View {
                             if let health {
                                 SourceHealthLabel(state: health.state)
                                 Text(verbatim: health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
-                                    .font(.system(size: 11.5))
+                                    .font(settingsFont(11.5))
                                     .foregroundStyle(Palette.ink3)
                                     .monospacedDigit()
                             } else {
                                 Text("Not collected yet")
-                                    .font(.system(size: 11.5))
+                                    .font(settingsFont(11.5))
                                     .foregroundStyle(Palette.ink3)
                             }
                         } else {
                             Text("Off")
-                                .font(.system(size: 11.5, weight: .medium))
+                                .font(settingsFont(11.5, weight: .medium))
                                 .foregroundStyle(Palette.ink3)
                         }
                     }
                     .lineLimit(1)
-                    .frame(width: 192, alignment: .trailing)
 
                     Toggle("Cursor account usage", isOn: isOn)
                         .labelsHidden()
@@ -1132,14 +1185,20 @@ private struct SourcesSettingsTab: View {
                 }
             }
 
+            Text("Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once.")
+                .font(settingsFont(11.5))
+                .foregroundStyle(Palette.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             if isOn.wrappedValue, let errorMessage {
                 Text(verbatim: errorMessage)
-                    .font(.system(size: 11.5))
+                    .font(settingsFont(11.5))
                     .foregroundStyle(health?.state == .failed ? SourceHealth.State.failed.dotColor : Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, isOn.wrappedValue && errorMessage != nil ? 8 : 0)
+        .padding(.vertical, 10)
         .frame(minHeight: 48)
         .help(errorMessage ?? "")
     }
@@ -1161,7 +1220,7 @@ private struct SourcesSettingsTab: View {
                             .accessibilityHidden(true)
 
                         Text("Not installed (\(sources.count))")
-                            .font(.system(size: 13, weight: .regular))
+                            .font(settingsFont(13))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
 
@@ -1169,7 +1228,7 @@ private struct SourcesSettingsTab: View {
 
                         if !showsNotInstalled {
                             Text(verbatim: sources.map(\.name).joined(separator: " · "))
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.ink3)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -1205,7 +1264,7 @@ private struct SourcesSettingsTab: View {
                                 SourceMonogramBadge(sourceID: source.id, name: source.name, size: 20)
                                     .opacity(0.65)
                                 Text(verbatim: source.name)
-                                    .font(.system(size: 13))
+                                    .font(settingsFont(13))
                                     .foregroundStyle(Palette.ink2)
                                     .lineLimit(1)
                             }
@@ -1253,7 +1312,7 @@ private struct SourceHealthLabel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
         }
-        .font(.system(size: 11.5, weight: state == .ok || state == .failed ? .semibold : .medium))
+        .font(settingsFont(11.5, weight: state == .ok || state == .failed ? .semibold : .medium))
         .foregroundStyle(state.textColor)
         .accessibilityElement(children: .combine)
     }
@@ -1279,7 +1338,7 @@ private extension SourceHealth.State {
         case .notInstalled:
             Palette.ink3
         case .failed:
-            Color(light: "#C43E3E", dark: "#EF6B6B", contrastLight: "#962424", contrastDark: "#FF9494")
+            Palette.healthFailed
         }
     }
 
@@ -1334,7 +1393,7 @@ private struct SyncSettingsTab: View {
                                 .foregroundStyle(Palette.healthWarn)
                                 .accessibilityHidden(true)
                             Text("iCloud Drive is not available on this Mac.")
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.healthWarn)
                         }
                         .padding(.vertical, 8)
@@ -1347,7 +1406,7 @@ private struct SyncSettingsTab: View {
                                 .foregroundStyle(Palette.healthWarn)
                                 .accessibilityHidden(true)
                             Text("Unavailable")
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.healthWarn)
                         }
                         .padding(.vertical, 8)
@@ -1388,16 +1447,16 @@ private struct SyncSettingsTab: View {
                 SettingsRowsGroup {
                     if !settings.syncEnabled {
                         Text("Turn on sync to see your other Macs here.")
-                            .font(.system(size: 11.5))
+                            .font(settingsFont(11.5))
                             .foregroundStyle(Palette.ink3)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if model.remoteDevices.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("No other Macs yet")
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.ink3)
                             Text("Other Macs appear here once Token Taken runs on them with iCloud sync on and the same Apple ID.")
-                                .font(.system(size: 11.5))
+                                .font(settingsFont(11.5))
                                 .foregroundStyle(Palette.ink3)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1419,7 +1478,7 @@ private struct SyncSettingsTab: View {
 
                 if settings.syncEnabled, !model.remoteDevices.isEmpty {
                     Text("Missing a Mac? Check that it uses the same Apple ID and has iCloud sync on.")
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1445,7 +1504,7 @@ private struct SyncSettingsTab: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     (device.displayName == device.deviceID ? Text("Unknown Mac") : Text(verbatim: device.displayName))
-                        .font(.system(size: 13, weight: .regular))
+                        .font(settingsFont(13))
                         .foregroundStyle(Palette.ink1)
                     // An account published from this Mac is one account counted once, not another Mac.
                     if isAccount {
@@ -1459,7 +1518,7 @@ private struct SyncSettingsTab: View {
                         locale: settings.language.locale ?? locale
                     )
                     Text("Last synced \(relative)")
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
                 }
@@ -1505,7 +1564,7 @@ private struct SyncSettingsTab: View {
                     .accessibilityHidden(true)
             }
             text
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(isWarning ? Palette.healthWarn : Palette.ink3)
                 .monospacedDigit()
         }
@@ -1517,14 +1576,27 @@ private struct SyncSettingsTab: View {
 
 private struct AccountBadge: View {
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
         Text("Account")
-            .font(.system(size: 11, weight: .medium))
+            .font(settingsFont(11, weight: .medium))
             .foregroundStyle(Palette.ink2)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background {
-                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
-                    .fill(Palette.ink1.opacity(0.06))
+                if ThemeRuntime.isCosmos {
+                    shape.fill(CosmosPalette.background)
+                } else if ThemeRuntime.isField {
+                    shape.fill(FieldPalette.paper)
+                } else {
+                    shape.fill(Palette.ink1.opacity(0.06))
+                }
+            }
+            .overlay {
+                if ThemeRuntime.isCosmos {
+                    shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
+                } else if ThemeRuntime.isField {
+                    shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
+                }
             }
             .fixedSize()
     }
@@ -1542,22 +1614,31 @@ private struct RemoteStatusLabel: View {
         }
     }
 
+    private var symbol: String {
+        switch state {
+        case .ok: "checkmark.circle.fill"
+        case .stale: "clock.fill"
+        case .partial: "exclamationmark.triangle.fill"
+        case .unavailable: "xmark.circle.fill"
+        }
+    }
+
     private var color: Color {
         switch state {
         case .ok: Palette.healthOK
-        case .stale, .partial, .unavailable: Palette.healthWarn
+        case .stale, .partial: Palette.healthWarn
+        case .unavailable: Palette.healthFailed
         }
     }
 
     var body: some View {
         HStack(spacing: 5) {
-            Circle()
-                .fill(color)
-                .frame(width: 6, height: 6)
+            Image(systemName: symbol)
+                .font(.system(size: 10.5, weight: .semibold))
                 .accessibilityHidden(true)
             Text(title)
         }
-        .font(.system(size: 11.5, weight: state == .ok ? .semibold : .medium))
+        .font(settingsFont(11.5, weight: state == .ok || state == .unavailable ? .semibold : .medium))
         .foregroundStyle(color)
         .accessibilityElement(children: .combine)
     }
@@ -1623,19 +1704,19 @@ private struct AboutSettingsTab: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: "Token Taken")
-                        .font(.system(size: 19, weight: .bold))
+                        .font(settingsFont(19, weight: .bold))
                         .tracking(-0.2)
                         .foregroundStyle(Palette.ink1)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("Local Agent token usage")
-                            .font(.system(size: 12))
+                            .font(settingsFont(12))
                             .foregroundStyle(Palette.ink3)
                         Text(verbatim: "·")
-                            .font(.system(size: 12))
+                            .font(settingsFont(12))
                             .foregroundStyle(Palette.ink3)
                             .accessibilityHidden(true)
                         Text(verbatim: versionText)
-                            .font(.system(size: 12))
+                            .font(settingsFont(12))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                     }
@@ -1662,12 +1743,15 @@ private struct AboutSettingsTab: View {
                 AboutValueRow(label: "Acknowledgements", value: Text(verbatim: "tokscale, TokenTracker, Token Monitor"))
                 SettingsHairline()
                 SettingsControlRow(title: "Open-source licenses") {
-                    secondaryActionButton("Third-party notices") {
-                        if let thirdPartyNoticesURL {
-                            NSWorkspace.shared.open(thirdPartyNoticesURL)
+                    HStack(spacing: 0) {
+                        secondaryActionButton("Third-party notices") {
+                            if let thirdPartyNoticesURL {
+                                NSWorkspace.shared.open(thirdPartyNoticesURL)
+                            }
                         }
+                        .disabled(thirdPartyNoticesURL == nil)
                     }
-                    .disabled(thirdPartyNoticesURL == nil)
+                    .accessibilityElement(children: .contain)
                 }
                 SettingsHairline()
                 AboutValueRow(label: "Privacy", value: Text("Read-only local Agent logs, no content uploads, no telemetry"))
@@ -1677,7 +1761,7 @@ private struct AboutSettingsTab: View {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Command-Line Tool")
-                            .font(.system(size: 13, weight: .regular))
+                            .font(settingsFont(13))
                             .foregroundStyle(Palette.ink1)
                         cliStatusLabel
                     }
@@ -1714,7 +1798,7 @@ private struct AboutSettingsTab: View {
         switch cliStatus {
         case .installed(let url):
             Text("Installed at \(url.path)")
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(Palette.ink3)
                 .lineLimit(2)
                 .truncationMode(.middle)
@@ -1727,11 +1811,11 @@ private struct AboutSettingsTab: View {
                     .lineLimit(2)
                     .truncationMode(.middle)
             }
-            .font(.system(size: 11.5))
+            .font(settingsFont(11.5))
             .foregroundStyle(Palette.healthWarn)
         case .notInstalled:
             Text("Not installed · Use token-taken in Terminal")
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(Palette.ink3)
         }
     }
@@ -1742,10 +1826,10 @@ private struct AboutSettingsTab: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Version")
-                            .font(.system(size: 13, weight: .regular))
+                            .font(settingsFont(13))
                             .foregroundStyle(Palette.ink1)
                         Text(verbatim: versionText)
-                            .font(.system(size: 13))
+                            .font(settingsFont(13))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                     }
@@ -1782,7 +1866,7 @@ private struct AboutSettingsTab: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text("What's New in \(notice.version)")
-                            .font(.system(size: 11.5, weight: .semibold))
+                            .font(settingsFont(11.5, weight: .semibold))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                         Spacer(minLength: 8)
@@ -1812,8 +1896,9 @@ private struct AboutSettingsTab: View {
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.mini)
+                    .tint(Palette.roleAccent)
                 Text("Checking…")
-                    .font(.system(size: 11.5))
+                    .font(settingsFont(11.5))
                     .foregroundStyle(Palette.ink3)
             }
         } else {
@@ -1821,36 +1906,39 @@ private struct AboutSettingsTab: View {
             case .downloading(let fraction):
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Downloading update…")
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                     ProgressView(value: min(max(fraction, 0), 1))
                         .controlSize(.small)
+                        .tint(Palette.roleAccent)
                         .frame(maxWidth: 180)
                 }
             case .verifying:
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.mini)
+                        .tint(Palette.roleAccent)
                     Text("Verifying update…")
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                 }
             case .installing:
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.mini)
+                        .tint(Palette.roleAccent)
                     Text("Installing update…")
-                        .font(.system(size: 11.5))
+                        .font(settingsFont(11.5))
                         .foregroundStyle(Palette.ink3)
                 }
             case .ready(let update):
                 Text("Version \(update.version.description) ready to install")
-                    .font(.system(size: 11.5))
+                    .font(settingsFont(11.5))
                     .foregroundStyle(Palette.roleAccent)
                     .monospacedDigit()
             case .failed(let message):
                 Text(message)
-                    .font(.system(size: 11.5))
+                    .font(settingsFont(11.5))
                     .foregroundStyle(SourceHealth.State.failed.dotColor)
                     .fixedSize(horizontal: false, vertical: true)
             case .idle:
@@ -1882,23 +1970,23 @@ private struct AboutSettingsTab: View {
                         Text("Up to date")
                     }
                 }
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(Palette.ink3)
                 .monospacedDigit()
             }
         case .available(let update):
             Text("Version \(update.version.description) available")
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(Palette.roleAccent)
                 .monospacedDigit()
         case .failed(let message):
             Text(message)
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(SourceHealth.State.failed.dotColor)
                 .fixedSize(horizontal: false, vertical: true)
         case .unsupported:
             Text("Updates are disabled in development builds")
-                .font(.system(size: 11.5))
+                .font(settingsFont(11.5))
                 .foregroundStyle(Palette.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1916,11 +2004,19 @@ private struct AboutSettingsTab: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            shape.fill(ThemeRuntime.isCosmos ? CosmosPalette.background : Palette.ink1.opacity(0.03))
+            if ThemeRuntime.isCosmos {
+                shape.fill(CosmosPalette.background)
+            } else if ThemeRuntime.isField {
+                shape.fill(FieldPalette.panel)
+            } else {
+                shape.fill(Palette.ink1.opacity(0.03))
+            }
         }
         .overlay {
             if ThemeRuntime.isCosmos {
                 shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
+            } else if ThemeRuntime.isField {
+                shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
             }
         }
     }
@@ -1934,7 +2030,7 @@ private struct AboutSettingsTab: View {
         )) ?? AttributedString(notes)
 
         return Text(attributed)
-            .font(.system(size: 12))
+            .font(settingsFont(12))
             .foregroundStyle(Palette.ink2)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
@@ -1951,7 +2047,11 @@ private struct AboutSettingsTab: View {
             Button(title, action: action)
                 .buttonStyle(CosmosProminentButtonStyle())
                 .controlSize(.small)
-        } else if ThemeRuntime.isField || reduceTransparency {
+        } else if ThemeRuntime.isField {
+            Button(title, action: action)
+                .buttonStyle(FieldProminentButtonStyle())
+                .controlSize(.small)
+        } else if reduceTransparency {
             Button(title, action: action)
                 .buttonStyle(.borderedProminent)
                 .tint(Palette.roleAccent)
@@ -2012,7 +2112,7 @@ private struct CosmosProminentButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(CosmosPalette.background)
+            .foregroundStyle(Palette.onAccent)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(
@@ -2023,6 +2123,21 @@ private struct CosmosProminentButtonStyle: ButtonStyle {
     }
 }
 
+private struct FieldProminentButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
+        configuration.label
+            .font(FieldFont.serif(12, weight: .semibold))
+            .foregroundStyle(Palette.onAccent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(
+                shape.fill(FieldPalette.accent.opacity(configuration.isPressed ? 0.85 : 1))
+            )
+            .contentShape(shape)
+    }
+}
+
 private struct AboutValueRow: View {
     let label: LocalizedStringKey
     let value: Text
@@ -2030,11 +2145,11 @@ private struct AboutValueRow: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(label)
-                .font(.system(size: 13, weight: .regular))
+                .font(settingsFont(13))
                 .foregroundStyle(Palette.ink1)
             Spacer(minLength: 12)
             value
-                .font(.system(size: 13))
+                .font(settingsFont(13))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)

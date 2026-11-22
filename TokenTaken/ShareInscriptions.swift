@@ -2,6 +2,8 @@ import Foundation
 
 // Draft lines to be replaced after a copy brainstorm.
 enum ShareInscriptions {
+    static let maxLength = 40
+
     private static let fieldKeys: [String] = [
         "share.inscription.field.1",
         "share.inscription.field.2",
@@ -13,7 +15,11 @@ enum ShareInscriptions {
         "share.inscription.field.8",
     ]
 
-    static func random(for theme: AppTheme, locale: Locale = .autoupdatingCurrent) -> String? {
+    static func random(
+        for theme: AppTheme,
+        locale: Locale = .autoupdatingCurrent,
+        excluding current: String? = nil
+    ) -> String? {
         let keys: [String]
         switch theme {
         case .field:
@@ -21,7 +27,10 @@ enum ShareInscriptions {
         case .liquidGlass, .cosmos:
             return nil
         }
-        guard let key = keys.randomElement() else { return nil }
-        return String(localized: String.LocalizationValue(key), locale: locale)
+        let candidates = keys.map { key in
+            String(String(localized: String.LocalizationValue(key), locale: locale).prefix(maxLength))
+        }
+        let filtered = current.map { value in candidates.filter { $0 != value } } ?? candidates
+        return (filtered.isEmpty ? candidates : filtered).randomElement()
     }
 }

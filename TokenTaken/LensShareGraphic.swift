@@ -206,16 +206,26 @@ struct LensShareSnapshot {
 /// Avoids `glassEffect` so `ImageRenderer` rasterizes every optical layer deterministically.
 struct LensShareGraphic: View {
     let snapshot: LensShareSnapshot
+    var reduceTransparencyOverride: Bool? = nil
+    var colorSchemeContrastOverride: ColorSchemeContrast? = nil
 
-    init(snapshot: LensShareSnapshot) {
+    init(
+        snapshot: LensShareSnapshot,
+        reduceTransparencyOverride: Bool? = nil,
+        colorSchemeContrastOverride: ColorSchemeContrast? = nil
+    ) {
         self.snapshot = snapshot
+        self.reduceTransparencyOverride = reduceTransparencyOverride
+        self.colorSchemeContrastOverride = colorSchemeContrastOverride
     }
 
     init(
         buckets: [LensBucket],
         data: ShareCardData,
         dimension: BreakdownDimension = .sources,
-        frozenRange: ClosedRange<Int>? = nil
+        frozenRange: ClosedRange<Int>? = nil,
+        reduceTransparencyOverride: Bool? = nil,
+        colorSchemeContrastOverride: ColorSchemeContrast? = nil
     ) {
         self.snapshot = LensShareSnapshot(
             buckets: buckets,
@@ -223,6 +233,8 @@ struct LensShareGraphic: View {
             dimension: dimension,
             frozenRange: frozenRange
         )
+        self.reduceTransparencyOverride = reduceTransparencyOverride
+        self.colorSchemeContrastOverride = colorSchemeContrastOverride
     }
 
     @Environment(\.locale) private var locale
@@ -230,10 +242,16 @@ struct LensShareGraphic: View {
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
+    private var effectiveReduceTransparency: Bool {
+        reduceTransparencyOverride ?? reduceTransparency
+    }
+
+    private var effectiveContrast: ColorSchemeContrast {
+        colorSchemeContrastOverride ?? contrast
+    }
+
     var body: some View {
         Canvas { context, size in
-            // Hourly buckets carry no model detail, so drawing them would show empty bars and "No usage".
-            guard !snapshot.modelDetailUnavailable else { return }
             draw(in: &context, size: size)
         }
         .overlay {
@@ -254,7 +272,7 @@ struct LensShareGraphic: View {
         guard size.width > 8, size.height > 8 else { return }
 
         let isDark = scheme == .dark
-        let increased = contrast == .increased
+        let increased = effectiveContrast == .increased
 
         // Scale logical coordinates so LensBarLayout's bar widths, bevels, and radii stay proportional
         // across 1080x1620, 1080x1080, and 1620x1080 share card canvases.
@@ -264,6 +282,9 @@ struct LensShareGraphic: View {
 
         let stageRect = CGRect(origin: .zero, size: logicalSize).insetBy(dx: 0.75, dy: 0.75)
         drawStageSurface(in: &context, rect: stageRect, isDark: isDark, increased: increased)
+
+        // Hourly buckets carry no model detail, so stop after the stage surface and let the overlay explain the gap.
+        guard !snapshot.modelDetailUnavailable else { return }
 
         let leftPad: CGFloat = 20
         let rightPad: CGFloat = 20
@@ -449,7 +470,7 @@ struct LensShareGraphic: View {
     ) {
         let shape = Path(roundedRect: rect, cornerRadius: 18, style: .continuous)
 
-        if reduceTransparency {
+        if effectiveReduceTransparency {
             context.fill(shape, with: .color(Palette.cardSurface))
             context.stroke(shape, with: .color(Palette.hairline), lineWidth: 1)
             return
@@ -591,7 +612,7 @@ struct LensShareGraphic: View {
         let lensHalfW = lensRect.width * 0.5
 
         // 1. Hand-drawn glass capsule body & ambient shadow (replaces offscreen-unsupported glassEffect).
-        if reduceTransparency {
+        if effectiveReduceTransparency {
             context.fill(lensPath, with: .color(Palette.cardSurface))
         } else {
             context.drawLayer { shadowLayer in
@@ -614,7 +635,7 @@ struct LensShareGraphic: View {
         context.drawLayer { mag in
             mag.clip(to: lensPath)
 
-            if !reduceTransparency {
+            if !effectiveReduceTransparency {
                 mag.fill(
                     Path(lensRect),
                     with: .linearGradient(
@@ -692,7 +713,7 @@ struct LensShareGraphic: View {
                 )
             }
 
-            if !reduceTransparency {
+            if !effectiveReduceTransparency {
                 if isRange {
                     let bevel = LensBarLayout.bevelWidth
                     let rimColor = Color.white.opacity(isDark ? 0.16 : 0.70)
@@ -740,7 +761,7 @@ struct LensShareGraphic: View {
         }
 
         // 3. Hand-drawn glass capsule rim: subtle red/cyan chromatic dispersion, fine border & top highlight.
-        if reduceTransparency {
+        if effectiveReduceTransparency {
             context.stroke(lensPath, with: .color(Palette.roleAccent), lineWidth: 2)
         } else {
             context.stroke(
@@ -842,7 +863,7 @@ struct LensShareGraphic: View {
         let pillRect = pill.rect
         let pillPath = Path(roundedRect: pillRect, cornerRadius: pillRect.height * 0.5, style: .continuous)
 
-        if reduceTransparency {
+        if effectiveReduceTransparency {
             context.fill(pillPath, with: .color(Palette.cardSurface))
             context.stroke(pillPath, with: .color(Palette.roleAccent), lineWidth: 1.2)
         } else {
@@ -902,7 +923,7 @@ struct LensShareGraphic: View {
 
         context.fill(
             badgePath,
-            with: .color(reduceTransparency
+            with: .color(effectiveReduceTransparency
                 ? Palette.cardSurface
                 : (isDark ? Color(hex: "#182130").opacity(0.86) : Color.white.opacity(0.84)))
         )

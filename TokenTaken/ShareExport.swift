@@ -59,7 +59,7 @@ private func cosmosShareSceneSize(for aspect: ShareAspect) -> CGSize {
     let cardSize = aspect.canvasSize
     switch aspect {
     case .portrait:
-        return CGSize(width: cardSize.width, height: (cardSize.height * 0.52).rounded())
+        return CGSize(width: cardSize.width, height: (cardSize.height * 0.64).rounded())
     case .square:
         return CGSize(width: cardSize.width, height: (cardSize.height * 0.46).rounded())
     case .landscape:
@@ -79,6 +79,7 @@ struct ShareExportSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -91,13 +92,15 @@ struct ShareExportSheet: View {
     @State private var showInscription = true
     @State private var showSignature = true
     // Field share cards only; kept for this sheet, never saved or synced.
-    @State private var inscription: String?
+    @State private var inscription = ""
+    @State private var didSeedInscription = false
     @State private var signature = ""
     @State private var previewSummary: UsageSummary?
     @State private var scopedSummary: UsageSummary?
     @State private var previewLensBuckets: [LensBucket] = []
     @State private var loadedScopeKey: SnapshotQueryKey?
     @State private var rankTopPercent: Double?
+    @State private var snapshotUnavailable = false
     @State private var cosmosSnapshot: NSImage?
     @State private var renderedCosmosSnapshotKey: CosmosShareSnapshotKey?
     @State private var didCopy = false
@@ -129,14 +132,40 @@ struct ShareExportSheet: View {
     private var activePeriod: Period { previewPeriod ?? model.period }
     private var summary: UsageSummary { previewSummary ?? model.summary }
     private var isCosmos: Bool { settings.theme == .cosmos }
+    private var isField: Bool { settings.theme == .field }
     private var isLiquidLens: Bool { settings.theme == .liquidGlass && settings.liquidView == .lens }
-    private var primaryInk: Color { isCosmos ? CosmosPalette.ink : Palette.ink1 }
-    private var secondaryInk: Color { isCosmos ? CosmosPalette.ink2 : Palette.ink2 }
-    private var tertiaryInk: Color { isCosmos ? CosmosPalette.ink3 : Palette.ink3 }
-    private var hairline: Color { isCosmos ? CosmosPalette.rule : Palette.hairline }
+    private var primaryInk: Color { isCosmos ? CosmosPalette.ink : (isField ? FieldPalette.ink : Palette.ink1) }
+    private var secondaryInk: Color { isCosmos ? CosmosPalette.ink2 : (isField ? FieldPalette.muted : Palette.ink2) }
+    private var tertiaryInk: Color { isCosmos ? CosmosPalette.ink3 : (isField ? FieldPalette.muted : Palette.ink3) }
+    private var hairline: Color { isCosmos ? CosmosPalette.rule : (isField ? FieldPalette.rule : Palette.hairline) }
 
     private var availableAspects: [ShareAspect] {
-        ShareAspect.allCases.filter { isCosmos || isLiquidLens || $0 != .square }
+        ShareAspect.allCases
+    }
+
+    private func sheetFont(_ size: CGFloat, weight: Font.Weight = .regular, monospaced: Bool = false) -> Font {
+        if monospaced {
+            return .system(size: size, weight: weight, design: .monospaced)
+        }
+        if isField {
+            return FieldFont.serif(size, weight: Self.nsFontWeight(weight))
+        }
+        return .system(size: size, weight: weight)
+    }
+
+    private static func nsFontWeight(_ weight: Font.Weight) -> NSFont.Weight {
+        switch weight {
+        case .ultraLight: .ultraLight
+        case .thin: .thin
+        case .light: .light
+        case .regular: .regular
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        default: .regular
+        }
     }
 
     private var effectiveAspect: ShareAspect {
@@ -231,12 +260,12 @@ struct ShareExportSheet: View {
     }
 
     private var activeInscription: String {
-        guard settings.theme == .field, showInscription else { return "" }
-        return inscription ?? ""
+        guard isField, showInscription else { return "" }
+        return inscription
     }
 
     private var activeSignature: String {
-        guard settings.theme == .field, showSignature else { return "" }
+        guard isField, showSignature else { return "" }
         return signature
     }
 
@@ -261,7 +290,7 @@ struct ShareExportSheet: View {
                 .padding(24)
                 .background(isCosmos ? CosmosPalette.background : Color.clear)
         }
-        .frame(width: isCosmos ? 892 : 760, height: isCosmos ? 640 : 620)
+        .frame(width: isCosmos ? 892 : 760, height: isCosmos ? 640 : (isField ? 656 : 620))
         .background {
             ShareSheetBackdrop(
                 theme: settings.theme,
@@ -273,9 +302,10 @@ struct ShareExportSheet: View {
             if previewPeriod == nil {
                 previewPeriod = model.period
             }
-            if inscription == nil {
-                inscription = ShareInscriptions.random(for: settings.theme, locale: locale)
-            }
+            seedFieldInscriptionIfNeeded()
+        }
+        .onChange(of: settings.theme) { _, _ in
+            seedFieldInscriptionIfNeeded()
         }
         .onChange(of: snapshotQueryKey, initial: true) { _, key in
             let resolved = resolveShareSnapshot(for: key)
@@ -283,6 +313,7 @@ struct ShareExportSheet: View {
             scopedSummary = resolved.scopedSummary
             previewLensBuckets = resolved.lensBuckets
             rankTopPercent = resolved.rank
+            snapshotUnavailable = resolved.dataUnavailable
             loadedScopeKey = key
         }
         .onChange(of: currentCosmosSnapshotKey, initial: true) { _, key in
@@ -308,6 +339,12 @@ struct ShareExportSheet: View {
         .onDisappear {
             copyResetTask?.cancel()
         }
+    }
+
+    private func seedFieldInscriptionIfNeeded() {
+        guard isField, !didSeedInscription else { return }
+        didSeedInscription = true
+        inscription = ShareInscriptions.random(for: settings.theme, locale: locale) ?? ""
     }
 
     private func renderCosmosSnapshot(for key: CosmosShareSnapshotKey) {
@@ -342,6 +379,7 @@ struct ShareExportSheet: View {
                 aspect: effectiveAspect,
                 showCost: showCost,
                 showComposition: showComposition,
+                theme: settings.theme,
                 dimension: dimension,
                 liquidView: settings.liquidView,
                 lensBuckets: currentLensBuckets,
@@ -388,9 +426,12 @@ struct ShareExportSheet: View {
                         .frame(width: 24, height: 24)
                         .modifier(ShareRoundButtonSurface(
                             reduceTransparency: reduceTransparency,
-                            isCosmos: isCosmos
+                            isCosmos: isCosmos,
+                            isField: isField
                         ))
-                        .contentShape(isCosmos ? AnyShape(Rectangle()) : AnyShape(Circle()))
+                        .contentShape(isCosmos
+                            ? AnyShape(Rectangle())
+                            : (isField ? AnyShape(RoundedRectangle(cornerRadius: 8, style: .continuous)) : AnyShape(Circle())))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
@@ -398,42 +439,74 @@ struct ShareExportSheet: View {
                 .accessibilityLabel(Text("Close"))
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Scope")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(secondaryInk)
+            ScrollView(.vertical) {
+                VStack(alignment: .leading, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Scope")
+                            .font(sheetFont(12, weight: .semibold))
+                            .foregroundStyle(secondaryInk)
 
-                scopePicker
-            }
+                        scopePicker
+                    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Aspect")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(secondaryInk)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Aspect")
+                            .font(sheetFont(12, weight: .semibold))
+                            .foregroundStyle(secondaryInk)
 
-                aspectSegmentedControl
-            }
+                        aspectSegmentedControl
+                    }
 
-            Rectangle()
-                .fill(hairline)
-                .frame(height: 1)
+                    Rectangle()
+                        .fill(hairline)
+                        .frame(height: 1)
 
-            VStack(spacing: 8) {
-                shareToggleRow(title: "Show cost estimate", isOn: $showCost)
-                shareToggleRow(title: "Show composition", isOn: $showComposition)
-                shareToggleRow(title: "Show rank", isOn: $showRank)
-                if settings.theme == .field {
-                    shareToggleRow(title: "Inscription", isOn: $showInscription)
-                    shareToggleRow(title: "Signature", isOn: $showSignature)
-                    if showSignature {
-                        fieldTextRow("Your name", text: $signature, limit: 24)
+                    VStack(spacing: 8) {
+                        shareToggleRow(title: "Show cost estimate", isOn: $showCost)
+                        shareToggleRow(title: "Show composition", isOn: $showComposition)
+                        shareToggleRow(title: "Show rank", isOn: $showRank)
+                        if isField {
+                            shareToggleRow(title: "Inscription", isOn: $showInscription)
+                            if showInscription {
+                                HStack(spacing: 6) {
+                                    fieldTextRow("A short note", text: $inscription, limit: ShareInscriptions.maxLength)
+                                    Button {
+                                        if let next = ShareInscriptions.random(for: settings.theme, locale: locale, excluding: inscription) {
+                                            inscription = next
+                                        }
+                                    } label: {
+                                        Image(systemName: "shuffle")
+                                            .font(.system(size: 11.5, weight: .medium))
+                                            .foregroundStyle(secondaryInk)
+                                            .frame(width: 28, height: 28)
+                                    }
+                                    .buttonStyle(FieldButtonStyle(horizontalPadding: 0, verticalPadding: 0))
+                                    .help(Text("New inscription"))
+                                    .accessibilityLabel(Text("New inscription"))
+                                }
+                            }
+                            shareToggleRow(title: "Signature", isOn: $showSignature)
+                            if showSignature {
+                                fieldTextRow("Your name", text: $signature, limit: 24)
+                            }
+                        }
                     }
                 }
+                .padding(.vertical, 1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-
-            Spacer(minLength: 12)
+            .scrollIndicators(.automatic)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(maxHeight: .infinity, alignment: .top)
 
             VStack(spacing: 10) {
+                if snapshotUnavailable {
+                    Text("Usage for this period could not be loaded, so it can't be shared yet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Palette.healthWarn)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
                 HStack(spacing: 8) {
                     actionButton(
                         title: didCopy ? "Copied" : "Copy",
@@ -449,8 +522,10 @@ struct ShareExportSheet: View {
                         action: saveCardAsPNG
                     )
                 }
+                .disabled(snapshotUnavailable)
 
                 sharePickerButton
+                    .disabled(snapshotUnavailable)
             }
         }
     }
@@ -458,12 +533,12 @@ struct ShareExportSheet: View {
     private func fieldTextRow(_ title: LocalizedStringKey, text: Binding<String>, limit: Int) -> some View {
         TextField(title, text: text)
             .textFieldStyle(.plain)
-            .font(.system(size: 13))
-            .foregroundStyle(Palette.ink1)
+            .font(FieldFont.serif(13))
+            .foregroundStyle(FieldPalette.ink)
             .padding(.horizontal, 10)
             .frame(height: 28)
-            .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(FieldPalette.panel))
-            .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(FieldPalette.panel))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
             .onChange(of: text.wrappedValue) { _, value in
                 if value.count > limit { text.wrappedValue = String(value.prefix(limit)) }
             }
@@ -476,25 +551,17 @@ struct ShareExportSheet: View {
     ) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(sheetFont(13, weight: .medium))
                 .foregroundStyle(primaryInk)
                 .lineLimit(1)
                 .accessibilityHidden(true)
 
             Spacer(minLength: 8)
 
-            Group {
-                if isCosmos {
-                    Toggle(title, isOn: isOn)
-                        .labelsHidden()
-                        .toggleStyle(CosmosShareToggleStyle())
-                } else {
-                    Toggle(title, isOn: isOn)
-                        .labelsHidden()
-                        .toggleStyle(GlassToggleStyle())
-                }
-            }
-            .accessibilityLabel(Text(title))
+            Toggle(title, isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(GlassToggleStyle())
+                .accessibilityLabel(Text(title))
         }
         .frame(maxWidth: .infinity)
         .frame(height: 30)
@@ -528,8 +595,8 @@ struct ShareExportSheet: View {
     private var periodSegmentedControl: some View {
         segmentedContainer {
             HStack(spacing: isCosmos ? 0 : 2) {
-                ForEach(Period.allCases) { option in
-                    periodSegment(option)
+                ForEach(Array(Period.allCases.enumerated()), id: \.element.id) { index, option in
+                    periodSegment(option, index: index)
                 }
             }
         }
@@ -537,7 +604,7 @@ struct ShareExportSheet: View {
         .accessibilityLabel(Text("Usage period"))
     }
 
-    private func periodSegment(_ option: Period) -> some View {
+    private func periodSegment(_ option: Period, index: Int) -> some View {
         let isSelected = activePeriod == option
         return Button {
             withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
@@ -545,19 +612,23 @@ struct ShareExportSheet: View {
             }
         } label: {
             Text(periodTitle(option))
-                .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                .font(sheetFont(11, weight: isSelected ? .semibold : .medium))
                 .foregroundStyle(isSelected ? primaryInk : secondaryInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.68)
                 .padding(.horizontal, 3)
                 .frame(maxWidth: .infinity, minHeight: 28)
-                .contentShape(isCosmos ? AnyShape(Rectangle()) : AnyShape(Capsule()))
+                .contentShape(isCosmos
+                    ? AnyShape(Rectangle())
+                    : (isField ? AnyShape(RoundedRectangle(cornerRadius: 6, style: .continuous)) : AnyShape(Capsule())))
                 .modifier(ShareSegmentSurface(
                     isSelected: isSelected,
                     reduceTransparency: reduceTransparency,
                     namespace: periodNamespace,
                     effectID: "sharePeriod",
-                    isCosmos: isCosmos
+                    isCosmos: isCosmos,
+                    isField: isField,
+                    showLeadingDivider: index > 0
                 ))
         }
         .buttonStyle(.plain)
@@ -625,12 +696,12 @@ struct ShareExportSheet: View {
             HStack(spacing: 6) {
                 if let source = selectedSourceBreakdown {
                     Text(verbatim: source.name)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(sheetFont(12, weight: .semibold))
                         .foregroundStyle(primaryInk)
                         .lineLimit(1)
                 } else {
                     Text("All harnesses")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(sheetFont(12, weight: .medium))
                         .foregroundStyle(secondaryInk)
                         .lineLimit(1)
                 }
@@ -646,15 +717,16 @@ struct ShareExportSheet: View {
             .modifier(SharePillSurface(
                 isSelected: isSelected,
                 reduceTransparency: reduceTransparency,
-                isCosmos: isCosmos
+                isCosmos: isCosmos,
+                isField: isField
             ))
             .contentShape(isCosmos
                 ? AnyShape(Rectangle())
-                : AnyShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)))
+                : AnyShape(RoundedRectangle(cornerRadius: isField ? 8 : Radius.inner, style: .continuous)))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .tint(isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+        .tint(isCosmos ? CosmosPalette.accent : (isField ? FieldPalette.accent : Palette.roleAccent))
         .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .disabled(summary.bySource.isEmpty)
         .opacity(summary.bySource.isEmpty ? 0.45 : 1)
@@ -695,13 +767,13 @@ struct ShareExportSheet: View {
             HStack(spacing: 6) {
                 if let item = selectedModelBreakdown {
                     Text(verbatim: item.name)
-                        .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                        .font(sheetFont(11.5, weight: .semibold, monospaced: !isField))
                         .foregroundStyle(primaryInk)
                         .lineLimit(1)
                         .truncationMode(.middle)
                 } else {
                     Text("All models")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(sheetFont(12, weight: .medium))
                         .foregroundStyle(secondaryInk)
                         .lineLimit(1)
                 }
@@ -717,15 +789,16 @@ struct ShareExportSheet: View {
             .modifier(SharePillSurface(
                 isSelected: isSelected,
                 reduceTransparency: reduceTransparency,
-                isCosmos: isCosmos
+                isCosmos: isCosmos,
+                isField: isField
             ))
             .contentShape(isCosmos
                 ? AnyShape(Rectangle())
-                : AnyShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)))
+                : AnyShape(RoundedRectangle(cornerRadius: isField ? 8 : Radius.inner, style: .continuous)))
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
-        .tint(isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+        .tint(isCosmos ? CosmosPalette.accent : (isField ? FieldPalette.accent : Palette.roleAccent))
         .environment(\.colorScheme, isCosmos ? .dark : scheme)
         .disabled(summary.byModel.isEmpty)
         .opacity(summary.byModel.isEmpty ? 0.45 : 1)
@@ -742,6 +815,12 @@ struct ShareExportSheet: View {
                 .frame(maxWidth: .infinity)
                 .background(CosmosPalette.background)
                 .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if isField {
+            content()
+                .padding(2)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(FieldPalette.paper))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
         } else {
             GlassEffectContainer(spacing: 0) {
                 content()
@@ -757,8 +836,8 @@ struct ShareExportSheet: View {
         let options = availableAspects
         segmentedContainer {
             HStack(spacing: isCosmos ? 0 : 2) {
-                ForEach(options) { option in
-                    aspectSegment(option)
+                ForEach(Array(options.enumerated()), id: \.element.id) { index, option in
+                    aspectSegment(option, index: index)
                 }
             }
         }
@@ -766,7 +845,7 @@ struct ShareExportSheet: View {
         .accessibilityLabel(Text("Aspect ratio"))
     }
 
-    private func aspectSegment(_ option: ShareAspect) -> some View {
+    private func aspectSegment(_ option: ShareAspect, index: Int) -> some View {
         let isSelected = effectiveAspect == option
         return Button {
             withAnimation(reduceMotion ? nil : .smooth(duration: 0.24)) {
@@ -774,18 +853,22 @@ struct ShareExportSheet: View {
             }
         } label: {
             Text(option.title)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+                .font(sheetFont(12, weight: isSelected ? .semibold : .medium))
                 .foregroundStyle(isSelected ? primaryInk : secondaryInk)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .frame(maxWidth: .infinity, minHeight: 30)
-                .contentShape(isCosmos ? AnyShape(Rectangle()) : AnyShape(Capsule()))
+                .contentShape(isCosmos
+                    ? AnyShape(Rectangle())
+                    : (isField ? AnyShape(RoundedRectangle(cornerRadius: 6, style: .continuous)) : AnyShape(Capsule())))
                 .modifier(ShareSegmentSurface(
                     isSelected: isSelected,
                     reduceTransparency: reduceTransparency,
                     namespace: aspectNamespace,
                     effectID: "shareAspect",
-                    isCosmos: isCosmos
+                    isCosmos: isCosmos,
+                    isField: isField,
+                    showLeadingDivider: index > 0
                 ))
         }
         .buttonStyle(.plain)
@@ -819,7 +902,7 @@ struct ShareExportSheet: View {
                 .foregroundStyle(secondaryInk)
                 .accessibilityHidden(true)
             Text(title)
-                .font(.system(size: 12.5, weight: .medium))
+                .font(sheetFont(12.5, weight: .medium))
                 .foregroundStyle(primaryInk)
                 .lineLimit(1)
         }
@@ -839,6 +922,14 @@ struct ShareExportSheet: View {
             }
             .buttonStyle(CosmosButtonStyle())
             .accessibilityLabel(Text(accessibilityLabel))
+        } else if isField {
+            Button(action: action) {
+                actionButtonLabel(title: title, symbol: symbol)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 22)
+            }
+            .buttonStyle(FieldButtonStyle())
+            .accessibilityLabel(Text(accessibilityLabel))
         } else {
             Button(action: action) {
                 actionButtonLabel(title: title, symbol: symbol)
@@ -856,10 +947,10 @@ struct ShareExportSheet: View {
         HStack(spacing: 6) {
             Image(systemName: "square.and.arrow.up")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isCosmos ? CosmosPalette.accent : Palette.roleAccent)
+                .foregroundStyle(isCosmos ? CosmosPalette.accent : (isField ? FieldPalette.accent : Palette.roleAccent))
                 .accessibilityHidden(true)
             Text("Share…")
-                .font(.system(size: 13, weight: .semibold))
+                .font(sheetFont(13, weight: .semibold))
                 .foregroundStyle(primaryInk)
                 .lineLimit(1)
         }
@@ -874,7 +965,15 @@ struct ShareExportSheet: View {
                         .frame(height: 26)
                 }
                 .buttonStyle(CosmosButtonStyle())
-                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(CosmosPalette.accent, lineWidth: 1))
+                .overlay(Rectangle().stroke(CosmosPalette.accent, lineWidth: 1))
+            } else if isField {
+                Button(action: presentSharePicker) {
+                    shareButtonLabel
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
+                }
+                .buttonStyle(FieldButtonStyle())
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(FieldPalette.accent, lineWidth: 1))
             } else {
                 Button(action: presentSharePicker) {
                     shareButtonLabel
@@ -899,6 +998,8 @@ struct ShareExportSheet: View {
         let scopedSummary: UsageSummary?
         let lensBuckets: [LensBucket]
         let rank: Double?
+        /// True when the period's usage could not be loaded and `summary` is a placeholder, not real data.
+        var dataUnavailable = false
     }
 
     private var themeFileTag: String {
@@ -923,15 +1024,33 @@ struct ShareExportSheet: View {
         }
     }
 
+    private func fallbackSummary(for period: Period) -> (summary: UsageSummary, matchesCachedData: Bool) {
+        if period == model.summary.period {
+            return (model.summary, true)
+        }
+        if period == model.todaySummary.period {
+            return (model.todaySummary, true)
+        }
+        if let empty = try? UsageAggregator(
+            store: EmptyShareUsageStore(devices: model.summary.devices),
+            now: .now
+        ).summary(for: period) {
+            return (empty, false)
+        }
+        return (model.summary, false)
+    }
+
     /// Queries summary, scoped summary, lens buckets, and 30-day rank from a single preload and query-time `now`.
     private func resolveShareSnapshot(for key: SnapshotQueryKey) -> ResolvedShareSnapshot {
         guard let context = resolveBaseStore(),
               let rows = try? UsageAggregator.preload(context.store) else {
+            let fallback = fallbackSummary(for: key.period)
             return ResolvedShareSnapshot(
-                summary: model.summary,
+                summary: fallback.summary,
                 scopedSummary: nil,
-                lensBuckets: key.isLiquidLens ? model.lensBuckets(for: key.period) : [],
-                rank: nil
+                lensBuckets: key.isLiquidLens && fallback.matchesCachedData ? model.lensBuckets(for: key.period) : [],
+                rank: nil,
+                dataUnavailable: !fallback.matchesCachedData
             )
         }
 
@@ -942,7 +1061,9 @@ struct ShareExportSheet: View {
             now: context.now,
             priceTable: context.priceTable
         )
-        let resolvedSummary = (try? aggregator.summary(for: key.period)) ?? model.summary
+        let queriedSummary = try? aggregator.summary(for: key.period)
+        let fallback = queriedSummary == nil ? fallbackSummary(for: key.period) : nil
+        let resolvedSummary = queriedSummary ?? fallback!.summary
         let targetScope = validatedScope(key.scope, against: resolvedSummary)
 
         let filter: UsageFilter? = switch targetScope {
@@ -978,7 +1099,8 @@ struct ShareExportSheet: View {
             summary: resolvedSummary,
             scopedSummary: resolvedScoped,
             lensBuckets: resolvedBuckets,
-            rank: resolvedRank
+            rank: resolvedRank,
+            dataUnavailable: fallback.map { !$0.matchesCachedData } ?? false
         )
     }
 
@@ -1028,11 +1150,14 @@ struct ShareExportSheet: View {
                 summary: summary,
                 scopedSummary: scopedSummary,
                 lensBuckets: previewLensBuckets,
-                rank: rankTopPercent
+                rank: rankTopPercent,
+                dataUnavailable: snapshotUnavailable
             )
         } else {
             resolved = resolveShareSnapshot(for: queryKey)
         }
+        // Never export placeholder numbers as if they were this period's usage.
+        guard !resolved.dataUnavailable else { return nil }
         let resolvedScope = validatedScope(scope, against: resolved.summary)
         let resolvedRank = showRank ? resolved.rank : nil
         let exportData = ShareCardData(
@@ -1067,13 +1192,16 @@ struct ShareExportSheet: View {
             aspect: resolvedAspect,
             showCost: showCost,
             showComposition: showComposition,
+            theme: settings.theme,
             dimension: dimension,
             liquidView: settings.liquidView,
             lensBuckets: exportLensBuckets,
             cosmosSnapshot: exportCosmosSnapshot,
             rank: resolvedRank,
             inscription: activeInscription,
-            signature: activeSignature
+            signature: activeSignature,
+            reduceTransparencyOverride: reduceTransparency,
+            colorSchemeContrastOverride: colorSchemeContrast
         )
         .frame(width: canvasSize.width, height: canvasSize.height)
         .environment(\.colorScheme, settings.theme == .cosmos ? .dark : scheme)
@@ -1084,7 +1212,14 @@ struct ShareExportSheet: View {
         renderer.scale = 2.0
         renderer.proposedSize = ProposedViewSize(canvasSize)
 
-        let targetAppearance = NSAppearance(named: settings.theme == .cosmos || scheme == .dark ? .darkAqua : .aqua)
+        let isDarkExport = settings.theme == .cosmos || scheme == .dark
+        let appearanceName: NSAppearance.Name = if colorSchemeContrast == .increased {
+            isDarkExport ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua
+        } else {
+            isDarkExport ? .darkAqua : .aqua
+        }
+        let targetAppearance = NSAppearance(named: appearanceName)
+            ?? NSAppearance(named: isDarkExport ? .darkAqua : .aqua)
         var cgImage: CGImage?
         if let targetAppearance {
             targetAppearance.performAsCurrentDrawingAppearance {
@@ -1200,6 +1335,12 @@ private struct PreloadedUsageStore: UsageStore {
     var devices: [Device] { rows.devices }
     func records() -> [UsageRecord] { rows.records }
     func hourly() -> [HourlyUsage] { rows.hourly }
+}
+
+private struct EmptyShareUsageStore: UsageStore {
+    let devices: [Device]
+    func records() -> [UsageRecord] { [] }
+    func hourly() -> [HourlyUsage] { [] }
 }
 
 // MARK: - Card Data
@@ -1360,6 +1501,23 @@ struct ShareCardData {
         )
     }
 
+    func periodDescription(locale: Locale) -> LocalizedStringKey {
+        let start = summary.start
+        switch summary.period {
+        case .day:
+            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+        case .week:
+            let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
+            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
+        case .month:
+            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
+        case .year:
+            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
+        case .all:
+            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
+        }
+    }
+
     func periodHeadlineText(locale: Locale) -> String {
         switch summary.period {
         case .day:
@@ -1439,16 +1597,30 @@ struct ShareCardData {
     }
 
     /// All positive strata sorted descending by token count before any tail merging.
-    fileprivate var unmergedStrata: [Stratum] {
+    fileprivate func unmergedStrata(dimension: BreakdownDimension) -> [Stratum] {
         switch kind {
         case .overall:
-            return activeSources.map { source in
-                Stratum(
-                    id: source.id,
-                    label: .verbatim(source.name, monospaced: false),
-                    tokens: source.counts.total,
-                    color: Palette.color(forSource: source.id)
-                )
+            switch dimension {
+            case .sources:
+                return activeSources.map { source in
+                    Stratum(
+                        id: source.id,
+                        label: .verbatim(source.name, monospaced: false),
+                        tokens: source.counts.total,
+                        color: Palette.color(forSource: source.id)
+                    )
+                }
+            case .models:
+                let models = activeModels
+                let palette = Palette.modelColors(for: summary.byModel.map(\.id))
+                return models.map { item in
+                    Stratum(
+                        id: item.id,
+                        label: .verbatim(item.name, monospaced: true),
+                        tokens: item.counts.total,
+                        color: palette[item.id] ?? Palette.color(for: .output)
+                    )
+                }
             }
 
         case .source:
@@ -1484,11 +1656,15 @@ struct ShareCardData {
 
     /// Stratified layers sorted descending by token count (index 0 is thickest at the bottom).
     var strata: [Stratum] {
+        strata(dimension: .sources)
+    }
+
+    func strata(dimension: BreakdownDimension) -> [Stratum] {
         let limit = switch kind {
         case .overall: 5
         case .source, .model: 4
         }
-        return Self.mergeTail(unmergedStrata, limit: limit)
+        return Self.mergeTail(unmergedStrata(dimension: dimension), limit: limit)
     }
 
     /// Supporting facts for the selected scope (3 for overall, 2 for a single harness or model).
@@ -1628,7 +1804,7 @@ struct ShareCardData {
     }
 }
 
-// MARK: - Concept 3: Tide Line ShareCardView (1080x1620 portrait / 1620x1080 landscape)
+// MARK: - Concept 3: Tide Line ShareCardView (1080x1620 portrait / 1080x1080 square / 1620x1080 landscape)
 
 private struct TideGeometry {
     struct Band: Identifiable {
@@ -1646,8 +1822,10 @@ private struct TideGeometry {
     let verticalMargin: CGFloat
     let footerBottomPadding: CGFloat
     let leftColumnWidth: CGFloat
+    let leftColumnHeight: CGFloat
     let vesselRect: CGRect
     let vesselCornerRadius: CGFloat
+    let compositionGap: CGFloat
     let innerRect: CGRect
     let fillLevel: Double
     let vesselLayers: [LiquidGlassVessel.Layer]
@@ -1660,22 +1838,44 @@ private struct TideGeometry {
     private static let inlineMinLayerHeight: CGFloat = 44
     private static let minCardLabelSize: CGFloat = 22
 
-    init(data: ShareCardData, aspect: ShareAspect, showComposition: Bool) {
+    init(
+        data: ShareCardData,
+        aspect: ShareAspect,
+        dimension: BreakdownDimension,
+        showCost: Bool,
+        showRank: Bool,
+        compositionRows: Int,
+        showLayers: Bool
+    ) {
         let size = aspect.canvasSize
         self.canvasSize = size
 
-        let hMargin: CGFloat = 76
-        let vMargin: CGFloat = 72
-        let footerPad: CGFloat = 24
+        let hMargin: CGFloat
+        let vMargin: CGFloat
+        let footerPad: CGFloat
         let cornerRadius: CGFloat
         let resolvedVesselRect: CGRect
         let leftColWidth: CGFloat
+        let leftColHeight: CGFloat
+        let compGap: CGFloat
 
         switch aspect {
-        case .portrait, .square:
+        case .portrait:
+            hMargin = 76
+            vMargin = 72
+            footerPad = 24
+            compGap = 22
             let contentWidth = size.width - hMargin * 2
-            let topY: CGFloat = 660
-            let bottomY: CGFloat = size.height - 76
+            let topContentBottom: CGFloat = 530
+                + (showCost ? 58 : 0)
+                + (showRank ? 54 : 0)
+            let topY = max(580, topContentBottom + (data.isPartialScope ? 76 : 36))
+            let compositionReserve: CGFloat = switch compositionRows {
+            case 0: 0
+            case 1: 60 + compGap
+            default: 100 + compGap
+            }
+            let bottomY = size.height - 76 - compositionReserve
             cornerRadius = 44
             resolvedVesselRect = CGRect(
                 x: hMargin,
@@ -1684,13 +1884,50 @@ private struct TideGeometry {
                 height: max(80, bottomY - topY)
             )
             leftColWidth = contentWidth
+            leftColHeight = max(320, bottomY - vMargin)
+
+        case .square:
+            hMargin = 68
+            vMargin = 54
+            footerPad = 22
+            compGap = 16
+            let contentWidth = size.width - hMargin * 2
+            let topContentBottom: CGFloat = 402
+                + (showCost ? 46 : 0)
+                + (showRank ? 42 : 0)
+            let topY = topContentBottom + (data.isPartialScope ? 66 : 26)
+            let compositionReserve: CGFloat = switch compositionRows {
+            case 0: 0
+            case 1: 50 + compGap
+            default: 84 + compGap
+            }
+            let bottomY = size.height - 64 - compositionReserve
+            cornerRadius = 38
+            resolvedVesselRect = CGRect(
+                x: hMargin,
+                y: topY,
+                width: contentWidth,
+                height: max(80, bottomY - topY)
+            )
+            leftColWidth = contentWidth
+            leftColHeight = max(260, bottomY - vMargin)
 
         case .landscape:
+            hMargin = 76
+            vMargin = 72
+            footerPad = 24
+            compGap = 20
             let contentWidth = size.width - hMargin * 2
             let vesselWidth = (contentWidth * 0.55).rounded()
             let vesselX = size.width - hMargin - vesselWidth
             let topY: CGFloat = data.isPartialScope ? (vMargin + 44) : vMargin
-            let bottomY: CGFloat = size.height - 76
+            let compositionReserve: CGFloat = switch compositionRows {
+            case 0: 0
+            case 1: 50 + compGap
+            default: 84 + compGap
+            }
+            let baseBottomY = size.height - 76
+            let bottomY = baseBottomY - compositionReserve
             let columnGap: CGFloat = 52
             cornerRadius = 42
             resolvedVesselRect = CGRect(
@@ -1700,14 +1937,17 @@ private struct TideGeometry {
                 height: max(80, bottomY - topY)
             )
             leftColWidth = max(320, vesselX - hMargin - columnGap)
+            leftColHeight = max(320, baseBottomY - vMargin)
         }
 
         self.horizontalMargin = hMargin
         self.verticalMargin = vMargin
         self.footerBottomPadding = footerPad
         self.leftColumnWidth = leftColWidth
+        self.leftColumnHeight = leftColHeight
         self.vesselCornerRadius = cornerRadius
         self.vesselRect = resolvedVesselRect
+        self.compositionGap = compGap
 
         let effectiveFill: Double
         if data.counts.total <= 0 {
@@ -1719,7 +1959,7 @@ private struct TideGeometry {
         }
         self.fillLevel = effectiveFill
 
-        let rawItems = data.unmergedStrata
+        let rawItems = data.unmergedStrata(dimension: dimension)
         let rawSum = rawItems.reduce(Int64(0)) { $0 + $1.tokens }
         self.strataTotalTokens = max(rawSum, data.counts.total)
 
@@ -1735,7 +1975,7 @@ private struct TideGeometry {
 
         // Merge strata shorter than 44pt into a single "Other N" layer so no external micro labels remain.
         let resolvedStrata: [ShareCardData.Stratum]
-        if showComposition, effectiveFill > 0, !rawItems.isEmpty, rawSum > 0, liquidTotalHeight > 0 {
+        if showLayers, effectiveFill > 0, !rawItems.isEmpty, rawSum > 0, liquidTotalHeight > 0 {
             var tall: [ShareCardData.Stratum] = []
             var thin: [ShareCardData.Stratum] = []
             for item in rawItems {
@@ -1769,7 +2009,7 @@ private struct TideGeometry {
         let layers: [LiquidGlassVessel.Layer]
         if effectiveFill <= 0 {
             layers = []
-        } else if showComposition, !resolvedStrata.isEmpty, sum > 0 {
+        } else if showLayers, !resolvedStrata.isEmpty, sum > 0 {
             layers = resolvedStrata.map { item in
                 LiquidGlassVessel.Layer(
                     color: item.color,
@@ -1793,12 +2033,16 @@ private struct TideGeometry {
         self.meniscusY = finalMetrics.meniscusCenterY
         self.meniscusHeight = finalMetrics.meniscusHeight
 
-        guard showComposition, effectiveFill > 0, !resolvedStrata.isEmpty, sum > 0 else {
+        guard showLayers, effectiveFill > 0, !resolvedStrata.isEmpty, sum > 0 else {
             self.bands = []
             return
         }
 
-        let maxNameSize: CGFloat = aspect == .portrait ? 33 : 31
+        let maxNameSize: CGFloat = switch aspect {
+        case .portrait: 33
+        case .square: 29
+        case .landscape: 31
+        }
         var computedBands: [Band] = []
         computedBands.reserveCapacity(resolvedStrata.count)
 
@@ -1935,7 +2179,7 @@ struct CosmosShareCard: View {
 
             if rank != nil {
                 Text("Rank is an estimate derived from public usage sources.")
-                    .font(.system(size: 13))
+                    .font(.system(size: 18))
                     .foregroundStyle(CosmosPalette.ink3)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -1952,6 +2196,14 @@ struct CosmosShareCard: View {
         }
     }
 
+    private var activeCompositionCategories: [TokenCategory] {
+        CosmosScene.categoryOrder.filter { data.counts[$0] > 0 }
+    }
+
+    private var hasComposition: Bool {
+        !activeCompositionCategories.isEmpty || data.counts.uncategorized > 0
+    }
+
     private var wideDetails: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -1965,7 +2217,7 @@ struct CosmosShareCard: View {
             }
             hairline.padding(.top, 20)
             ranking.padding(.top, 20)
-            if showComposition {
+            if showComposition, hasComposition {
                 hairline.padding(.top, 20)
                 composition.padding(.top, 18)
             }
@@ -1994,7 +2246,7 @@ struct CosmosShareCard: View {
 
             VStack(alignment: .leading, spacing: 0) {
                 ranking
-                if showComposition {
+                if showComposition, hasComposition {
                     hairline.padding(.top, 18)
                     composition.padding(.top, 16)
                 }
@@ -2019,7 +2271,7 @@ struct CosmosShareCard: View {
                     .lineLimit(1)
             }
 
-            Text(periodDescription)
+            Text(data.periodDescription(locale: locale))
                 .font(.system(size: 20))
                 .foregroundStyle(CosmosPalette.ink3)
                 .lineLimit(1)
@@ -2047,7 +2299,7 @@ struct CosmosShareCard: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)
 
-                Text(verbatim: "Token")
+                Text("Token")
                     .font(.system(size: 20, weight: .regular))
                     .foregroundStyle(CosmosPalette.ink3)
                     .lineLimit(1)
@@ -2186,7 +2438,7 @@ struct CosmosShareCard: View {
                 .foregroundStyle(CosmosPalette.ink2)
 
             VStack(alignment: .leading, spacing: 8) {
-                ForEach(CosmosScene.categoryOrder) { category in
+                ForEach(activeCompositionCategories) { category in
                     let value = data.counts[category]
                     compositionRow(
                         color: Self.categoryColors[category] ?? CosmosPalette.ink3,
@@ -2231,23 +2483,6 @@ struct CosmosShareCard: View {
                 .frame(width: 58, alignment: .trailing)
         }
     }
-
-    private var periodDescription: LocalizedStringKey {
-        let start = data.summary.start
-        switch data.summary.period {
-        case .day:
-            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .week:
-            let today = Calendar.current.date(byAdding: .day, value: -1, to: data.summary.end) ?? start
-            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .month:
-            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
-        case .year:
-            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
-        case .all:
-            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
-        }
-    }
 }
 
 struct ShareCardView: View {
@@ -2255,6 +2490,7 @@ struct ShareCardView: View {
     let aspect: ShareAspect
     let showCost: Bool
     let showComposition: Bool
+    var theme: AppTheme = .liquidGlass
     var dimension: BreakdownDimension = .sources
     var liquidView: LiquidView = .confluence
     var lensBuckets: [LensBucket] = []
@@ -2262,19 +2498,25 @@ struct ShareCardView: View {
     var rank: Double? = nil
     var inscription = ""
     var signature = ""
+    var reduceTransparencyOverride: Bool? = nil
+    var colorSchemeContrastOverride: ColorSchemeContrast? = nil
 
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     private var isDark: Bool { scheme == .dark }
+    private var effectiveReduceTransparency: Bool { reduceTransparencyOverride ?? reduceTransparency }
+    private var effectiveContrast: ColorSchemeContrast { colorSchemeContrastOverride ?? contrast }
 
     private var usesLensGraphic: Bool {
         liquidView == .lens
     }
 
     var body: some View {
-        if ThemeRuntime.isCosmos {
+        switch theme {
+        case .cosmos:
             CosmosShareCard(
                 data: data,
                 aspect: aspect,
@@ -2284,20 +2526,23 @@ struct ShareCardView: View {
                 snapshot: cosmosSnapshot,
                 rank: rank
             )
-        } else if ThemeRuntime.isField {
+        case .field:
             FieldShareCard(
                 data: data,
                 aspect: aspect,
                 showCost: showCost,
                 showComposition: showComposition,
+                dimension: dimension,
                 rank: rank,
                 inscription: inscription,
                 signature: signature
             )
-        } else if usesLensGraphic {
-            lensCard
-        } else {
-            tideCard
+        case .liquidGlass:
+            if usesLensGraphic {
+                lensCard
+            } else {
+                tideCard
+            }
         }
     }
 
@@ -2317,7 +2562,7 @@ struct ShareCardView: View {
                 hasUsage: data.counts.total > 0,
                 bloomRect: lensBloomRect(for: aspect),
                 isDark: isDark,
-                reduceTransparency: reduceTransparency
+                reduceTransparency: effectiveReduceTransparency
             )
 
             switch aspect {
@@ -2351,12 +2596,12 @@ struct ShareCardView: View {
             HStack(alignment: .center, spacing: 24) {
                 wordmarkRow
                 Spacer(minLength: 20)
-                lensHeaderTimeLabel(snapshot: snapshot)
-                    .font(.system(size: 33, weight: .medium))
-                    .foregroundStyle(Palette.ink2)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.80)
+                lensHeaderTimeLabel(
+                    snapshot: snapshot,
+                    alignment: .trailing,
+                    primarySize: 33,
+                    secondarySize: 24
+                )
             }
 
             headlineRow
@@ -2378,9 +2623,13 @@ struct ShareCardView: View {
                     .padding(.top, 18)
             }
 
-            LensShareGraphic(snapshot: snapshot)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 34)
+            LensShareGraphic(
+                snapshot: snapshot,
+                reduceTransparencyOverride: effectiveReduceTransparency,
+                colorSchemeContrastOverride: effectiveContrast
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 34)
 
             if showComposition, !compositionParts.isEmpty {
                 lensCompositionStrip(compact: false)
@@ -2411,7 +2660,406 @@ struct ShareCardView: View {
 
                 Spacer(minLength: 16)
 
-                lensHeaderTimeLabel(snapshot: snapshot)
+                lensHeaderTimeLabel(
+                    snapshot: snapshot,
+                    alignment: .trailing,
+                    primarySize: 29,
+                    secondarySize: 21
+                )
+            }
+
+            HStack(alignment: .center, spacing: 14) {
+                Circle()
+                    .fill(data.accentColor)
+                    .frame(width: 17, height: 17)
+                    .accessibilityHidden(true)
+
+                data.headlineText(
+                    locale: locale,
+                    modelFont: .system(size: 29, weight: .semibold, design: .monospaced)
+                )
+                .font(.system(size: 30, weight: .semibold))
+                .foregroundStyle(Palette.ink2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .truncationMode(.middle)
+            }
+            .padding(.top, 20)
+
+            heroBlock(numberSize: 120, unitSize: 60, tokenLabelSize: 32)
+                .padding(.top, 8)
+
+            if showCost {
+                costRow(amountSize: 31, noteSize: 26)
+                    .padding(.top, 8)
+            }
+
+            lensSquareSupportingFacts
+                .padding(.top, 16)
+
+            if let rank {
+                Text("Last 30 days · about top \(UsageRank.formatted(rank))")
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.80)
+                    .padding(.top, 12)
+            }
+
+            LensShareGraphic(
+                snapshot: snapshot,
+                reduceTransparencyOverride: effectiveReduceTransparency,
+                colorSchemeContrastOverride: effectiveContrast
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.top, 22)
+
+            if showComposition, !compositionParts.isEmpty {
+                lensCompositionStrip(compact: true)
+                    .padding(.top, 16)
+            }
+
+            lensFooterRow(rankFontSize: 20, dateFontSize: 22)
+                .padding(.top, 16)
+        }
+        .padding(.horizontal, 68)
+        .padding(.top, 54)
+        .padding(.bottom, 22)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private func lensLandscapeContent(snapshot: LensShareSnapshot, size: CGSize) -> some View {
+        let hMargin: CGFloat = 76
+        let contentWidth = size.width - hMargin * 2
+        let rightWidth = (contentWidth * 0.55).rounded()
+        let columnGap: CGFloat = 52
+        let leftWidth = max(320, contentWidth - rightWidth - columnGap)
+
+        return VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: columnGap) {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        wordmarkRow
+
+                        lensHeaderTimeLabel(
+                            snapshot: snapshot,
+                            alignment: .leading,
+                            primarySize: 31,
+                            secondarySize: 23
+                        )
+                    }
+
+                    headlineRow
+                        .padding(.top, 38)
+
+                    heroBlock(numberSize: 144, unitSize: 72, tokenLabelSize: 36)
+                        .padding(.top, 16)
+
+                    if showCost {
+                        costRow(amountSize: 36, noteSize: 30)
+                            .padding(.top, 12)
+                    }
+
+                    Spacer(minLength: 20)
+
+                    Rectangle()
+                        .fill(Palette.hairline)
+                        .frame(height: 2)
+
+                    landscapeSupportingFacts
+                        .padding(.top, 22)
+
+                    if let rank {
+                        rankRow(rank)
+                            .padding(.top, 18)
+                    }
+                }
+                .frame(minWidth: leftWidth, maxWidth: leftWidth, maxHeight: .infinity, alignment: .topLeading)
+
+                VStack(alignment: .leading, spacing: 20) {
+                    LensShareGraphic(
+                        snapshot: snapshot,
+                        reduceTransparencyOverride: effectiveReduceTransparency,
+                        colorSchemeContrastOverride: effectiveContrast
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if showComposition, !compositionParts.isEmpty {
+                        lensCompositionStrip(compact: true)
+                    }
+                }
+                .frame(minWidth: rightWidth, maxWidth: rightWidth, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            lensFooterRow(rankFontSize: 22, dateFontSize: 25)
+                .padding(.top, 24)
+        }
+        .padding(.horizontal, hMargin)
+        .padding(.top, 72)
+        .padding(.bottom, 24)
+        .frame(width: size.width, height: size.height, alignment: .topLeading)
+    }
+
+    private func lensHeaderTimeLabel(
+        snapshot: LensShareSnapshot,
+        alignment: HorizontalAlignment,
+        primarySize: CGFloat,
+        secondarySize: CGFloat
+    ) -> some View {
+        VStack(alignment: alignment, spacing: 4) {
+            Text(data.periodDescription(locale: locale))
+                .font(.system(size: primarySize, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.80)
+
+            if let frozenTime = snapshot.frozenTimeText(locale: locale) {
+                Text(verbatim: String(localized: "Peak · \(frozenTime)", locale: locale))
+                    .font(.system(size: secondarySize, weight: .medium))
+                    .foregroundStyle(Palette.ink3)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.80)
+            }
+        }
+    }
+
+    private var lensSquareSupportingFacts: some View {
+        HStack(alignment: .top, spacing: 44) {
+            ForEach(data.supportingFacts) { fact in
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(fact.label)
+                        .font(.system(size: 24, weight: .medium))
+                        .foregroundStyle(Palette.ink2)
+                        .lineLimit(1)
+
+                    Text(verbatim: fact.value)
+                        .font(fact.isMonospacedValue
+                            ? .system(size: 30, weight: .semibold, design: .monospaced)
+                            : .system(size: 32, weight: .semibold))
+                        .foregroundStyle(Palette.ink1)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.70)
+                        .truncationMode(.middle)
+                }
+                .layoutPriority(fact.isMonospacedValue ? 0 : 1)
+            }
+        }
+    }
+
+    private struct CompositionPart: Identifiable {
+        let id: String
+        let label: LocalizedStringKey
+        let tokens: Int64
+        let color: Color
+    }
+
+    private var compositionParts: [CompositionPart] {
+        TokenCategory.allCases.compactMap { category in
+            let value = data.counts[category]
+            return value > 0
+                ? CompositionPart(id: category.rawValue, label: category.title, tokens: value, color: Palette.color(for: category))
+                : nil
+        } + (data.counts.uncategorized > 0
+            ? [CompositionPart(id: "uncategorized", label: "Uncategorized", tokens: data.counts.uncategorized, color: Palette.ink3.opacity(effectiveContrast == .increased ? 0.80 : 0.45))]
+            : [])
+    }
+
+    private func lensCompositionStrip(compact: Bool) -> some View {
+        let total = data.counts.total
+        let divisor = max(1, total)
+        let parts = compositionParts
+        let barHeight: CGFloat = compact ? 12 : 14
+
+        let rows: [[CompositionPart]] = parts.count >= 4
+            ? [
+                Array(parts.prefix((parts.count + 1) / 2)),
+                Array(parts.dropFirst((parts.count + 1) / 2)),
+            ]
+            : (parts.isEmpty ? [] : [parts])
+
+        return VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+            Canvas { context, size in
+                let fullRect = CGRect(origin: .zero, size: size)
+                let capsule = Path(roundedRect: fullRect, cornerRadius: barHeight * 0.5, style: .continuous)
+                context.fill(capsule, with: .color(Palette.barTrack))
+
+                guard !parts.isEmpty else { return }
+
+                context.drawLayer { layer in
+                    layer.clip(to: capsule)
+                    let gap: CGFloat = 2.5
+                    let totalGaps = CGFloat(max(0, parts.count - 1)) * gap
+                    let usable = max(0, size.width - totalGaps)
+                    var cursorX: CGFloat = 0
+
+                    for (idx, seg) in parts.enumerated() {
+                        let rawW = usable * CGFloat(seg.tokens) / CGFloat(divisor)
+                        let w = idx == parts.count - 1
+                            ? max(2, size.width - cursorX)
+                            : max(2, rawW)
+                        let segRect = CGRect(x: cursorX, y: 0, width: w, height: size.height)
+                        layer.fill(
+                            Path(roundedRect: segRect, cornerRadius: 3, style: .continuous),
+                            with: .color(seg.color)
+                        )
+                        cursorX += w + gap
+                    }
+                }
+            }
+            .frame(height: barHeight)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    HStack(spacing: compact ? 14 : 18) {
+                        ForEach(row) { part in
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(part.color)
+                                    .frame(width: compact ? 9.5 : 11, height: compact ? 9.5 : 11)
+                                    .accessibilityHidden(true)
+
+                                Text(part.label)
+                                    .foregroundStyle(Palette.ink2)
+
+                                Text(verbatim: Share.percent(part.tokens, of: total))
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(Palette.ink1)
+                                    .monospacedDigit()
+                            }
+                            .font(.system(size: compact ? 19.5 : 22, weight: .medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func lensFooterRow(rankFontSize: CGFloat, dateFontSize: CGFloat) -> some View {
+        let dateText = Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day())
+
+        return HStack(alignment: .firstTextBaseline, spacing: 20) {
+            if rank != nil {
+                Text("Rank is an estimate derived from public usage sources.")
+                    .font(.system(size: rankFontSize, weight: .regular))
+                    .foregroundStyle(Palette.ink3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            Spacer(minLength: 0)
+            Text(verbatim: dateText)
+                .font(.system(size: dateFontSize, weight: .medium))
+                .foregroundStyle(Palette.ink3)
+                .monospacedDigit()
+                .layoutPriority(1)
+        }
+    }
+
+    private var tideCard: some View {
+        let parts = compositionParts
+        let showStrip = showComposition && !parts.isEmpty
+        let compositionRows = showStrip ? (parts.count >= 4 ? 2 : 1) : 0
+        let geometry = TideGeometry(
+            data: data,
+            aspect: aspect,
+            dimension: dimension,
+            showCost: showCost,
+            showRank: rank != nil,
+            compositionRows: compositionRows,
+            showLayers: showComposition
+        )
+
+        return ZStack(alignment: .topLeading) {
+            ShareTideVesselCanvas(
+                data: data,
+                geometry: geometry,
+                isDark: isDark,
+                reduceTransparency: effectiveReduceTransparency,
+                increasedContrast: effectiveContrast == .increased
+            )
+
+            switch aspect {
+            case .portrait:
+                portraitTopContent(geometry: geometry)
+            case .square:
+                squareTopContent(geometry: geometry)
+            case .landscape:
+                landscapeLeftColumn(geometry: geometry)
+            }
+
+            if data.isPartialScope {
+                brimAndShareCallouts(geometry: geometry)
+            }
+
+            inlineStrataLabels(geometry: geometry)
+
+            if showStrip {
+                lensCompositionStrip(compact: aspect != .portrait)
+                    .frame(width: geometry.vesselRect.width, alignment: .leading)
+                    .offset(
+                        x: geometry.vesselRect.minX,
+                        y: geometry.vesselRect.maxY + geometry.compositionGap
+                    )
+            }
+
+            footerDateOverlay(geometry: geometry)
+        }
+        .frame(width: aspect.canvasSize.width, height: aspect.canvasSize.height)
+    }
+
+    // MARK: - Top & side content layouts
+
+    private func portraitTopContent(geometry: TideGeometry) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            cardHeader
+
+            headlineRow
+                .padding(.top, 32)
+
+            heroBlock(numberSize: 164, unitSize: 82, tokenLabelSize: 38)
+                .padding(.top, 12)
+
+            if showCost {
+                costRow(amountSize: 38, noteSize: 32)
+                    .padding(.top, 10)
+            }
+
+            portraitSupportingFacts
+                .padding(.top, 24)
+
+            if let rank {
+                rankRow(rank)
+                    .padding(.top, 18)
+            }
+        }
+        .padding(.horizontal, geometry.horizontalMargin)
+        .padding(.top, geometry.verticalMargin)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func squareTopContent(geometry: TideGeometry) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 20) {
+                HStack(alignment: .center, spacing: 11) {
+                    ShareBrandLogo(theme: .liquidGlass, size: 48)
+                        .accessibilityHidden(true)
+
+                    Text(verbatim: "Token Taken")
+                        .font(.system(size: 32, weight: .semibold))
+                        .tracking(-0.4)
+                        .foregroundStyle(Palette.ink1)
+                }
+
+                Spacer(minLength: 16)
+
+                Text(data.periodDescription(locale: locale))
                     .font(.system(size: 29, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                     .monospacedDigit()
@@ -2457,283 +3105,6 @@ struct ShareCardView: View {
                     .minimumScaleFactor(0.80)
                     .padding(.top, 12)
             }
-
-            LensShareGraphic(snapshot: snapshot)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, 22)
-
-            if showComposition, !compositionParts.isEmpty {
-                lensCompositionStrip(compact: true)
-                    .padding(.top, 16)
-            }
-
-            lensFooterRow(rankFontSize: 20, dateFontSize: 22)
-                .padding(.top, 16)
-        }
-        .padding(.horizontal, 68)
-        .padding(.top, 54)
-        .padding(.bottom, 22)
-        .frame(width: size.width, height: size.height, alignment: .topLeading)
-    }
-
-    private func lensLandscapeContent(snapshot: LensShareSnapshot, size: CGSize) -> some View {
-        let hMargin: CGFloat = 76
-        let contentWidth = size.width - hMargin * 2
-        let rightWidth = (contentWidth * 0.55).rounded()
-        let columnGap: CGFloat = 52
-        let leftWidth = max(320, contentWidth - rightWidth - columnGap)
-
-        return VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: columnGap) {
-                VStack(alignment: .leading, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        wordmarkRow
-
-                        lensHeaderTimeLabel(snapshot: snapshot)
-                            .font(.system(size: 31, weight: .medium))
-                            .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.80)
-                    }
-
-                    headlineRow
-                        .padding(.top, 38)
-
-                    heroBlock(numberSize: 144, unitSize: 72, tokenLabelSize: 36)
-                        .padding(.top, 16)
-
-                    if showCost {
-                        costRow(amountSize: 36, noteSize: 30)
-                            .padding(.top, 12)
-                    }
-
-                    Spacer(minLength: 20)
-
-                    Rectangle()
-                        .fill(Palette.hairline)
-                        .frame(height: 2)
-
-                    landscapeSupportingFacts
-                        .padding(.top, 22)
-
-                    if let rank {
-                        rankRow(rank)
-                            .padding(.top, 18)
-                    }
-                }
-                .frame(minWidth: leftWidth, maxWidth: leftWidth, maxHeight: .infinity, alignment: .topLeading)
-
-                VStack(alignment: .leading, spacing: 20) {
-                    LensShareGraphic(snapshot: snapshot)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    if showComposition, !compositionParts.isEmpty {
-                        lensCompositionStrip(compact: true)
-                    }
-                }
-                .frame(minWidth: rightWidth, maxWidth: rightWidth, maxHeight: .infinity, alignment: .topLeading)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            lensFooterRow(rankFontSize: 22, dateFontSize: 25)
-                .padding(.top, 24)
-        }
-        .padding(.horizontal, hMargin)
-        .padding(.top, 72)
-        .padding(.bottom, 24)
-        .frame(width: size.width, height: size.height, alignment: .topLeading)
-    }
-
-    @ViewBuilder
-    private func lensHeaderTimeLabel(snapshot: LensShareSnapshot) -> some View {
-        if let frozenTime = snapshot.frozenTimeText(locale: locale) {
-            Text(verbatim: String(localized: "Peak · \(frozenTime)", locale: locale))
-        } else {
-            Text(periodDescription)
-        }
-    }
-
-    private var lensSquareSupportingFacts: some View {
-        HStack(alignment: .top, spacing: 44) {
-            ForEach(data.supportingFacts) { fact in
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(fact.label)
-                        .font(.system(size: 24, weight: .medium))
-                        .foregroundStyle(Palette.ink2)
-                        .lineLimit(1)
-
-                    Text(verbatim: fact.value)
-                        .font(fact.isMonospacedValue
-                            ? .system(size: 30, weight: .semibold, design: .monospaced)
-                            : .system(size: 32, weight: .semibold))
-                        .foregroundStyle(Palette.ink1)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.70)
-                        .truncationMode(.middle)
-                }
-                .layoutPriority(fact.isMonospacedValue ? 0 : 1)
-            }
-        }
-    }
-
-    private struct CompositionPart: Identifiable {
-        let id: String
-        let label: LocalizedStringKey
-        let tokens: Int64
-        let color: Color
-    }
-
-    private var compositionParts: [CompositionPart] {
-        TokenCategory.allCases.compactMap { category in
-            let value = data.counts[category]
-            return value > 0
-                ? CompositionPart(id: category.rawValue, label: category.title, tokens: value, color: Palette.color(for: category))
-                : nil
-        } + (data.counts.uncategorized > 0
-            ? [CompositionPart(id: "uncategorized", label: "Uncategorized", tokens: data.counts.uncategorized, color: Palette.ink3.opacity(0.45))]
-            : [])
-    }
-
-    private func lensCompositionStrip(compact: Bool) -> some View {
-        let total = data.counts.total
-        let divisor = max(1, total)
-        let parts = compositionParts
-        let barHeight: CGFloat = compact ? 12 : 14
-
-        return VStack(alignment: .leading, spacing: compact ? 10 : 12) {
-            Canvas { context, size in
-                let fullRect = CGRect(origin: .zero, size: size)
-                let capsule = Path(roundedRect: fullRect, cornerRadius: barHeight * 0.5, style: .continuous)
-                context.fill(capsule, with: .color(Palette.barTrack))
-
-                guard !parts.isEmpty else { return }
-
-                context.drawLayer { layer in
-                    layer.clip(to: capsule)
-                    let gap: CGFloat = 2.5
-                    let totalGaps = CGFloat(max(0, parts.count - 1)) * gap
-                    let usable = max(0, size.width - totalGaps)
-                    var cursorX: CGFloat = 0
-
-                    for (idx, seg) in parts.enumerated() {
-                        let rawW = usable * CGFloat(seg.tokens) / CGFloat(divisor)
-                        let w = idx == parts.count - 1
-                            ? max(2, size.width - cursorX)
-                            : max(2, rawW)
-                        let segRect = CGRect(x: cursorX, y: 0, width: w, height: size.height)
-                        layer.fill(
-                            Path(roundedRect: segRect, cornerRadius: 3, style: .continuous),
-                            with: .color(seg.color)
-                        )
-                        cursorX += w + gap
-                    }
-                }
-            }
-            .frame(height: barHeight)
-            .accessibilityHidden(true)
-
-            HStack(spacing: compact ? 12 : 18) {
-                ForEach(parts) { part in
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(part.color)
-                            .frame(width: compact ? 9.5 : 11, height: compact ? 9.5 : 11)
-                            .accessibilityHidden(true)
-
-                        Text(part.label)
-                            .foregroundStyle(Palette.ink2)
-
-                        Text(verbatim: Share.percent(part.tokens, of: total))
-                            .fontWeight(.semibold)
-                            .foregroundStyle(Palette.ink1)
-                            .monospacedDigit()
-                    }
-                    .font(.system(size: compact ? 19.5 : 22, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                }
-            }
-        }
-    }
-
-    private func lensFooterRow(rankFontSize: CGFloat, dateFontSize: CGFloat) -> some View {
-        let dateText = Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day())
-
-        return HStack(alignment: .firstTextBaseline, spacing: 20) {
-            if rank != nil {
-                Text("Rank is an estimate derived from public usage sources.")
-                    .font(.system(size: rankFontSize, weight: .regular))
-                    .foregroundStyle(Palette.ink3)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            Spacer(minLength: 0)
-            Text(verbatim: dateText)
-                .font(.system(size: dateFontSize, weight: .medium))
-                .foregroundStyle(Palette.ink3)
-                .monospacedDigit()
-                .layoutPriority(1)
-        }
-    }
-
-    private var tideCard: some View {
-        let geometry = TideGeometry(data: data, aspect: aspect, showComposition: showComposition)
-
-        return ZStack(alignment: .topLeading) {
-            ShareTideVesselCanvas(
-                data: data,
-                geometry: geometry,
-                showComposition: showComposition,
-                isDark: isDark,
-                reduceTransparency: reduceTransparency
-            )
-
-            switch aspect {
-            case .portrait, .square:
-                portraitTopContent(geometry: geometry)
-            case .landscape:
-                landscapeLeftColumn(geometry: geometry)
-            }
-
-            if data.isPartialScope {
-                brimAndShareCallouts(geometry: geometry)
-            }
-
-            if showComposition {
-                inlineStrataLabels(geometry: geometry)
-            }
-
-            footerDateOverlay(geometry: geometry)
-        }
-        .frame(width: aspect.canvasSize.width, height: aspect.canvasSize.height)
-    }
-
-    // MARK: - Top & side content layouts
-
-    private func portraitTopContent(geometry: TideGeometry) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            cardHeader
-
-            headlineRow
-                .padding(.top, 32)
-
-            heroBlock(numberSize: 164, unitSize: 82, tokenLabelSize: 38)
-                .padding(.top, 12)
-
-            if showCost {
-                costRow(amountSize: 38, noteSize: 32)
-                    .padding(.top, 10)
-            }
-
-            portraitSupportingFacts
-                .padding(.top, 24)
-
-            if let rank {
-                rankRow(rank)
-                    .padding(.top, 18)
-            }
         }
         .padding(.horizontal, geometry.horizontalMargin)
         .padding(.top, geometry.verticalMargin)
@@ -2771,7 +3142,7 @@ struct ShareCardView: View {
         }
         .frame(
             width: geometry.leftColumnWidth,
-            height: max(320, geometry.vesselRect.maxY - geometry.verticalMargin),
+            height: geometry.leftColumnHeight,
             alignment: .topLeading
         )
         .offset(x: geometry.horizontalMargin, y: geometry.verticalMargin)
@@ -2797,7 +3168,7 @@ struct ShareCardView: View {
 
             Spacer(minLength: 20)
 
-            Text(periodDescription)
+            Text(data.periodDescription(locale: locale))
                 .font(.system(size: 33, weight: .medium))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
@@ -2810,7 +3181,7 @@ struct ShareCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             wordmarkRow
 
-            Text(periodDescription)
+            Text(data.periodDescription(locale: locale))
                 .font(.system(size: 31, weight: .medium))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
@@ -2888,6 +3259,10 @@ struct ShareCardView: View {
                     .foregroundStyle(Palette.ink2)
 
                 if data.unpricedTokens > 0 {
+                    Text(verbatim: "·")
+                        .font(.system(size: noteSize - 4, weight: .medium))
+                        .foregroundStyle(Palette.ink3)
+
                     Text("\(TokenFormat.short(data.unpricedTokens)) unpriced")
                         .font(.system(size: noteSize - 4, weight: .medium))
                         .foregroundStyle(Palette.ink3)
@@ -2961,7 +3336,9 @@ struct ShareCardView: View {
 
     @ViewBuilder
     private func brimAndShareCallouts(geometry: TideGeometry) -> some View {
-        let labelHeight: CGFloat = 36
+        let isSquare = aspect == .square
+        let labelHeight: CGFloat = isSquare ? 32 : 36
+        let calloutFontSize: CGFloat = isSquare ? 24 : 28
         let topCalloutBottomY = geometry.vesselRect.minY - 10
         let shareText = Share.percent(data.counts.total, of: data.summary.total.total)
         let meniscusTopY = geometry.meniscusY - geometry.meniscusHeight * 0.5
@@ -2977,7 +3354,7 @@ struct ShareCardView: View {
             HStack {
                 Spacer(minLength: 0)
                 brimPeriodTotalText
-                    .font(.system(size: 28, weight: .medium))
+                    .font(.system(size: calloutFontSize, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                     .monospacedDigit()
                     .lineLimit(1)
@@ -2986,7 +3363,7 @@ struct ShareCardView: View {
             .offset(x: geometry.vesselRect.minX, y: topCalloutBottomY - labelHeight)
 
             Text(verbatim: shareText)
-                .font(.system(size: 28, weight: .semibold))
+                .font(.system(size: calloutFontSize, weight: .semibold))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -3019,7 +3396,7 @@ struct ShareCardView: View {
                             .lineLimit(1)
                             .fixedSize()
                     }
-                    .shadow(color: .black.opacity(reduceTransparency ? 0 : 0.34), radius: 5, x: 0, y: 1.5)
+                    .shadow(color: .black.opacity(effectiveReduceTransparency ? 0 : 0.34), radius: 5, x: 0, y: 1.5)
                     .frame(width: inlineWidth, height: rowHeight, alignment: .center)
                     .offset(x: geometry.innerRect.minX + inlineInsetX, y: midY - rowHeight / 2)
                 }
@@ -3043,20 +3420,21 @@ struct ShareCardView: View {
 
     private func footerDateOverlay(geometry: TideGeometry) -> some View {
         let dateText = Date.now.formatted(.dateTime.locale(locale).year().month(.abbreviated).day())
+        let isSquare = aspect == .square
 
         return VStack {
             Spacer(minLength: 0)
             HStack(alignment: .firstTextBaseline, spacing: 20) {
                 if rank != nil {
                     Text("Rank is an estimate derived from public usage sources.")
-                        .font(.system(size: 22, weight: .regular))
+                        .font(.system(size: isSquare ? 20 : 22, weight: .regular))
                         .foregroundStyle(Palette.ink3)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 }
                 Spacer(minLength: 0)
                 Text(verbatim: dateText)
-                    .font(.system(size: 25, weight: .medium))
+                    .font(.system(size: isSquare ? 22 : 25, weight: .medium))
                     .foregroundStyle(Palette.ink3)
                     .monospacedDigit()
                     .layoutPriority(1)
@@ -3068,23 +3446,6 @@ struct ShareCardView: View {
     }
 
     // MARK: - Formatting helpers
-
-    private var periodDescription: LocalizedStringKey {
-        let start = data.summary.start
-        switch data.summary.period {
-        case .day:
-            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .week:
-            let today = Calendar.current.date(byAdding: .day, value: -1, to: data.summary.end) ?? start
-            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .month:
-            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
-        case .year:
-            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
-        case .all:
-            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
-        }
-    }
 
     private var brimPeriodTotalText: Text {
         let overall = TokenFormat.short(data.summary.total.total)
@@ -3165,9 +3526,9 @@ struct ShareBrandLogo: View {
 private struct ShareTideVesselCanvas: View {
     let data: ShareCardData
     let geometry: TideGeometry
-    let showComposition: Bool
     let isDark: Bool
     let reduceTransparency: Bool
+    let increasedContrast: Bool
 
     var body: some View {
         Canvas { context, size in
@@ -3256,7 +3617,8 @@ private struct ShareTideVesselCanvas: View {
                 layers: geometry.vesselLayers,
                 fillLevel: geometry.fillLevel,
                 isDark: isDark,
-                reduceTransparency: reduceTransparency
+                reduceTransparency: reduceTransparency,
+                increasedContrast: increasedContrast
             )
 
             // 3. Dashed period-total brim line inside the vessel for partial scopes.
@@ -3407,7 +3769,9 @@ private struct ShareSheetBackdrop: View {
     var body: some View {
         if theme == .cosmos {
             CosmosPalette.background
-        } else if reduceTransparency || theme != .liquidGlass {
+        } else if theme == .field {
+            FieldPalette.paper
+        } else if reduceTransparency {
             Palette.solid
         } else {
             let isDark = scheme == .dark
@@ -3447,12 +3811,17 @@ private struct ShareSheetBackdrop: View {
 private struct ShareRoundButtonSurface: ViewModifier {
     let reduceTransparency: Bool
     let isCosmos: Bool
+    let isField: Bool
 
     func body(content: Content) -> some View {
         if isCosmos {
             content
                 .background(Rectangle().fill(CosmosPalette.panel))
                 .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
+        } else if isField {
+            content
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(FieldPalette.panel))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
         } else if reduceTransparency {
             content
                 .background { Circle().fill(Palette.cardSurface) }
@@ -3468,9 +3837,10 @@ private struct SharePillSurface: ViewModifier {
     let isSelected: Bool
     let reduceTransparency: Bool
     let isCosmos: Bool
+    let isField: Bool
 
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: isField ? 8 : Radius.inner, style: .continuous)
         if isCosmos {
             content
                 .background(Rectangle().fill(isSelected ? CosmosPalette.selection : CosmosPalette.panel))
@@ -3479,6 +3849,15 @@ private struct SharePillSurface: ViewModifier {
                     Rectangle()
                         .fill(isSelected ? CosmosPalette.accent : Color.clear)
                         .frame(height: 2)
+                }
+        } else if isField {
+            content
+                .background { shape.fill(FieldPalette.panel) }
+                .overlay {
+                    shape.strokeBorder(
+                        isSelected ? FieldPalette.accent : FieldPalette.rule,
+                        lineWidth: 1
+                    )
                 }
         } else if reduceTransparency {
             content
@@ -3507,6 +3886,8 @@ private struct ShareSegmentSurface: ViewModifier {
     let namespace: Namespace.ID
     let effectID: String
     let isCosmos: Bool
+    let isField: Bool
+    let showLeadingDivider: Bool
 
     func body(content: Content) -> some View {
         if isCosmos {
@@ -3517,6 +3898,27 @@ private struct ShareSegmentSurface: ViewModifier {
                         .fill(isSelected ? CosmosPalette.accent : Color.clear)
                         .frame(height: 2)
                 }
+                .overlay(alignment: .leading) {
+                    if showLeadingDivider {
+                        Rectangle()
+                            .fill(CosmosPalette.rule)
+                            .frame(width: 1)
+                    }
+                }
+        } else if isField {
+            if isSelected {
+                content
+                    .background {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(FieldPalette.panel)
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .strokeBorder(FieldPalette.rule, lineWidth: 1)
+                    }
+            } else {
+                content
+            }
         } else if !isSelected {
             content
         } else if reduceTransparency {
@@ -3527,36 +3929,6 @@ private struct ShareSegmentSurface: ViewModifier {
             content
                 .themedGlass(.regular.interactive(), in: .capsule)
                 .glassEffectID(effectID, in: namespace)
-        }
-    }
-}
-
-private struct CosmosShareToggleStyle: ToggleStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.isEnabled) private var isEnabled
-
-    func makeBody(configuration: Configuration) -> some View {
-        Button {
-            configuration.isOn.toggle()
-        } label: {
-            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-                Rectangle()
-                    .fill(configuration.isOn ? CosmosPalette.accent : CosmosPalette.track)
-                    .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-                Rectangle()
-                    .fill(configuration.isOn ? CosmosPalette.page : CosmosPalette.ink2)
-                    .frame(width: 14, height: 14)
-                    .padding(3)
-            }
-            .frame(width: 36, height: 20)
-            .contentShape(Rectangle())
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: configuration.isOn)
-        }
-        .buttonStyle(.plain)
-        .opacity(isEnabled ? 1 : 0.45)
-        .accessibilityRepresentation {
-            Toggle(configuration)
-                .toggleStyle(.switch)
         }
     }
 }

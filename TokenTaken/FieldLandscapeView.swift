@@ -25,7 +25,9 @@ struct FieldPlot: Identifiable, Equatable {
     let value: Int64
     let crop: FieldCrop
     let plan: CGRect
-    var corners: [CGPoint] = []
+    let corners: [CGPoint]
+    let hitPath: Path
+    let bounds: CGRect
 }
 
 /// Geometry shared by the painter and hit testing. The scene is a fixed 1200 × 720 picture scaled to fit.
@@ -48,9 +50,20 @@ struct FieldSceneModel: Equatable {
         plots = cells.map { cell in
             let item = active[cell.index]
             let r = CGRect(x: cell.rect.minX + gap, y: cell.rect.minY + gap, width: max(1, cell.rect.width - gap), height: max(1, cell.rect.height - gap))
-            var plot = FieldPlot(id: item.id, name: item.name, value: item.counts.total, crop: crops[item.id] ?? .wheat, plan: r)
-            plot.corners = [Self.project(r.minX, r.minY), Self.project(r.maxX, r.minY), Self.project(r.maxX, r.maxY), Self.project(r.minX, r.maxY)]
-            return plot
+            let corners = [Self.project(r.minX, r.minY), Self.project(r.maxX, r.minY), Self.project(r.maxX, r.maxY), Self.project(r.minX, r.maxY)]
+            var hitPath = Path()
+            hitPath.addLines(corners)
+            hitPath.closeSubpath()
+            return FieldPlot(
+                id: item.id,
+                name: item.name,
+                value: item.counts.total,
+                crop: crops[item.id] ?? .wheat,
+                plan: r,
+                corners: corners,
+                hitPath: hitPath,
+                bounds: hitPath.boundingRect
+            )
         }
         total = active.reduce(0) { $0 + $1.counts.total }
     }
@@ -63,12 +76,7 @@ struct FieldSceneModel: Equatable {
     }
 
     func plot(at point: CGPoint) -> FieldPlot? {
-        plots.first { plot in
-            var path = Path()
-            path.addLines(plot.corners)
-            path.closeSubpath()
-            return path.contains(point)
-        }
+        plots.first { $0.bounds.contains(point) && $0.hitPath.contains(point) }
     }
 }
 
@@ -100,6 +108,7 @@ struct FieldLandscapeView: View {
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hoverPoint: CGPoint?
+    @State private var tooltipSize = CGSize(width: 220, height: 68)
     @State private var windowVisible = true
     @State private var scene = FieldSceneModelCache()
 
@@ -107,18 +116,65 @@ struct FieldLandscapeView: View {
         let model = scene.model(for: items)
         let chinese = locale.language.languageCode == .chinese
         let season = FieldSeason.of(Date())
+        let isDark = scheme == .dark
         GeometryReader { proxy in
             let scale = proxy.size.width / FieldSceneModel.size.width
-            // Equatable, so pointer moves that do not change the highlighted plot skip repainting the farm.
-            FieldSceneCanvas(model: model, isDark: scheme == .dark, season: season, highlight: highlight, chinese: chinese, compact: compact)
-                .equatable()
-                .background {
-                    // Only the interactive farm needs to know; share cards and the panel render off screen.
-                    if interactive { WindowVisibilityProbe { windowVisible = $0 } }
+            // Static scenery layers are Equatable and independent of highlight, so hover changes only repaint plots and signs.
+            ZStack {
+                FieldBackSceneryCanvas(model: model, isDark: isDark, season: season)
+                    .equatable()
+                FieldPlotsCanvas(model: model, isDark: isDark, season: season, highlight: highlight)
+                    .equatable()
+                FieldFrontSceneryCanvas(isDark: isDark, season: season)
+                    .equatable()
+                FieldSignsCanvas(model: model, isDark: isDark, season: season, highlight: highlight, chinese: chinese, compact: compact)
+                    .equatable()
+            }
+            .accessibilityHidden(true)
+            .background {
+                // Only the interactive farm needs to know; share cards and the panel render off screen.
+                if interactive { WindowVisibilityProbe { windowVisible = $0 } }
+            }
+            .overlay {
+                FieldAmbience(isDark: isDark, season: season, animate: interactive && !reduceMotion, windowVisible: windowVisible)
+                    .accessibilityHidden(true)
+            }
+            .overlay {
+                if model.plots.isEmpty {
+                    Text("No usage in this period")
+                        .font(FieldFont.serif(compact ? 11.5 : 15))
+                        .foregroundStyle(FieldPalette.ink)
+                        .padding(.horizontal, compact ? 10 : 18)
+                        .padding(.vertical, compact ? 6 : 10)
+                        .background(FieldPalette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
+                        .shadow(color: Color.black.opacity(isDark ? 0.28 : 0.10), radius: 6, y: 2)
+                        .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.58)
+                        .allowsHitTesting(false)
                 }
-                .overlay {
-                    FieldAmbience(isDark: scheme == .dark, season: season, animate: interactive && !reduceMotion, windowVisible: windowVisible)
+            }
+            .overlay {
+                if !model.plots.isEmpty {
+                    ZStack(alignment: .topLeading) {
+                        ForEach(model.plots) { plot in
+                            let bounds = plot.bounds
+                            Color.clear
+                                .frame(
+                                    width: max(1, bounds.width * scale),
+                                    height: max(1, bounds.height * scale)
+                                )
+                                .offset(x: bounds.minX * scale, y: bounds.minY * scale)
+                                .accessibilityElement()
+                                .accessibilityLabel(Text(verbatim: "\(plot.name), \(plot.crop.label(locale: locale))"))
+                                .accessibilityValue(
+                                    Text("\(TokenFormat.spoken(plot.value)) tokens, \(FieldFormat.percent(plot.value, of: model.total, locale: locale)) of total")
+                                )
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
                 }
+            }
             .onContinuousHover { phase in
                 guard interactive else { return }
                 switch phase {
@@ -132,8 +188,16 @@ struct FieldLandscapeView: View {
             }
             .overlay(alignment: .topLeading) {
                 if interactive, let point = hoverPoint, let id = highlight, let plot = model.plots.first(where: { $0.id == id }) {
+                    let tipWidth = min(max(tooltipSize.width, 1), 260)
+                    let tipHeight = max(tooltipSize.height, 64)
+                    let x = max(8, min(point.x + 14, proxy.size.width - tipWidth - 8))
+                    let y = max(8, point.y + tipHeight + 20 > proxy.size.height ? point.y - tipHeight - 10 : point.y + 16)
                     FieldTooltip(plot: plot, total: model.total)
-                        .offset(x: min(point.x + 14, proxy.size.width - 230), y: point.y + 64 > proxy.size.height ? point.y - 54 : point.y + 16)
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .onGeometryChange(for: CGSize.self, of: \.size) { newSize in
+                            tooltipSize = newSize
+                        }
+                        .offset(x: x, y: y)
                         .allowsHitTesting(false)
                 }
             }
@@ -141,16 +205,53 @@ struct FieldLandscapeView: View {
         .aspectRatio(FieldSceneModel.size.width / FieldSceneModel.size.height, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            model.plots.isEmpty
-                ? Text("No usage in this period")
-                : Text(verbatim: model.plots.map { "\($0.name), \($0.crop.label(locale: locale)), \(TokenFormat.spoken($0.value))" }.joined(separator: "; "))
-        )
+        .accessibilityElement(children: .contain)
     }
 }
 
-private struct FieldSceneCanvas: View, Equatable {
+private struct FieldBackSceneryCanvas: View, Equatable {
+    let model: FieldSceneModel
+    let isDark: Bool
+    let season: FieldSeason
+
+    var body: some View {
+        Canvas { ctx, size in
+            let scale = size.width / FieldSceneModel.size.width
+            ctx.scaleBy(x: scale, y: scale)
+            FieldPainter(ctx: ctx, model: model, isDark: isDark, season: season, highlight: nil, chinese: false).paintBackScenery()
+        }
+    }
+}
+
+private struct FieldPlotsCanvas: View, Equatable {
+    let model: FieldSceneModel
+    let isDark: Bool
+    let season: FieldSeason
+    let highlight: String?
+
+    var body: some View {
+        Canvas { ctx, size in
+            let scale = size.width / FieldSceneModel.size.width
+            ctx.scaleBy(x: scale, y: scale)
+            FieldPainter(ctx: ctx, model: model, isDark: isDark, season: season, highlight: highlight, chinese: false).paintPlots()
+        }
+    }
+}
+
+private struct FieldFrontSceneryCanvas: View, Equatable {
+    let isDark: Bool
+    let season: FieldSeason
+
+    var body: some View {
+        Canvas { ctx, size in
+            let scale = size.width / FieldSceneModel.size.width
+            ctx.scaleBy(x: scale, y: scale)
+            FieldPainter(ctx: ctx, model: .empty, isDark: isDark, season: season, highlight: nil, chinese: false).paintFrontScenery()
+        }
+    }
+}
+
+private struct FieldSignsCanvas: View, Equatable {
     let model: FieldSceneModel
     let isDark: Bool
     let season: FieldSeason
@@ -162,7 +263,7 @@ private struct FieldSceneCanvas: View, Equatable {
         Canvas { ctx, size in
             let scale = size.width / FieldSceneModel.size.width
             ctx.scaleBy(x: scale, y: scale)
-            FieldPainter(ctx: ctx, model: model, isDark: isDark, season: season, highlight: highlight, chinese: chinese, compact: compact).paint()
+            FieldPainter(ctx: ctx, model: model, isDark: isDark, season: season, highlight: highlight, chinese: chinese, compact: compact).paintSigns()
         }
     }
 }
@@ -210,24 +311,38 @@ private struct FieldTooltip: View {
     let plot: FieldPlot
     let total: Int64
     @Environment(\.locale) private var locale
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(verbatim: "\(plot.name) · \(plot.crop.label(locale: locale))")
-            Text("\(plot.value.formatted(.number.locale(locale))) Token · \(FieldFormat.percent(plot.value, of: total))")
+                .font(FieldFont.serif(12.5, weight: .semibold))
+                .foregroundStyle(FieldPalette.ink)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            (Text("\(TokenFormat.short(plot.value)) tokens")
+                + Text(verbatim: " · \(FieldFormat.percent(plot.value, of: total, locale: locale))"))
+                .font(FieldFont.serif(12.5))
+                .foregroundStyle(FieldPalette.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+            Text("\(plot.value.formatted(.number.locale(locale))) tokens")
+                .font(FieldFont.serif(11))
+                .foregroundStyle(FieldPalette.muted)
+                .monospacedDigit()
+                .lineLimit(1)
         }
-        .font(FieldFont.serif(12.5))
-        .foregroundStyle(FieldPalette.paper)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(FieldPalette.ink, in: RoundedRectangle(cornerRadius: 7))
-        .fixedSize()
+        .background(FieldPalette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
+        .shadow(color: Color.black.opacity(scheme == .dark ? 0.30 : 0.12), radius: 6, y: 2)
     }
 }
 
 enum FieldFormat {
-    static func percent(_ value: Int64, of total: Int64) -> String {
-        Share.percent(value, of: total)
+    static func percent(_ value: Int64, of total: Int64, locale: Locale = .current) -> String {
+        Share.percent(value, of: total, locale: locale)
     }
 }
 
@@ -354,7 +469,7 @@ private struct FieldPainter {
 
     // MARK: Scene
 
-    func paint() {
+    func paintBackScenery() {
         sky()
         let (farAt, _) = hills()
         _ = farAt
@@ -364,13 +479,22 @@ private struct FieldPainter {
         let riverAt = river()
         irrigation(riverAt: riverAt)
         lane(riverAt: riverAt)
+    }
+
+    func paintPlots() {
         fields()
+    }
+
+    func paintFrontScenery() {
         hedge()
-        bridge(riverAt: riverAt)
+        bridge(riverAt: Self.riverX)
         fence()
         bigTree()
         foreground()
         overlays()
+    }
+
+    func paintSigns() {
         signs()
     }
 
@@ -1100,45 +1224,281 @@ private struct FieldPainter {
     }
 }
 
-// MARK: - List under the field
+// MARK: - Composition strip & list under the field
+
+struct FieldCompositionStrip: View {
+    let counts: TokenCounts
+
+    @Environment(\.locale) private var locale
+
+    private static let categoryOrder: [TokenCategory] = [.cacheRead, .input, .cacheWrite, .output, .reasoning]
+
+    private struct Part: Identifiable {
+        let id: String
+        let label: LocalizedStringKey
+        let tokens: Int64
+        let color: Color
+    }
+
+    private var parts: [Part] {
+        var list = Self.categoryOrder.map { category in
+            Part(
+                id: category.rawValue,
+                label: category.title,
+                tokens: counts[category],
+                color: Palette.color(for: category)
+            )
+        }
+        if counts.uncategorized > 0 {
+            list.append(
+                Part(
+                    id: "uncategorized",
+                    label: "Uncategorized",
+                    tokens: counts.uncategorized,
+                    color: FieldPalette.muted.opacity(0.55)
+                )
+            )
+        }
+        return list
+    }
+
+    var body: some View {
+        let total = counts.total
+        if total > 0 {
+            let allParts = parts
+            let barParts = allParts.filter { $0.tokens > 0 }
+            VStack(alignment: .leading, spacing: 8) {
+                GeometryReader { proxy in
+                    let gap: CGFloat = 2
+                    let usable = max(0, proxy.size.width - CGFloat(max(0, barParts.count - 1)) * gap)
+                    HStack(spacing: gap) {
+                        ForEach(Array(barParts.enumerated()), id: \.element.id) { index, part in
+                            let isLast = index == barParts.count - 1
+                            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                .fill(part.color)
+                                .frame(
+                                    width: isLast ? nil : max(2, usable * CGFloat(part.tokens) / CGFloat(total)),
+                                    height: 6
+                                )
+                                .frame(maxWidth: isLast ? .infinity : nil, alignment: .leading)
+                        }
+                    }
+                    .frame(width: proxy.size.width, height: 6, alignment: .leading)
+                    .background(FieldPalette.rule.opacity(0.45))
+                    .clipShape(Capsule())
+                }
+                .frame(height: 6)
+                .accessibilityHidden(true)
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 16) {
+                        ForEach(allParts) { part in
+                            partItem(part, total: total)
+                                .fixedSize(horizontal: true, vertical: false)
+                        }
+                    }
+                    LazyVGrid(
+                        columns: Array(repeating: GridItem(.flexible(), spacing: 12, alignment: .leading), count: 3),
+                        alignment: .leading,
+                        spacing: 6
+                    ) {
+                        ForEach(allParts) { part in
+                            partItem(part, total: total)
+                                .minimumScaleFactor(0.85)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(FieldPalette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(Text("Composition"))
+        }
+    }
+
+    private func partItem(_ part: Part, total: Int64) -> some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(part.color)
+                .frame(width: 7, height: 7)
+                .accessibilityHidden(true)
+            Text(part.label)
+                .font(FieldFont.serif(12.5))
+                .foregroundStyle(FieldPalette.muted)
+                .lineLimit(1)
+            Text(verbatim: Share.percent(part.tokens, of: total, locale: locale))
+                .font(FieldFont.serif(12.5, weight: .medium))
+                .foregroundStyle(FieldPalette.ink)
+                .monospacedDigit()
+                .lineLimit(1)
+        }
+        .help(Text("\(part.tokens.formatted(.number.locale(locale))) tokens"))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(part.label))
+        .accessibilityValue(
+            Text("\(TokenFormat.spoken(part.tokens)) tokens, \(Share.percent(part.tokens, of: total, locale: locale)) of total")
+        )
+    }
+}
 
 struct FieldBreakdownList: View {
     let items: [Breakdown]
     let total: Int64
+    let dimension: BreakdownDimension
+    var soleSource: String? = nil
     @Binding var highlight: String?
+
+    @State private var cacheDetailModelID: String?
+    @FocusState private var focusedItemID: String?
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let active = items.filter { $0.counts.total > 0 }
-        let crops = FieldCrop.assign(active)
-        let colors = FieldColors.cached(isDark: scheme == .dark)
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 24), count: 3), alignment: .leading, spacing: 0) {
-            ForEach(active) { item in
-                let crop = crops[item.id] ?? .wheat
-                HStack(spacing: 10) {
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(colors.crops[crop.rawValue].mix(colors.paper, 0.22).color)
-                        .overlay(Circle().fill(colors.crops[crop.rawValue].color).padding(7))
-                        .frame(width: 26, height: 26)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(verbatim: item.name).font(FieldFont.serif(16)).foregroundStyle(FieldPalette.ink).lineLimit(1)
-                        Text(verbatim: crop.label(locale: locale)).font(FieldFont.serif(12.5)).foregroundStyle(FieldPalette.muted)
-                    }
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 1) {
-                        Text(verbatim: TokenFormat.short(item.counts.total)).font(FieldFont.serif(15)).foregroundStyle(FieldPalette.ink).monospacedDigit()
-                        Text(verbatim: FieldFormat.percent(item.counts.total, of: total)).font(FieldFont.serif(12.5)).foregroundStyle(FieldPalette.muted).monospacedDigit()
+        Group {
+            if active.isEmpty {
+                Text("No usage in this period")
+                    .font(FieldFont.serif(14))
+                    .foregroundStyle(FieldPalette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 12)
+            } else {
+                let crops = FieldCrop.assign(active)
+                let colors = FieldColors.cached(isDark: scheme == .dark)
+                let columnCount = dimension == .models ? 2 : 3
+                let secondary = dimension == .models ? soleSource : nil
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 24), count: columnCount),
+                    alignment: .leading,
+                    spacing: 0
+                ) {
+                    ForEach(active) { item in
+                        let crop = crops[item.id] ?? .wheat
+                        row(item, crop: crop, colors: colors, secondary: secondary)
                     }
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 6)
-                .background(RoundedRectangle(cornerRadius: 6).fill(highlight == item.id ? FieldPalette.hedge.opacity(0.1) : .clear))
-                .overlay(alignment: .bottom) { Rectangle().fill(FieldPalette.rule).frame(height: 1) }
-                .contentShape(Rectangle())
-                .onHover { inside in highlight = inside ? item.id : (highlight == item.id ? nil : highlight) }
-                .accessibilityElement(children: .combine)
             }
         }
+        .onChange(of: dimension) {
+            cacheDetailModelID = nil
+            focusedItemID = nil
+        }
+        .onChange(of: focusedItemID) { oldID, newID in
+            if let newID {
+                highlight = newID
+            } else if let oldID, highlight == oldID {
+                highlight = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ item: Breakdown, crop: FieldCrop, colors: FieldColors, secondary: String?) -> some View {
+        let isHighlighted = highlight == item.id
+        let isFocused = focusedItemID == item.id
+        let content = HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(colors.crops[crop.rawValue].mix(colors.paper, 0.22).color)
+                .overlay(Circle().fill(colors.crops[crop.rawValue].color).padding(7))
+                .frame(width: 26, height: 26)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: item.name)
+                    .font(FieldFont.serif(16))
+                    .foregroundStyle(FieldPalette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(verbatim: crop.label(locale: locale))
+                    .font(FieldFont.serif(12.5))
+                    .foregroundStyle(FieldPalette.muted)
+                    .lineLimit(1)
+                if let secondary {
+                    Text("Mainly from \(secondary)")
+                        .font(FieldFont.serif(11.5))
+                        .foregroundStyle(FieldPalette.muted)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 1) {
+                Text(verbatim: TokenFormat.short(item.counts.total))
+                    .font(FieldFont.serif(15))
+                    .foregroundStyle(FieldPalette.ink)
+                    .monospacedDigit()
+                Text(verbatim: FieldFormat.percent(item.counts.total, of: total, locale: locale))
+                    .font(FieldFont.serif(12.5))
+                    .foregroundStyle(FieldPalette.muted)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 6)
+        .background(RoundedRectangle(cornerRadius: 6).fill(isHighlighted ? FieldPalette.hedge.opacity(0.1) : .clear))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(isFocused ? FieldPalette.accent : .clear, lineWidth: 1))
+        .overlay(alignment: .bottom) { Rectangle().fill(FieldPalette.rule).frame(height: 1) }
+        .contentShape(Rectangle())
+
+        if dimension == .models {
+            Button {
+                cacheDetailModelID = item.id
+            } label: {
+                content
+            }
+            .buttonStyle(.plain)
+            .focused($focusedItemID, equals: item.id)
+            .onHover { inside in
+                if inside {
+                    highlight = item.id
+                } else if highlight == item.id {
+                    highlight = focusedItemID
+                }
+            }
+            .help(item.name)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(rowAccessibilityLabel(item, crop: crop, secondary: secondary))
+            .accessibilityHint(Text("Shows cache details"))
+            .accessibilityAddTraits(.isButton)
+            .popover(isPresented: cacheDetailPresented(for: item.id), arrowEdge: .trailing) {
+                ModelCacheDetail(item: item, color: crop.color)
+            }
+        } else {
+            content
+                .focusable(interactions: .activate)
+                .focused($focusedItemID, equals: item.id)
+                .onHover { inside in
+                    if inside {
+                        highlight = item.id
+                    } else if highlight == item.id {
+                        highlight = focusedItemID
+                    }
+                }
+                .help(item.name)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(rowAccessibilityLabel(item, crop: crop, secondary: nil))
+        }
+    }
+
+    private func cacheDetailPresented(for modelID: String) -> Binding<Bool> {
+        Binding(
+            get: { cacheDetailModelID == modelID },
+            set: { isPresented in
+                if isPresented {
+                    cacheDetailModelID = modelID
+                } else if cacheDetailModelID == modelID {
+                    cacheDetailModelID = nil
+                }
+            }
+        )
+    }
+
+    private func rowAccessibilityLabel(_ item: Breakdown, crop: FieldCrop, secondary: String?) -> Text {
+        var label = Text(verbatim: "\(item.name), \(crop.label(locale: locale)), ")
+            + Text("\(TokenFormat.spoken(item.counts.total)) tokens, \(FieldFormat.percent(item.counts.total, of: total, locale: locale)) of total")
+        if let secondary {
+            label = label + Text(verbatim: ", ") + Text("Mainly from \(secondary)")
+        }
+        return label
     }
 }

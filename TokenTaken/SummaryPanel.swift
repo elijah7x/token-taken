@@ -1,6 +1,25 @@
+import AppKit
 import Foundation
 import SwiftUI
 import TokenTakenKit
+
+private func summaryFont(size: CGFloat, weight: Font.Weight = .regular, cosmosMonospaced: Bool = false) -> Font {
+    if ThemeRuntime.isCosmos {
+        return cosmosMonospaced
+            ? .system(size: size, weight: weight, design: .monospaced)
+            : .system(size: size, weight: weight)
+    }
+    if ThemeRuntime.isField {
+        let nsWeight: NSFont.Weight = switch weight {
+        case .bold: .bold
+        case .semibold: .semibold
+        case .medium: .medium
+        default: .regular
+        }
+        return FieldFont.serif(size, weight: nsWeight)
+    }
+    return .system(size: size, weight: weight)
+}
 
 // MARK: - Left sidebar summary rail
 
@@ -25,36 +44,38 @@ struct SummaryRail: View {
     private var standardBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(periodDescription)
-                .font(.system(size: 12, weight: .medium))
+                .font(summaryFont(size: 12, weight: .medium))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .contentTransition(reduceMotion ? .identity : .numericText())
 
             if isCollecting {
                 Text(verbatim: "—")
-                    .font(.system(size: 40, weight: .bold))
+                    .font(summaryFont(size: 40, weight: .bold))
                     .foregroundStyle(Palette.ink3)
                     .monospacedDigit()
                     .padding(.top, 4)
                     .accessibilityHidden(true)
 
                 Text("Summarising…")
-                    .font(.system(size: 12))
+                    .font(summaryFont(size: 12))
                     .foregroundStyle(Palette.ink3)
                     .padding(.top, 4)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(TokenFormat.short(summary.total.total))
-                        .font(.system(size: 40, weight: .bold))
+                        .font(summaryFont(size: 40, weight: .bold))
                         .tracking(-1.0)
                         .foregroundStyle(Palette.ink1)
                         .monospacedDigit()
                         .contentTransition(reduceMotion ? .identity : .numericText())
                     Text("tokens")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(summaryFont(size: 13, weight: .medium))
                         .foregroundStyle(Palette.ink2)
                 }
+                .help(Text("\(summary.total.total.formatted(.number.locale(locale))) tokens"))
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text("Total"))
                 .accessibilityValue(Text("\(TokenFormat.spoken(summary.total.total)) tokens"))
@@ -62,21 +83,23 @@ struct SummaryRail: View {
 
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(TokenFormat.usd(summary.cost.estimatedUSD))
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(summaryFont(size: 17, weight: .semibold))
                         .foregroundStyle(Palette.ink1)
                         .monospacedDigit()
                         .contentTransition(reduceMotion ? .identity : .numericText())
                     Text("estimate, not a bill")
-                        .font(.system(size: 12))
+                        .font(summaryFont(size: 12))
                         .foregroundStyle(Palette.ink3)
                 }
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .accessibilityElement(children: .combine)
                 .help(costHelp)
                 .padding(.top, 8)
 
                 if summary.cost.unpricedTokens > 0 {
                     Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
-                        .font(.system(size: 11))
+                        .font(summaryFont(size: 11))
                         .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
                         .fixedSize(horizontal: false, vertical: true)
@@ -138,7 +161,7 @@ struct SummaryRail: View {
                 .accessibilityValue(Text("\(TokenFormat.spoken(summary.total.total)) tokens"))
                 .padding(.top, 12)
 
-                Text("\(summary.total.total.formatted(.number.locale(locale))) Token")
+                Text("\(summary.total.total.formatted(.number.locale(locale))) tokens")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(CosmosPalette.ink3)
                     .padding(.top, 2)
@@ -149,25 +172,29 @@ struct SummaryRail: View {
                     .padding(.vertical, 12)
                     .accessibilityHidden(true)
 
-                Text("Estimated cost")
-                    .font(.system(size: 11))
-                    .foregroundStyle(CosmosPalette.ink3)
-                Text("estimate, not a bill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(CosmosPalette.ink3)
-                    .padding(.top, 1)
-                Text(TokenFormat.usd(summary.cost.estimatedUSD))
-                    .font(.system(size: 24, weight: .medium, design: .monospaced))
-                    .foregroundStyle(CosmosPalette.ink)
-                    .padding(.top, 4)
-                    .contentTransition(reduceMotion ? .identity : .numericText())
-                    .help(costHelp)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("Estimated cost")
+                        .font(.system(size: 11))
+                        .foregroundStyle(CosmosPalette.ink3)
+                    Text("estimate, not a bill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(CosmosPalette.ink3)
+                        .padding(.top, 1)
+                    Text(TokenFormat.usd(summary.cost.estimatedUSD))
+                        .font(.system(size: 24, weight: .medium, design: .monospaced))
+                        .foregroundStyle(CosmosPalette.ink)
+                        .padding(.top, 4)
+                        .contentTransition(reduceMotion ? .identity : .numericText())
+                }
+                .accessibilityElement(children: .combine)
+                .help(costHelp)
 
                 if summary.cost.unpricedTokens > 0 {
                     Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
                         .font(.system(size: 11))
                         .foregroundStyle(CosmosPalette.accent)
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(Text("\(TokenFormat.spoken(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate"))
                         .padding(.top, 4)
                 }
 
@@ -245,22 +272,27 @@ struct TrayDevices: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .center, spacing: 6) {
                         Text(verbatim: Host.current().localizedName ?? "Mac")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Palette.ink1)
+                            .font(ThemeRuntime.isCosmos ? .system(size: 12, weight: .medium) : summaryFont(size: 14, weight: .semibold))
+                            .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.ink : Palette.ink1)
                             .lineLimit(1)
                         ThisMacBadge()
                     }
                     Text(verbatim: "—")
-                        .font(.system(size: 12))
+                        .font(summaryFont(size: 12, cosmosMonospaced: true))
                         .monospacedDigit()
-                        .foregroundStyle(Palette.ink2)
+                        .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.ink3 : Palette.ink2)
                     Text("Summarising…")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Palette.ink3)
+                        .font(summaryFont(size: 11))
+                        .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.ink3 : Palette.ink3)
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, ThemeRuntime.isCosmos ? 8 : 0)
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(CosmosPalette.rule)
+                        .frame(height: ThemeRuntime.isCosmos ? 1 : 0)
+                }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(verbatim: Host.current().localizedName ?? "Mac") + Text(verbatim: ", ") + Text("This Mac"))
                 .accessibilityValue(Text("Summarising…"))
@@ -280,12 +312,12 @@ struct TrayDevices: View {
                                     .accessibilityHidden(true)
                                 // An unreadable identity leaves only the device ID, which the CLI also names "Unknown Mac".
                                 (remote.displayName == remote.deviceID ? Text("Unknown Mac") : Text(verbatim: remote.displayName))
-                                    .font(.system(size: 14, weight: .semibold))
+                                    .font(ThemeRuntime.isCosmos ? .system(size: 12, weight: .medium) : summaryFont(size: 14, weight: .semibold))
                                     .foregroundStyle(Palette.healthWarn)
                                     .lineLimit(1)
                             }
                             Text(remoteLabelKey(for: remote.effectiveState(now: context.date)))
-                                .font(.system(size: 11, weight: .medium))
+                                .font(summaryFont(size: 11, weight: .medium))
                                 .foregroundStyle(Palette.healthWarn)
                                 .lineLimit(1)
                         }
@@ -350,7 +382,7 @@ struct TrayDevices: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .center, spacing: 6) {
                         Text(verbatim: device.name)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(summaryFont(size: 14, weight: .semibold))
                             .foregroundStyle(Palette.ink1)
                             .lineLimit(1)
                         if isAccount {
@@ -368,14 +400,14 @@ struct TrayDevices: View {
                             Text(verbatim: "\(TokenFormat.short(device.counts.total)) · \(Share.percent(device.counts.total, of: summary.total.total))")
                         }
                     }
-                    .font(.system(size: 12))
+                    .font(summaryFont(size: 12))
                     .monospacedDigit()
                     .foregroundStyle(Palette.ink2)
                     .lineLimit(1)
 
                     if let update = updateStatus(for: device, isLocal: isLocal, now: now) {
                         update.text
-                            .font(.system(size: 11, weight: update.isWarning ? .medium : .regular))
+                            .font(summaryFont(size: 11, weight: update.isWarning ? .medium : .regular))
                             .foregroundStyle(update.isWarning ? Palette.healthWarn : Palette.ink3)
                             .monospacedDigit()
                             .lineLimit(1)
@@ -538,7 +570,7 @@ private struct PartialDeviceBanner: View {
                 .foregroundStyle(Palette.healthWarn)
                 .accessibilityHidden(true)
             message
-                .font(.system(size: 11.5, weight: .medium))
+                .font(summaryFont(size: 11.5, weight: .medium))
                 .foregroundStyle(Palette.healthWarn)
                 .monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
@@ -589,7 +621,7 @@ private struct PartialDeviceBanner: View {
 private struct ThisMacBadge: View {
     var body: some View {
         Text("This Mac")
-            .font(.system(size: 11, weight: .medium))
+            .font(summaryFont(size: 11, weight: .medium))
             .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.accent : Palette.ink2)
             .padding(.horizontal, ThemeRuntime.isCosmos ? 4 : 6)
             .padding(.vertical, ThemeRuntime.isCosmos ? 0 : 2)
@@ -608,7 +640,7 @@ private struct ThisMacBadge: View {
 private struct AccountBadge: View {
     var body: some View {
         Text("Account")
-            .font(.system(size: 11, weight: .medium))
+            .font(summaryFont(size: 11, weight: .medium))
             .foregroundStyle(ThemeRuntime.isCosmos ? CosmosPalette.ink3 : Palette.ink2)
             .padding(.horizontal, ThemeRuntime.isCosmos ? 4 : 6)
             .padding(.vertical, ThemeRuntime.isCosmos ? 0 : 2)
@@ -800,6 +832,13 @@ struct SectionHead: View {
 struct BreakdownCard: View {
     let summary: UsageSummary
     let dimension: BreakdownDimension
+    @Binding var highlight: String?
+
+    init(summary: UsageSummary, dimension: BreakdownDimension, highlight: Binding<String?> = .constant(nil)) {
+        self.summary = summary
+        self.dimension = dimension
+        self._highlight = highlight
+    }
 
     // A footer that folds a single row saves nothing; show it instead.
     private var limit: Int { items.count == 5 ? 5 : 4 }
@@ -833,7 +872,7 @@ struct BreakdownCard: View {
         VStack(alignment: .leading, spacing: 0) {
             if items.isEmpty {
                 Text("No usage in this period")
-                    .font(.system(size: 13))
+                    .font(summaryFont(size: 13))
                     .foregroundStyle(Palette.ink3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 12)
@@ -882,10 +921,12 @@ struct BreakdownCard: View {
     @ViewBuilder
     private func row(_ item: Breakdown, modelColors: [String: Color], soleSource: String?) -> some View {
         let isModel = dimension == .models
+        let isHighlighted = highlight == item.id
         let color = isModel
             ? (modelColors[item.id] ?? Palette.color(for: .output))
             : Palette.color(forSource: item.id)
         let secondary = isModel ? soleSource : nil
+        let nameColor: Color = (ThemeRuntime.isCosmos && isHighlighted) ? CosmosPalette.accent : Palette.ink1
 
         let content = Group {
             if let secondary {
@@ -902,15 +943,15 @@ struct BreakdownCard: View {
                         Text(verbatim: item.name)
                             .font(isModel
                                 ? .system(size: 13, weight: .semibold, design: .monospaced)
-                                : .system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.ink1)
+                                : summaryFont(size: 13, weight: .medium))
+                            .foregroundStyle(nameColor)
                             .lineLimit(1)
                             .truncationMode(.tail)
 
                         Spacer(minLength: 12)
 
                         Text("\(TokenFormat.short(item.counts.total)) tokens")
-                            .font(.system(size: 13, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                            .font(summaryFont(size: 13, weight: .semibold, cosmosMonospaced: true))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
                             .fixedSize()
@@ -918,7 +959,7 @@ struct BreakdownCard: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Mainly from \(secondary)")
-                            .font(.system(size: 11.5))
+                            .font(summaryFont(size: 11.5))
                             .foregroundStyle(Palette.ink2)
                             .lineLimit(1)
 
@@ -934,7 +975,7 @@ struct BreakdownCard: View {
                             .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.0 }
 
                             Text(Share.percent(item.counts.total, of: summary.total.total))
-                                .font(.system(size: 11.5))
+                                .font(summaryFont(size: 11.5, cosmosMonospaced: true))
                                 .foregroundStyle(Palette.ink2)
                                 .monospacedDigit()
                                 .fixedSize()
@@ -959,8 +1000,8 @@ struct BreakdownCard: View {
                         Text(verbatim: item.name)
                             .font(isModel
                                 ? .system(size: 13, weight: .semibold, design: .monospaced)
-                                : .system(size: 13, weight: .medium))
-                            .foregroundStyle(Palette.ink1)
+                                : summaryFont(size: 13, weight: .medium))
+                            .foregroundStyle(nameColor)
                             .lineLimit(1)
                             .truncationMode(.tail)
                     }
@@ -969,7 +1010,7 @@ struct BreakdownCard: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text("\(TokenFormat.short(item.counts.total)) tokens")
-                            .font(.system(size: 13, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                            .font(summaryFont(size: 13, weight: .semibold, cosmosMonospaced: true))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
                             .fixedSize()
@@ -983,7 +1024,7 @@ struct BreakdownCard: View {
                         .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
 
                         Text(Share.percent(item.counts.total, of: summary.total.total))
-                            .font(.system(size: 11.5))
+                            .font(summaryFont(size: 11.5, cosmosMonospaced: true))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                             .fixedSize()
@@ -995,15 +1036,30 @@ struct BreakdownCard: View {
                 .frame(minHeight: 48)
             }
         }
+        .background {
+            if ThemeRuntime.isCosmos {
+                Rectangle().fill(isHighlighted ? CosmosPalette.selection : .clear)
+            } else {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isHighlighted ? Palette.barTrack : .clear)
+            }
+        }
+        .contentShape(Rectangle())
 
         if isModel {
             Button {
                 cacheDetailModelID = item.id
             } label: {
                 content
-                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onHover { inside in
+                if inside {
+                    highlight = item.id
+                } else if highlight == item.id {
+                    highlight = nil
+                }
+            }
             .help(item.name)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(Text(verbatim: item.name))
@@ -1015,6 +1071,13 @@ struct BreakdownCard: View {
             }
         } else {
             content
+                .onHover { inside in
+                    if inside {
+                        highlight = item.id
+                    } else if highlight == item.id {
+                        highlight = nil
+                    }
+                }
                 .help(item.name)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(Text(verbatim: item.name))
@@ -1124,7 +1187,7 @@ struct BreakdownCard: View {
     }
 }
 
-private struct ModelCacheDetail: View {
+struct ModelCacheDetail: View {
     let item: Breakdown
     let color: Color
 
@@ -1147,24 +1210,24 @@ private struct ModelCacheDetail: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Cache hit rate")
-                    .font(.system(size: 11.5))
+                    .font(summaryFont(size: 11.5))
                     .foregroundStyle(Palette.ink2)
 
                 if let rate = item.counts.cacheHitRate {
                     Text(rate, format: .percent.precision(.fractionLength(0)))
-                        .font(.system(size: 22, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                        .font(summaryFont(size: 22, weight: .semibold, cosmosMonospaced: true))
                         .foregroundStyle(Palette.ink1)
                         .monospacedDigit()
                 } else {
                     Text(verbatim: "-")
-                        .font(.system(size: 22, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                        .font(summaryFont(size: 22, weight: .semibold, cosmosMonospaced: true))
                         .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
 
                     Text(promptTokens == 0 && item.counts.uncategorized == 0
                         ? LocalizedStringKey("No input tokens in this period.")
                         : LocalizedStringKey("Most usage for this model has no category split."))
-                        .font(.system(size: 11))
+                        .font(summaryFont(size: 11))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
@@ -1187,46 +1250,54 @@ private struct ModelCacheDetail: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text("Estimated savings")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(summaryFont(size: 12, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                 Spacer(minLength: 8)
                 if let savings = item.cacheSavingsUSD {
                     Text(verbatim: TokenFormat.usd(savings))
-                        .font(.system(size: 12, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                        .font(summaryFont(size: 12, weight: .semibold, cosmosMonospaced: true))
                         .foregroundStyle(Palette.ink1)
                         .monospacedDigit()
                 } else {
                     Text("Unpriced")
-                        .font(.system(size: 12))
+                        .font(summaryFont(size: 12))
                         .foregroundStyle(Palette.ink3)
                 }
             }
             .accessibilityElement(children: .combine)
 
             Text("Rate = cache read ÷ all input tokens. Providers report cache writes differently, so compare models from the same provider.")
-                .font(.system(size: 10.5))
+                .font(summaryFont(size: 10.5))
                 .foregroundStyle(Palette.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(Self.popoverPadding)
         .frame(width: Self.popoverWidth, alignment: .leading)
+        .overlay {
+            if ThemeRuntime.isCosmos {
+                Rectangle()
+                    .strokeBorder(CosmosPalette.rule, lineWidth: 1)
+            }
+        }
+        .fontDesign(ThemeRuntime.isField ? .serif : nil)
+        .modifier(ThemedPopoverBackground())
     }
 
     private func splitRow(title: LocalizedStringKey, value: Int64, barColor: Color) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(title)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(summaryFont(size: 12, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                     .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(verbatim: TokenFormat.short(value))
-                    .font(.system(size: 12, weight: .semibold, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                    .font(summaryFont(size: 12, weight: .semibold, cosmosMonospaced: true))
                     .foregroundStyle(Palette.ink1)
                     .monospacedDigit()
                     .fixedSize()
                 Text(verbatim: Share.percent(value, of: promptTokens, locale: locale))
-                    .font(.system(size: 11.5, design: ThemeRuntime.isCosmos ? .monospaced : .default))
+                    .font(summaryFont(size: 11.5, cosmosMonospaced: true))
                     .foregroundStyle(Palette.ink2)
                     .monospacedDigit()
                     .fixedSize()
@@ -1241,5 +1312,17 @@ private struct ModelCacheDetail: View {
             )
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ThemedPopoverBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        if ThemeRuntime.isField {
+            content.presentationBackground(FieldPalette.panel)
+        } else if ThemeRuntime.isCosmos {
+            content.presentationBackground(CosmosPalette.panel)
+        } else {
+            content
+        }
     }
 }

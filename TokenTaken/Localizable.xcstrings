@@ -5321,7 +5321,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Watered the field with prompts; let's see what sprouted."
+            "value" : "Prompted the field; see what sprouted."
           }
         },
         "zh-Hans" : {
@@ -5337,7 +5337,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Every token here was grown from scratch, no shortcuts."
+            "value" : "Every token here grown from scratch."
           }
         },
         "zh-Hans" : {
@@ -5353,7 +5353,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Good harvest this season. Still plenty of soil left."
+            "value" : "Good harvest, plenty of soil left."
           }
         },
         "zh-Hans" : {
@@ -5369,7 +5369,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The agent plowed the rows; I mostly brought the seeds."
+            "value" : "Agent plowed the rows; I brought seeds."
           }
         },
         "zh-Hans" : {
@@ -5385,7 +5385,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Turned late-night bugs into bumper crops."
+            "value" : "Turned midnight bugs into bumper crops."
           }
         },
         "zh-Hans" : {
@@ -5401,7 +5401,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Cache warmed the soil; output did the blooming."
+            "value" : "Cache warmed the soil; output bloomed."
           }
         },
         "zh-Hans" : {
@@ -5417,7 +5417,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sowed half-baked ideas, reaped a tidy little farm."
+            "value" : "Sowed rough ideas, reaped a tidy farm."
           }
         },
         "zh-Hans" : {
@@ -5433,7 +5433,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "No rain check needed—tokens grow fine indoors."
+            "value" : "No rain needed—tokens grow indoors."
           }
         },
         "zh-Hans" : {
@@ -5488,6 +5488,56 @@
     },
     "简体中文" : {
       "shouldTranslate" : false
+    },
+    "Token categories" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Token 分类"
+          }
+        }
+      }
+    },
+    "A short note" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "写一句题记"
+          }
+        }
+      }
+    },
+    "New inscription" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "换一句题记"
+          }
+        }
+      }
+    },
+    "Usage for this period could not be loaded, so it can't be shared yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个时段的用量暂时读不到，现在还不能分享。"
+          }
+        }
+      }
+    },
+    "A black hole bends starlight and particle flow; six token categories form the disk and up to six bodies share the same occluded light paths." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "黑洞弯折星光与粒子流；六类 Token 组成吸积盘，至多六颗天体在同一弯曲光路中受遮挡。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

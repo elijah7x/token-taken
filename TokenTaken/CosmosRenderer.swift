@@ -4,28 +4,19 @@ import MetalKit
 import QuartzCore
 import simd
 
-private struct CosmosFloat5 {
-    var v0: Float = 0, v1: Float = 0, v2: Float = 0, v3: Float = 0, v4: Float = 0
-
-    init(_ values: [Double]) {
-        v0 = Float(values.indices.contains(0) ? values[0] : 0)
-        v1 = Float(values.indices.contains(1) ? values[1] : 0)
-        v2 = Float(values.indices.contains(2) ? values[2] : 0)
-        v3 = Float(values.indices.contains(3) ? values[3] : 0)
-        v4 = Float(values.indices.contains(4) ? values[4] : 0)
-    }
-}
-
 private struct CosmosFloat6 {
     var v0: Float = 0, v1: Float = 0, v2: Float = 0, v3: Float = 0, v4: Float = 0, v5: Float = 0
 
-    init(_ values: [Float]) {
-        v0 = values.indices.contains(0) ? values[0] : 0
-        v1 = values.indices.contains(1) ? values[1] : 0
-        v2 = values.indices.contains(2) ? values[2] : 0
-        v3 = values.indices.contains(3) ? values[3] : 0
-        v4 = values.indices.contains(4) ? values[4] : 0
-        v5 = values.indices.contains(5) ? values[5] : 0
+    mutating func set(_ index: Int, _ value: Float) {
+        switch index {
+        case 0: v0 = value
+        case 1: v1 = value
+        case 2: v2 = value
+        case 3: v3 = value
+        case 4: v4 = value
+        case 5: v5 = value
+        default: break
+        }
     }
 }
 
@@ -33,13 +24,16 @@ private struct CosmosVector6 {
     var v0 = SIMD3<Float>(), v1 = SIMD3<Float>(), v2 = SIMD3<Float>()
     var v3 = SIMD3<Float>(), v4 = SIMD3<Float>(), v5 = SIMD3<Float>()
 
-    init(_ values: [SIMD3<Float>]) {
-        if values.indices.contains(0) { v0 = values[0] }
-        if values.indices.contains(1) { v1 = values[1] }
-        if values.indices.contains(2) { v2 = values[2] }
-        if values.indices.contains(3) { v3 = values[3] }
-        if values.indices.contains(4) { v4 = values[4] }
-        if values.indices.contains(5) { v5 = values[5] }
+    mutating func set(_ index: Int, _ value: SIMD3<Float>) {
+        switch index {
+        case 0: v0 = value
+        case 1: v1 = value
+        case 2: v2 = value
+        case 3: v3 = value
+        case 4: v4 = value
+        case 5: v5 = value
+        default: break
+        }
     }
 }
 
@@ -57,14 +51,15 @@ private struct CosmosSceneUniforms {
     var focal: Float = 900
     var hover: Int32 = -1
     var bodyCount: Int32 = 0
-    var edges = CosmosFloat5([])
-    var bodyPosition = CosmosVector6([])
-    var bodyRadius = CosmosFloat6([])
-    var bodyKind = CosmosFloat6([])
-    var bodySeed = CosmosFloat6([])
-    var bodySpin = CosmosFloat6([])
-    var bodyTilt = CosmosFloat6([])
-    var bodyRing = CosmosFloat6([])
+    var bandCount: Int32 = 5
+    var edges = CosmosFloat6()
+    var bodyPosition = CosmosVector6()
+    var bodyRadius = CosmosFloat6()
+    var bodyKind = CosmosFloat6()
+    var bodySeed = CosmosFloat6()
+    var bodySpin = CosmosFloat6()
+    var bodyTilt = CosmosFloat6()
+    var bodyRing = CosmosFloat6()
 }
 
 private struct CosmosParticleUniforms {
@@ -80,8 +75,9 @@ private struct CosmosParticleUniforms {
     var pixel: Float = 1
     var points: Float = 0
     var shadow: Float = 0
-    var edges = CosmosFloat5([])
+    var edges = CosmosFloat6()
     var focal: Float = 0
+    var bandCount: Int32 = 5
 }
 
 final class CosmosRenderer {
@@ -98,6 +94,7 @@ final class CosmosRenderer {
     private let flowBuffer: MTLBuffer
     private let dustBuffer: MTLBuffer
     private let flowSeeds: [Float]
+    private let scenePassDescriptor: MTLRenderPassDescriptor
 
     private var cachedTexture: MTLTexture?
     private var cachedFlowShares: [Double]?
@@ -175,6 +172,17 @@ final class CosmosRenderer {
             return nil
         }
 
+        let passDescriptor = MTLRenderPassDescriptor()
+        passDescriptor.colorAttachments[0].loadAction = .clear
+        passDescriptor.colorAttachments[0].storeAction = .store
+        passDescriptor.colorAttachments[0].clearColor = MTLClearColor(
+            red: 7.0 / 255.0,
+            green: 9.0 / 255.0,
+            blue: 13.0 / 255.0,
+            alpha: 1
+        )
+        scenePassDescriptor = passDescriptor
+
         var seed = UInt32(83_021)
         var seeds: [Float] = []
         seeds.reserveCapacity(Self.particleCount * 4)
@@ -191,7 +199,7 @@ final class CosmosRenderer {
                 output[offset + 1] = Self.nextRandom(&seed) * Float(2 * Double.pi)
                 output[offset + 2] = Self.nextRandom(&seed) + Self.nextRandom(&seed) - 1
                 output[offset + 3] = Self.nextRandom(&seed)
-                output[offset + 4] = 5
+                output[offset + 4] = 6
                 output[offset + 5] = 0
             }
         }
@@ -240,6 +248,7 @@ final class CosmosRenderer {
             pixelSize: CGSize(width: CGFloat(width), height: CGFloat(height)),
             commandBuffer: commandBuffer
         )
+        scenePassDescriptor.colorAttachments[0].texture = nil
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         guard commandBuffer.status == .completed else { return nil }
@@ -330,12 +339,8 @@ final class CosmosRenderer {
         updateFlowParticles(shares: frame.scene.particleShares)
         var sceneUniforms = makeSceneUniforms(frame)
         var particleUniforms = makeParticleUniforms(frame, pixelSize: pixelSize)
-        let descriptor = MTLRenderPassDescriptor()
-        descriptor.colorAttachments[0].texture = texture
-        descriptor.colorAttachments[0].loadAction = .clear
-        descriptor.colorAttachments[0].storeAction = .store
-        descriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: descriptor) else { return }
+        scenePassDescriptor.colorAttachments[0].texture = texture
+        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: scenePassDescriptor) else { return }
         encoder.label = "Cosmos scene and particles"
         encoder.setRenderPipelineState(scenePipeline)
         encoder.setFragmentBytes(&sceneUniforms, length: MemoryLayout<CosmosSceneUniforms>.stride, index: 0)
@@ -362,12 +367,13 @@ final class CosmosRenderer {
     private func updateFlowParticles(shares: [Double]) {
         guard cachedFlowShares != shares else { return }
         cachedFlowShares = shares
+        let maxBand = max(0, min(5, shares.count - 1))
         flowBuffer.contents().withMemoryRebound(to: Float.self, capacity: Self.particleCount * 2 * 6) { output in
             for index in 0..<Self.particleCount {
                 let quantile = (Double(index) + 0.5) / Double(Self.particleCount)
                 var band = 0
                 var accumulated = 0.0
-                while band < 4 {
+                while band < maxBand {
                     accumulated += shares.indices.contains(band) ? shares[band] : 0
                     if quantile < accumulated { break }
                     band += 1
@@ -386,6 +392,15 @@ final class CosmosRenderer {
         }
     }
 
+    private static func makeEdges(from categories: [CosmosCategory]) -> CosmosFloat6 {
+        var edges = CosmosFloat6()
+        let count = min(6, categories.count)
+        for index in 0..<count {
+            edges.set(index, Float(categories[index].edge))
+        }
+        return edges
+    }
+
     private func makeSceneUniforms(_ frame: CosmosFrame) -> CosmosSceneUniforms {
         var uniforms = CosmosSceneUniforms()
         uniforms.size = SIMD2(Float(frame.size.width), Float(frame.size.height))
@@ -400,29 +415,23 @@ final class CosmosRenderer {
         uniforms.disk = Float(frame.disk)
         uniforms.focal = Float(frame.focal)
         uniforms.hover = Int32(frame.hoverCategory)
-        uniforms.bodyCount = Int32(frame.scene.bodies.count)
-        uniforms.edges = CosmosFloat5(frame.scene.categories.map(\.edge))
+        uniforms.bandCount = Int32(max(1, min(6, frame.scene.categories.count)))
+        uniforms.edges = Self.makeEdges(from: frame.scene.categories)
 
-        var positions: [SIMD3<Float>] = []
-        var radii: [Float] = [], kinds: [Float] = [], seeds: [Float] = []
-        var spins: [Float] = [], tilts: [Float] = [], rings: [Float] = []
+        var bodyIndex = 0
         for body in frame.scene.bodies {
-            guard let placement = frame.placements.first(where: { $0.id == body.id }) else { continue }
-            positions.append(placement.world.float)
-            radii.append(Float(placement.radius))
-            kinds.append(Float(body.kind))
-            seeds.append(Float(body.seed % 10_000) / 100)
-            spins.append(Float(body.seed % 256) + Float(frame.time) * 0.42)
-            tilts.append(Float(body.tilt))
-            rings.append(body.kind == 3 ? 1 : 0)
+            guard bodyIndex < 6,
+                  let placement = frame.placements.first(where: { $0.id == body.id }) else { continue }
+            uniforms.bodyPosition.set(bodyIndex, placement.world.float)
+            uniforms.bodyRadius.set(bodyIndex, Float(placement.radius))
+            uniforms.bodyKind.set(bodyIndex, Float(body.kind))
+            uniforms.bodySeed.set(bodyIndex, Float(body.seed % 10_000) / 100)
+            uniforms.bodySpin.set(bodyIndex, Float(body.seed % 256) + Float(frame.time) * 0.42)
+            uniforms.bodyTilt.set(bodyIndex, Float(body.tilt))
+            uniforms.bodyRing.set(bodyIndex, body.kind == 3 ? 1 : 0)
+            bodyIndex += 1
         }
-        uniforms.bodyPosition = CosmosVector6(positions)
-        uniforms.bodyRadius = CosmosFloat6(radii)
-        uniforms.bodyKind = CosmosFloat6(kinds)
-        uniforms.bodySeed = CosmosFloat6(seeds)
-        uniforms.bodySpin = CosmosFloat6(spins)
-        uniforms.bodyTilt = CosmosFloat6(tilts)
-        uniforms.bodyRing = CosmosFloat6(rings)
+        uniforms.bodyCount = Int32(bodyIndex)
         return uniforms
     }
 
@@ -440,8 +449,9 @@ final class CosmosRenderer {
         uniforms.pixel = Float(pixelSize.width / frame.size.width)
         uniforms.points = 0
         uniforms.shadow = Float(Self.shadow * frame.focal / Self.cameraDistance)
-        uniforms.edges = CosmosFloat5(frame.scene.categories.map(\.edge))
+        uniforms.edges = Self.makeEdges(from: frame.scene.categories)
         uniforms.focal = Float(frame.focal)
+        uniforms.bandCount = Int32(max(1, min(6, frame.scene.categories.count)))
         return uniforms
     }
 }

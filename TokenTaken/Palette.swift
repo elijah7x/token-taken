@@ -28,17 +28,35 @@ extension Color {
         )
     }
 
-    /// Appearance-aware color. With Increase Contrast the `contrast` variant wins.
-    init(light: String, dark: String, contrastLight: String? = nil, contrastDark: String? = nil, fieldLight: String? = nil, fieldDark: String? = nil, cosmos: String? = nil) {
+    /// Appearance-aware color. With Increase Contrast the `contrast` variant wins in every theme.
+    init(
+        light: String,
+        dark: String,
+        contrastLight: String? = nil,
+        contrastDark: String? = nil,
+        fieldLight: String? = nil,
+        fieldDark: String? = nil,
+        fieldContrastLight: String? = nil,
+        fieldContrastDark: String? = nil,
+        cosmos: String? = nil,
+        cosmosContrast: String? = nil
+    ) {
         self.init(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
             if ThemeRuntime.isField, let fieldLight, let fieldDark {
-                return NSColor(Color(hex: isDark ? fieldDark : fieldLight))
+                let hex = switch (isDark, increased) {
+                case (false, false): fieldLight
+                case (true, false): fieldDark
+                case (false, true): fieldContrastLight ?? fieldLight
+                case (true, true): fieldContrastDark ?? fieldDark
+                }
+                return NSColor(Color(hex: hex))
             }
             if ThemeRuntime.isCosmos, let cosmos {
-                return NSColor(Color(hex: cosmos))
+                let hex = increased ? (cosmosContrast ?? cosmos) : cosmos
+                return NSColor(Color(hex: hex))
             }
-            let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
             let hex = switch (isDark, increased) {
             case (false, false): light
             case (true, false): dark
@@ -51,16 +69,23 @@ extension Color {
 }
 
 enum CosmosPalette {
+    private static func contrastAware(_ normal: String, contrast: String) -> Color {
+        Color(nsColor: NSColor(name: nil) { _ in
+            let hex = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? contrast : normal
+            return NSColor(Color(hex: hex))
+        })
+    }
+
     static let page = Color(hex: "#030507")
     static let background = Color(hex: "#07090D")
     static let panel = Color(hex: "#0C1016")
-    static let ink = Color(hex: "#F0F2F4")
-    static let ink2 = Color(hex: "#B5BCC7")
-    static let ink3 = Color(hex: "#8993A2")
-    static let rule = Color(hex: "#1A2029")
-    static let controlRule = Color(hex: "#303845")
-    static let accent = Color(hex: "#E8C48E")
-    static let track = Color(hex: "#171E28")
+    static let ink = contrastAware("#F0F2F4", contrast: "#FFFFFF")
+    static let ink2 = contrastAware("#B5BCC7", contrast: "#D8DFE9")
+    static let ink3 = contrastAware("#8993A2", contrast: "#B6C0CE")
+    static let rule = contrastAware("#1A2029", contrast: "#3A4556")
+    static let controlRule = contrastAware("#303845", contrast: "#4D596C")
+    static let accent = contrastAware("#E8C48E", contrast: "#F3D7AC")
+    static let track = contrastAware("#171E28", contrast: "#242E3D")
     static let selection = Color(hex: "#202630")
 }
 
@@ -72,24 +97,36 @@ enum Palette {
         dark: "#EEF2F8",
         contrastLight: "#090E14",
         contrastDark: "#FFFFFF",
-        fieldLight: "#2B2A24", fieldDark: "#ECE6D6",
-        cosmos: "#F0F2F4"
+        fieldLight: "#2B2A24",
+        fieldDark: "#ECE6D6",
+        fieldContrastLight: "#161511",
+        fieldContrastDark: "#FBF7EC",
+        cosmos: "#F0F2F4",
+        cosmosContrast: "#FFFFFF"
     )
     static let ink2 = Color(
         light: "#465264",
         dark: "#A9B5C7",
         contrastLight: "#283241",
         contrastDark: "#D4DCE8",
-        fieldLight: "#55524A", fieldDark: "#C4BDAB",
-        cosmos: "#B5BCC7"
+        fieldLight: "#55524A",
+        fieldDark: "#C4BDAB",
+        fieldContrastLight: "#33312B",
+        fieldContrastDark: "#E4DEC9",
+        cosmos: "#B5BCC7",
+        cosmosContrast: "#D8DFE9"
     )
     static let ink3 = Color(
-        light: "#6C788A",
+        light: "#5D6879",
         dark: "#7B889C",
-        contrastLight: "#465264",
+        contrastLight: "#3B4657",
         contrastDark: "#B0BCCF",
-        fieldLight: "#6B675B", fieldDark: "#A9A392",
-        cosmos: "#8993A2"
+        fieldLight: "#6B675B",
+        fieldDark: "#A9A392",
+        fieldContrastLight: "#454239",
+        fieldContrastDark: "#CFC9B8",
+        cosmos: "#8993A2",
+        cosmosContrast: "#B6C0CE"
     )
 
     // MARK: Surfaces & borders
@@ -140,18 +177,40 @@ enum Palette {
     })
 
     static let trayRim = Color(nsColor: NSColor(name: nil) { appearance in
-        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.rule) }
-        if ThemeRuntime.isField { return NSColor(Color(hex: appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? "#3E4337" : "#D9D2C0")) }
-        return appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        if ThemeRuntime.isCosmos {
+            return NSColor(Color(hex: increased ? "#3A4556" : "#1A2029"))
+        }
+        if ThemeRuntime.isField {
+            let hex = switch (isDark, increased) {
+            case (false, false): "#D9D2C0"
+            case (true, false): "#3E4337"
+            case (false, true): "#9F9680"
+            case (true, true): "#6A725E"
+            }
+            return NSColor(Color(hex: hex))
+        }
+        return isDark
             ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.10)
             : NSColor(srgbRed: 15 / 255, green: 23 / 255, blue: 42 / 255, alpha: 0.08)
     })
 
     static let barTrack = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        if ThemeRuntime.isCosmos { return NSColor(CosmosPalette.track) }
-        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#353A30" : "#E6DFCD")) }
         let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        if ThemeRuntime.isCosmos {
+            return NSColor(Color(hex: increased ? "#242E3D" : "#171E28"))
+        }
+        if ThemeRuntime.isField {
+            let hex = switch (isDark, increased) {
+            case (false, false): "#E6DFCD"
+            case (true, false): "#353A30"
+            case (false, true): "#CFC6AE"
+            case (true, true): "#4C5345"
+            }
+            return NSColor(Color(hex: hex))
+        }
         if isDark {
             return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: increased ? 0.16 : 0.08)
         }
@@ -160,12 +219,20 @@ enum Palette {
 
     static let hairline = Color(nsColor: NSColor(name: nil) { appearance in
         let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         if ThemeRuntime.isCosmos {
-            let hex = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? "#303845" : "#1A2029"
+            let hex = increased ? "#4D596C" : "#1A2029"
             return NSColor(Color(hex: hex))
         }
-        if ThemeRuntime.isField { return NSColor(Color(hex: isDark ? "#3E4337" : "#D9D2C0")) }
-        let increased = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+        if ThemeRuntime.isField {
+            let hex = switch (isDark, increased) {
+            case (false, false): "#D9D2C0"
+            case (true, false): "#3E4337"
+            case (false, true): "#9F9680"
+            case (true, true): "#6A725E"
+            }
+            return NSColor(Color(hex: hex))
+        }
         if isDark {
             return NSColor(srgbRed: 1, green: 1, blue: 1, alpha: increased ? 0.30 : 0.095)
         }
@@ -182,29 +249,72 @@ enum Palette {
         dark: "#56A8FF",
         contrastLight: "#004FA3",
         contrastDark: "#82BEFF",
-        fieldLight: "#A94E2A", fieldDark: "#E28A62",
-        cosmos: "#E8C48E"
+        fieldLight: "#A94E2A",
+        fieldDark: "#E28A62",
+        fieldContrastLight: "#873818",
+        fieldContrastDark: "#F0A27D",
+        cosmos: "#E8C48E",
+        cosmosContrast: "#F3D7AC"
+    )
+    /// Ink color on `roleAccent` fills, meeting WCAG AA across every theme and appearance.
+    static let onAccent = Color(
+        light: "#FFFFFF",
+        dark: "#090E14",
+        contrastLight: "#FFFFFF",
+        contrastDark: "#030507",
+        fieldLight: "#FFFFFF",
+        fieldDark: "#161813",
+        fieldContrastLight: "#FFFFFF",
+        fieldContrastDark: "#0E100C",
+        cosmos: "#07090D"
     )
     static let healthOK = Color(
         light: "#178750",
         dark: "#3BD184",
         contrastLight: "#0E6339",
         contrastDark: "#6BE0A3",
-        cosmos: "#E8C48E"
+        fieldLight: "#3F6B36",
+        fieldDark: "#8FBE79",
+        fieldContrastLight: "#2D5126",
+        fieldContrastDark: "#AED49B",
+        cosmos: "#9FC2B0",
+        cosmosContrast: "#B8D9C8"
     )
     static let healthWarn = Color(
         light: "#B56100",
         dark: "#FFB340",
         contrastLight: "#8A4800",
         contrastDark: "#FFC978",
-        cosmos: "#E8C48E"
+        fieldLight: "#8F5A12",
+        fieldDark: "#DFB35C",
+        fieldContrastLight: "#6E4309",
+        fieldContrastDark: "#EECA80",
+        cosmos: "#E8C48E",
+        cosmosContrast: "#F3D7AC"
+    )
+    static let healthFailed = Color(
+        light: "#C43E3E",
+        dark: "#EF6B6B",
+        contrastLight: "#962424",
+        contrastDark: "#FF9494",
+        fieldLight: "#A4382B",
+        fieldDark: "#E5806E",
+        fieldContrastLight: "#7E251B",
+        fieldContrastDark: "#F2A091",
+        cosmos: "#D97A4A",
+        cosmosContrast: "#EB9568"
     )
     static let healthScan = Color(
         light: "#0D7490",
         dark: "#4FB0CD",
         contrastLight: "#08566B",
         contrastDark: "#7AD0E6",
-        cosmos: "#B5BCC7"
+        fieldLight: "#3F6D6E",
+        fieldDark: "#7EB2B2",
+        fieldContrastLight: "#2A5051",
+        fieldContrastDark: "#A2CECE",
+        cosmos: "#B5BCC7",
+        cosmosContrast: "#D8DFE9"
     )
 
     static let muted = ink2
@@ -462,7 +572,7 @@ struct WindowBackdrop: View {
             }
         }
         .ignoresSafeArea()
-        .background { BackdropWindowConfigurator(isTransparent: isTransparent && opacity < 0.98) }
+        .background { BackdropWindowConfigurator(isTransparent: isTransparent && opacity < 0.98, theme: theme) }
     }
 
     @ViewBuilder
@@ -566,20 +676,23 @@ extension View {
 
 private struct BackdropWindowConfigurator: NSViewRepresentable {
     let isTransparent: Bool
+    let theme: AppTheme
 
     func makeNSView(context: Context) -> BackdropWindowView {
         let view = BackdropWindowView()
         view.isTransparent = isTransparent
+        view.theme = theme
         return view
     }
 
     func updateNSView(_ view: BackdropWindowView, context: Context) {
         view.isTransparent = isTransparent
+        view.theme = theme
     }
 }
 
 private final class BackdropWindowView: NSView {
-    private static let trafficLightOffset = CGPoint(x: 6, y: 6)
+    private static let floatingTrayTrafficLightOffset = CGPoint(x: 6, y: 6)
     private static let trafficLightTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
 
     private struct DefaultButtonOrigin {
@@ -588,7 +701,19 @@ private final class BackdropWindowView: NSView {
     }
 
     var isTransparent = false {
-        didSet { applyWindowAppearance() }
+        didSet {
+            if isTransparent != oldValue {
+                applyWindowAppearance()
+            }
+        }
+    }
+
+    var theme: AppTheme = .liquidGlass {
+        didSet {
+            if theme != oldValue {
+                applyWindowAppearance()
+            }
+        }
     }
 
     private var defaultButtonOrigins: [NSWindow.ButtonType: DefaultButtonOrigin] = [:]
@@ -693,7 +818,8 @@ private final class BackdropWindowView: NSView {
     }
 
     /// An empty unified toolbar moves the traffic lights 20pt in and centres them in a 52pt band;
-    /// `repositionWindowControls` shifts them a further +6pt inward and +6pt down inside the tray.
+    /// `repositionWindowControls` shifts them a further +6pt inward and +6pt down inside the 8pt-inset floating tray,
+    /// while Cosmos (0pt tray inset) keeps the native unified-toolbar alignment.
     private func insetWindowControls(in window: NSWindow) {
         if window.toolbar == nil {
             window.toolbar = NSToolbar(identifier: "TokenTakenMainWindow")
@@ -729,6 +855,8 @@ private final class BackdropWindowView: NSView {
             }
         }
 
+        let offset = theme == .cosmos ? CGPoint.zero : Self.floatingTrayTrafficLightOffset
+
         isAdjustingButtons = true
         defer { isAdjustingButtons = false }
 
@@ -737,8 +865,8 @@ private final class BackdropWindowView: NSView {
                   let buttonSuperview = button.superview,
                   let base = defaultButtonOrigins[type]
             else { continue }
-            let targetX = base.x + Self.trafficLightOffset.x
-            let targetTop = base.topInset + Self.trafficLightOffset.y
+            let targetX = base.x + offset.x
+            let targetTop = base.topInset + offset.y
             let targetY = buttonSuperview.isFlipped
                 ? targetTop
                 : (buttonSuperview.bounds.height - targetTop - button.frame.height)

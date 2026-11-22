@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Retained local long-term hourly usage history (`hourly_history`, schema 7) as the base for weekly, monthly, and yearly recaps: sparse per-source hours with floor semantics, never synced, about 2–3 MB per year for a heavy user; collectors now emit hourly rows for their whole readable history and the first collection after upgrading backfills it once ([ADR-0015](docs/decisions/0015-hourly-history.md)).
 
+### Changed
+
+- Brought the three themes to parity: Field now shows the five-category token composition, the model cache detail popover, "Mainly from" lines and a no-usage notice in the main window, and uses paper surfaces and serif type (with Songti SC) in the dimension switch, status cards, menu bar, Settings and share sheet instead of Liquid Glass or system chrome; Cosmos breakdown rows highlight together with the scene, and Cosmos status colors now distinguish healthy, stale and failed states.
+- Share cards offer 2:3, 1:1 and 3:2 in every theme, Field and Confluence cards follow the harness/model switch, "Show composition" means the five-category composition everywhere, and the Field inscription can be edited (up to 40 characters) or rerolled.
+- Cosmos draws uncategorized tokens as a neutral sixth disk band with its own legend row instead of folding them into the outermost band.
+- Field and Cosmos honor Increase Contrast; primary buttons and secondary text meet WCAG AA in every theme and appearance.
+
+### Fixed
+
+- Fixed overlapping Cosmos overlays at the minimum window height, Lens axis labels missing 万亿 and dropping tiny non-zero bar segments, a Confluence portrait share card overlap with cost and rank enabled, and menu-bar-only launches not forcing Cosmos dark appearance.
+- Share export no longer reports zero usage when a period's data cannot be loaded; it explains the problem and disables export instead.
+- Reduced hover and animation work in Confluence, Lens, Field and Cosmos (cached layouts, a single planet surface evaluation per pixel).
+
 ## [0.2.0] - 2026-11-20
 
 ### Added

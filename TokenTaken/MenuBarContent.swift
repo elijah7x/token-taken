@@ -35,6 +35,9 @@ struct MenuBarContent: View {
             } else if settings.theme == .cosmos, !activeSources.isEmpty {
                 CosmosSceneView(summary: today, dimension: .sources, highlight: .constant(nil), style: .menuBar)
                     .aspectRatio(FieldSceneModel.size.width / FieldSceneModel.size.height, contentMode: .fit)
+                    .overlay {
+                        Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
+                    }
             }
 
             topSourcesSection
@@ -48,6 +51,7 @@ struct MenuBarContent: View {
         }
         .padding(14)
         .frame(width: 332)
+        .font(settings.theme == .field ? FieldFont.serif(12.5) : nil)
         .background {
             if settings.theme == .field {
                 FieldPalette.paper
@@ -55,11 +59,6 @@ struct MenuBarContent: View {
                 CosmosPalette.panel
             } else if reduceTransparency {
                 Palette.solid
-            }
-        }
-        .overlay {
-            if settings.theme == .cosmos {
-                Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
             }
         }
         .onAppear { model.refresh() }
@@ -75,7 +74,7 @@ struct MenuBarContent: View {
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Today · \(today.start.formatted(.dateTime.month(.abbreviated).day()))")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(menuBarFont(theme: settings.theme, size: 12, weight: .semibold))
                         .foregroundStyle(Palette.ink2)
                         .monospacedDigit()
                         .lineLimit(1)
@@ -102,7 +101,7 @@ struct MenuBarContent: View {
                             }
 
                             statusLabel
-                                .font(.system(size: 11.5, weight: hasIssue ? .semibold : .medium))
+                                .font(menuBarFont(theme: settings.theme, size: 11.5, weight: hasIssue ? .semibold : .medium))
                                 .foregroundStyle(hasIssue ? Palette.healthWarn : Palette.ink2)
                                 .monospacedDigit()
                                 .lineLimit(1)
@@ -125,12 +124,12 @@ struct MenuBarContent: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(TokenFormat.short(today.total.total))
-                    .font(.system(size: settings.theme == .cosmos ? 24 : 30, weight: .medium, design: settings.theme == .cosmos ? .monospaced : .default))
+                    .font(menuBarFont(theme: settings.theme, size: settings.theme == .cosmos ? 24 : 30, weight: .medium, monospacedInCosmos: true))
                     .tracking(settings.theme == .cosmos ? 0 : -0.8)
                     .foregroundStyle(Palette.ink1)
                     .monospacedDigit()
                 Text("tokens")
-                    .font(.system(size: 12.5, weight: .medium))
+                    .font(menuBarFont(theme: settings.theme, size: 12.5, weight: .medium))
                     .foregroundStyle(Palette.ink2)
             }
             .accessibilityElement(children: .combine)
@@ -138,11 +137,11 @@ struct MenuBarContent: View {
 
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(TokenFormat.usd(today.cost.estimatedUSD))
-                    .font(.system(size: 14, weight: .semibold, design: settings.theme == .cosmos ? .monospaced : .default))
+                    .font(menuBarFont(theme: settings.theme, size: 14, weight: .semibold, monospacedInCosmos: true))
                     .foregroundStyle(settings.theme == .cosmos ? CosmosPalette.accent : Palette.ink1)
                     .monospacedDigit()
                 Text("estimate, not a bill")
-                    .font(.system(size: 11.5))
+                    .font(menuBarFont(theme: settings.theme, size: 11.5))
                     .foregroundStyle(Palette.ink3)
             }
             .accessibilityElement(children: .combine)
@@ -150,7 +149,7 @@ struct MenuBarContent: View {
 
             if today.cost.unpricedTokens > 0 {
                 Text("\(TokenFormat.short(today.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
-                    .font(.system(size: 11))
+                    .font(menuBarFont(theme: settings.theme, size: 11))
                     .foregroundStyle(settings.theme == .cosmos ? CosmosPalette.accent : Palette.ink3)
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
@@ -161,33 +160,39 @@ struct MenuBarContent: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background { shape.fill(settings.theme == .cosmos ? CosmosPalette.background : Palette.cardSurface) }
-        .overlay { shape.strokeBorder(settings.theme == .cosmos ? CosmosPalette.controlRule : Palette.hairline, lineWidth: settings.theme == .cosmos ? 1 : 0.5) }
+        .overlay {
+            shape.strokeBorder(
+                settings.theme == .cosmos ? CosmosPalette.controlRule : (settings.theme == .field ? FieldPalette.rule : Palette.hairline),
+                lineWidth: settings.theme == .cosmos || settings.theme == .field ? 1 : 0.5
+            )
+        }
     }
 
     private var topSourcesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Top harnesses")
-                .font(.system(size: settings.theme == .cosmos ? 11 : 12, weight: .semibold))
+                .font(menuBarFont(theme: settings.theme, size: settings.theme == .cosmos ? 11 : 12, weight: .semibold))
                 .foregroundStyle(settings.theme == .cosmos ? CosmosPalette.ink3 : Palette.ink2)
                 .accessibilityAddTraits(.isHeader)
 
             if activeSources.isEmpty {
                 Text(model.isEmpty ? model.statusText : LocalizedStringKey("No usage yet today"))
-                    .font(.system(size: 12.5))
+                    .font(menuBarFont(theme: settings.theme, size: 12.5))
                     .foregroundStyle(Palette.ink3)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
             } else {
+                let topSources = Array(activeSources.prefix(4))
                 VStack(spacing: settings.theme == .cosmos ? 0 : 9) {
-                    ForEach(activeSources.prefix(4)) { source in
-                        sourceRow(source)
+                    ForEach(Array(topSources.enumerated()), id: \.element.id) { index, source in
+                        sourceRow(source, showBottomRule: index < topSources.count - 1)
                     }
                 }
             }
         }
     }
 
-    private func sourceRow(_ source: Breakdown) -> some View {
+    private func sourceRow(_ source: Breakdown, showBottomRule: Bool) -> some View {
         let color = Palette.color(forSource: source.id)
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
             if settings.theme != .cosmos {
@@ -201,18 +206,18 @@ struct MenuBarContent: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(verbatim: source.name)
-                        .font(.system(size: 12.5, weight: .medium))
+                        .font(menuBarFont(theme: settings.theme, size: 12.5, weight: .medium))
                         .foregroundStyle(Palette.ink1)
                         .lineLimit(1)
 
                     Spacer(minLength: 8)
 
                     Text(TokenFormat.short(source.counts.total))
-                        .font(.system(size: 12.5, weight: .semibold, design: settings.theme == .cosmos ? .monospaced : .default))
+                        .font(menuBarFont(theme: settings.theme, size: 12.5, weight: .semibold, monospacedInCosmos: true))
                         .foregroundStyle(Palette.ink1)
 
                     Text(Share.percent(source.counts.total, of: today.total.total))
-                        .font(.system(size: 11.5, design: settings.theme == .cosmos ? .monospaced : .default))
+                        .font(menuBarFont(theme: settings.theme, size: 11.5, monospacedInCosmos: true))
                         .foregroundStyle(Palette.ink2)
                         .frame(minWidth: 42, alignment: .trailing)
                 }
@@ -229,9 +234,11 @@ struct MenuBarContent: View {
         }
         .padding(.vertical, settings.theme == .cosmos ? 4 : 0)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(CosmosPalette.rule)
-                .frame(height: settings.theme == .cosmos ? 1 : 0)
+            if settings.theme == .cosmos, showBottomRule {
+                Rectangle()
+                    .fill(CosmosPalette.rule)
+                    .frame(height: 1)
+            }
         }
         .monospacedDigit()
         .accessibilityElement(children: .combine)
@@ -247,7 +254,7 @@ struct MenuBarContent: View {
                 .accessibilityHidden(true)
 
             Text("Updated to \(version)")
-                .font(.system(size: 11.5, weight: .medium))
+                .font(menuBarFont(theme: settings.theme, size: 11.5, weight: .medium))
                 .foregroundStyle(Palette.ink1)
                 .monospacedDigit()
                 .lineLimit(1)
@@ -261,7 +268,7 @@ struct MenuBarContent: View {
                 dismiss()
             }
             .buttonStyle(.plain)
-            .font(.system(size: 11.5, weight: .semibold))
+            .font(menuBarFont(theme: settings.theme, size: 11.5, weight: .semibold))
             .foregroundStyle(Palette.roleAccent)
             .fixedSize()
 
@@ -280,7 +287,12 @@ struct MenuBarContent: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background { shape.fill(settings.theme == .cosmos ? CosmosPalette.background : Palette.cardSurface) }
-        .overlay { shape.strokeBorder(settings.theme == .cosmos ? CosmosPalette.controlRule : Palette.hairline, lineWidth: settings.theme == .cosmos ? 1 : 0.5) }
+        .overlay {
+            shape.strokeBorder(
+                settings.theme == .cosmos ? CosmosPalette.controlRule : (settings.theme == .field ? FieldPalette.rule : Palette.hairline),
+                lineWidth: settings.theme == .cosmos || settings.theme == .field ? 1 : 0.5
+            )
+        }
     }
 
     private var actionRow: some View {
@@ -328,6 +340,34 @@ struct MenuBarContent: View {
     }
 }
 
+private func menuBarFont(
+    theme: AppTheme,
+    size: CGFloat,
+    weight: Font.Weight = .regular,
+    monospacedInCosmos: Bool = false
+) -> Font {
+    if theme == .cosmos {
+        return monospacedInCosmos
+            ? .system(size: size, weight: weight, design: .monospaced)
+            : .system(size: size, weight: weight)
+    }
+    if theme == .field {
+        let nsWeight: NSFont.Weight = switch weight {
+        case .ultraLight: .ultraLight
+        case .thin: .thin
+        case .light: .light
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        case .heavy: .heavy
+        case .black: .black
+        default: .regular
+        }
+        return FieldFont.serif(size, weight: nsWeight)
+    }
+    return .system(size: size, weight: weight)
+}
+
 private struct MenuBarPrimaryButton: View {
     let title: LocalizedStringKey
     let action: () -> Void
@@ -338,9 +378,10 @@ private struct MenuBarPrimaryButton: View {
         let shape = RoundedRectangle(cornerRadius: settings.theme == .cosmos ? 0 : 8, style: .continuous)
         Button(action: action) {
             Text(title)
-                .font(.system(size: settings.theme == .cosmos ? 11 : 12, weight: .semibold))
-                .foregroundStyle(settings.theme == .cosmos ? CosmosPalette.background : .white)
+                .font(menuBarFont(theme: settings.theme, size: settings.theme == .cosmos ? 11 : 12, weight: .semibold))
+                .foregroundStyle(Palette.onAccent)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .padding(.horizontal, 10)
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
@@ -358,24 +399,37 @@ private struct MenuBarSecondaryButton: View {
     let title: LocalizedStringKey
     let foreground: Color
     let action: () -> Void
+    @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isHovered = false
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : 8, style: .continuous)
+        let isCosmos = settings.theme == .cosmos
+        let isField = settings.theme == .field
+        let shape = RoundedRectangle(cornerRadius: isCosmos ? 0 : 8, style: .continuous)
         Button(action: action) {
             Text(title)
-                .font(.system(size: ThemeRuntime.isCosmos ? 11 : 12, weight: .medium))
+                .font(menuBarFont(theme: settings.theme, size: isCosmos ? 11 : 12, weight: .medium))
                 .foregroundStyle(isHovered ? Palette.ink1 : foreground)
                 .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 11)
                 .frame(height: 30)
                 .background {
-                    shape.fill(ThemeRuntime.isCosmos ? (isHovered ? CosmosPalette.selection : CosmosPalette.background) : (reduceTransparency ? Palette.cardSurface : Palette.barTrack.opacity(isHovered ? 1 : 0.72)))
+                    if isCosmos {
+                        shape.fill(isHovered ? CosmosPalette.selection : CosmosPalette.background)
+                    } else if isField {
+                        shape.fill(isHovered ? FieldPalette.rule : FieldPalette.panel)
+                    } else {
+                        shape.fill(reduceTransparency ? Palette.cardSurface : Palette.barTrack.opacity(isHovered ? 1 : 0.72))
+                    }
                 }
                 .overlay {
-                    shape.strokeBorder(ThemeRuntime.isCosmos ? CosmosPalette.controlRule : Palette.hairline, lineWidth: ThemeRuntime.isCosmos || reduceTransparency ? 1 : 0.5)
+                    shape.strokeBorder(
+                        isCosmos ? CosmosPalette.controlRule : (isField ? FieldPalette.rule : Palette.hairline),
+                        lineWidth: isCosmos || isField || reduceTransparency ? 1 : 0.5
+                    )
                 }
                 .contentShape(shape)
         }

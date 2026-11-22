@@ -19,7 +19,8 @@ struct CosmosSceneUniforms {
     float focal;
     int hover;
     int bodyCount;
-    float edges[5];
+    int bandCount;
+    float edges[6];
     float3 bodyPosition[6];
     float bodyRadius[6];
     float bodyKind[6];
@@ -42,8 +43,9 @@ struct CosmosParticleUniforms {
     float pixel;
     float points;
     float shadow;
-    float edges[5];
+    float edges[6];
     float focal;
+    int bandCount;
 };
 
 struct CosmosFullscreenOut {
@@ -189,13 +191,24 @@ float4 a3disk(float3 q, float3 cam, constant CosmosSceneUniforms &u) {
     float clump = pow(smoothstep(0.6, 0.88, a3pfbm(float2(unit * 11.0 + u.time * 0.012, log(radius) * 7.0), 11.0)), 3.0);
     float density = (0.22 + 0.95 * noise) * (0.42 + 1.15 * streak * streak) * (0.96 + 0.06 * spiral) + clump * 0.12;
     float fade = smoothstep(1.02, 1.3, radius) * (1.0 - smoothstep(2.65, 4.0, radius));
-    int index = 4;
-    for (int i = 0; i < 5; i++) {
-        if (radius < u.edges[i] && index == 4) index = i;
+    int maxBand = clamp(u.bandCount - 1, 0, 5);
+    int index = maxBand;
+    for (int i = 0; i < 6; i++) {
+        if (i >= u.bandCount) break;
+        if (radius < u.edges[i]) {
+            index = i;
+            break;
+        }
     }
-    float3 temperature = a3thermal(clamp((radius - 1.02) / 2.98, 0.0, 1.0)) * a3bandColor(index);
+    float3 temperature = index == 5
+        ? float3(0.541, 0.576, 0.639)
+        : a3thermal(clamp((radius - 1.02) / 2.98, 0.0, 1.0)) * a3bandColor(index);
     float gap = 1.0;
-    for (int i = 0; i < 4; i++) gap *= 0.3 + 0.7 * smoothstep(0.006, 0.024, abs(radius - u.edges[i]));
+    int gapCount = max(0, min(5, u.bandCount - 1));
+    for (int i = 0; i < 5; i++) {
+        if (i >= gapCount) break;
+        gap *= 0.3 + 0.7 * smoothstep(0.006, 0.024, abs(radius - u.edges[i]));
+    }
     float3 velocity = normalize(float3(-q.z, 0.0, q.x)), toCamera = normalize(cam - q);
     float approach = dot(velocity, toCamera), beta = 0.48 * sqrt(1.02 / radius);
     float beam = clamp(pow(max(0.25, 1.0 + beta * approach), 3.0), 0.2, 2.4);
@@ -467,13 +480,7 @@ float4 pl_surface(float3 n, float kind, float seed, float t) {
     return float4(pl_moonSurface(n, seed), 0.0);
 }
 
-float3 planetAlbedo(float3 n, float kind, float seed, float t) {
-    return pl_surface(n, kind, seed, t).rgb;
-}
-
-float3 shadePlanet(float3 n, float3 v, float3 l, float3 lightColor,
-                   float kind, float seed, float t) {
-    float4 surface = pl_surface(n, kind, seed, t);
+float3 shadePlanet(float4 surface, float3 n, float3 v, float3 l, float3 lightColor, float kind) {
     float3 albedo = surface.rgb;
     float ndl = dot(n, l), ndv = clamp(dot(n, v), 0.0, 1.0);
     bool gas = kind < 1.5 || (kind > 2.5 && kind < 3.5);
@@ -610,10 +617,11 @@ float4 a3surface(float3 point, float3 center, float radius, float kind, float se
     float3 nl = a3local(n, tilt, spin), vl = a3local(v, tilt, spin), ll = a3local(l, tilt, spin);
     float3 keyDirection = a3keyDir(center, v), keyLight = a3keyColor(center, u);
     float3 keyLocal = a3local(keyDirection, tilt, spin);
-    float3 color = shadePlanet(nl, vl, ll, light, kind, seed, u.time);
-    float3 albedo = planetAlbedo(nl, kind, seed, u.time);
+    float4 surface = pl_surface(nl, kind, seed, u.time);
+    float3 albedo = surface.rgb;
+    float3 color = shadePlanet(surface, nl, vl, ll, light, kind);
     if (kind > 3.5 && kind < 4.5) color += albedo * keyLight * max(dot(nl, keyLocal), 0.0) * 0.9;
-    else color += shadePlanet(nl, vl, keyLocal, keyLight, kind, seed, u.time) * 0.9;
+    else color += shadePlanet(surface, nl, vl, keyLocal, keyLight, kind) * 0.9;
     color = (color + albedo * float3(0.065, 0.078, 0.10)) * 1.18;
     float distanceHaze = smoothstep(12.0, 22.0, distance(u.cam, point));
     float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
@@ -814,12 +822,13 @@ struct CosmosParticleOut {
 vertex CosmosParticleOut cosmosParticleVertex(CosmosParticleIn in [[stage_in]],
                                                constant CosmosParticleUniforms &u [[buffer(1)]]) {
     float band = in.meta.x, tail = in.meta.y, random = in.seed.w;
-    bool dust = band > 4.5;
+    bool dust = band > 5.5;
     float low = 1.02, high = u.edges[0];
     if (band > 0.5 && band < 1.5) { low = u.edges[0]; high = u.edges[1]; }
     else if (band > 1.5 && band < 2.5) { low = u.edges[1]; high = u.edges[2]; }
     else if (band > 2.5 && band < 3.5) { low = u.edges[2]; high = u.edges[3]; }
     else if (band > 3.5 && band < 4.5) { low = u.edges[3]; high = u.edges[4]; }
+    else if (band > 4.5 && band < 5.5) { low = u.edges[4]; high = u.edges[5]; }
     bool plunge = !dust && fract(random * 13.17) < 0.18;
     float life = fract(random + u.time * (plunge ? 0.085 : 0.018));
     float radius = dust ? 5.25 + in.seed.x * 0.72
@@ -848,13 +857,18 @@ vertex CosmosParticleOut cosmosParticleVertex(CosmosParticleIn in [[stage_in]],
         out.color = mix(float3(0.3, 0.35, 0.43), float3(0.62, 0.48, 0.3), random);
         out.alpha = (0.025 + 0.07 * random) * u.dust;
     } else {
+        int maxBand = clamp(u.bandCount - 1, 0, 5);
         int index = 0;
-        if (radius >= u.edges[0]) index = 1;
-        if (radius >= u.edges[1]) index = 2;
-        if (radius >= u.edges[2]) index = 3;
-        if (radius >= u.edges[3]) index = 4;
+        if (maxBand >= 1 && radius >= u.edges[0]) index = 1;
+        if (maxBand >= 2 && radius >= u.edges[1]) index = 2;
+        if (maxBand >= 3 && radius >= u.edges[2]) index = 3;
+        if (maxBand >= 4 && radius >= u.edges[3]) index = 4;
+        if (maxBand >= 5 && radius >= u.edges[4]) index = 5;
         float innerGain = 0.28 + 1.1 * pow(1.02 / max(radius, 0.9), 1.4);
-        out.color = a3thermal(clamp((radius - 1.02) / 2.98, 0.0, 1.0)) * a3bandColor(index) * 1.25;
+        float3 bandRGB = index == 5
+            ? float3(0.541, 0.576, 0.639)
+            : a3thermal(clamp((radius - 1.02) / 2.98, 0.0, 1.0)) * a3bandColor(index);
+        out.color = bandRGB * 1.25;
         out.alpha = (0.12 + 0.22 * random) * fade * (1.0 - tail * 0.58) * u.disk * innerGain * (1.0 + pull * 0.6);
         float side = abs(dot(normalize(world.xz), normalize(u.cam.xz)));
         out.alpha *= mix(mix(0.18, 1.0, smoothstep(0.15, 0.7, side)), 1.0, smoothstep(1.3, 2.0, radius));
