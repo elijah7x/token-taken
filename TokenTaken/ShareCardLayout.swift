@@ -26,23 +26,16 @@ enum ShareCardMetrics {
         let canvas = aspect.canvasSize
         switch aspect {
         case .square:
-            return CGSize(width: canvas.width, height: (canvas.height * 0.42).rounded())
+            return CGSize(width: canvas.width, height: (canvas.height * 0.52).rounded())
         case .portrait:
-            return CGSize(width: canvas.width, height: (canvas.height * 0.50).rounded())
+            return CGSize(width: canvas.width, height: (canvas.height * 0.64).rounded())
         case .landscape:
             return CGSize(width: (canvas.width * 0.55).rounded(), height: canvas.height)
         }
     }
 
-    static func infoSize(for aspect: ShareAspect) -> CGSize {
-        let canvas = aspect.canvasSize
-        let visual = visualSize(for: aspect)
-        switch aspect {
-        case .square, .portrait:
-            return CGSize(width: canvas.width, height: canvas.height - visual.height)
-        case .landscape:
-            return CGSize(width: canvas.width - visual.width, height: canvas.height)
-        }
+    static func landscapeVisualWidth(for canvasWidth: CGFloat) -> CGFloat {
+        (canvasWidth * 0.55).rounded()
     }
 
     static func padding(for aspect: ShareAspect) -> CGFloat {
@@ -187,9 +180,10 @@ struct ShareCardLayout<Visual: View>: View {
 
     private var type: ShareCardTypography { ShareCardTypography(aspect: aspect) }
     private var canvasSize: CGSize { aspect.canvasSize }
-    private var visualSize: CGSize { ShareCardMetrics.visualSize(for: aspect) }
-    private var infoSize: CGSize { ShareCardMetrics.infoSize(for: aspect) }
+    private var estimatedVisualSize: CGSize { ShareCardMetrics.visualSize(for: aspect) }
     private var pad: CGFloat { ShareCardMetrics.padding(for: aspect) }
+    private var headerToHeroGap: CGFloat { (type.l2 * 0.6).rounded() }
+    private var levelGap: CGFloat { (type.l2 * 0.9).rounded() }
 
     private var detailDimension: BreakdownDimension {
         data.detailDimension(for: dimension)
@@ -216,18 +210,18 @@ struct ShareCardLayout<Visual: View>: View {
             cardBackdrop
 
             if aspect == .landscape {
+                let visualWidth = ShareCardMetrics.landscapeVisualWidth(for: canvasSize.width)
+                let infoWidth = canvasSize.width - visualWidth
                 HStack(spacing: 0) {
                     visualSlot
-                        .frame(width: visualSize.width, height: visualSize.height)
-                    infoPanel
-                        .frame(width: infoSize.width, height: infoSize.height, alignment: .topLeading)
+                        .frame(width: visualWidth, height: canvasSize.height)
+                    landscapeInfoPanel(width: infoWidth)
                 }
             } else {
                 VStack(spacing: 0) {
                     visualSlot
-                        .frame(width: visualSize.width, height: visualSize.height)
-                    infoPanel
-                        .frame(width: infoSize.width, height: infoSize.height, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    stackedInfoPanel
                 }
             }
         }
@@ -240,7 +234,7 @@ struct ShareCardLayout<Visual: View>: View {
             ShareLiquidCardBackdrop(
                 accentColor: data.accentColor,
                 hasUsage: data.counts.total > 0,
-                visualRect: CGRect(origin: .zero, size: visualSize),
+                visualRect: CGRect(origin: .zero, size: estimatedVisualSize),
                 isDark: scheme == .dark,
                 reduceTransparency: reduceTransparency
             )
@@ -265,55 +259,74 @@ struct ShareCardLayout<Visual: View>: View {
         }
     }
 
-    private var infoPanel: some View {
-        let topPad: CGFloat = if skin.fullBleedVisual || aspect == .landscape {
-            pad
-        } else {
-            aspect == .square ? 32 : 44
-        }
-        let leadingPad: CGFloat = (!skin.fullBleedVisual && aspect == .landscape) ? 52 : pad
-
-        return VStack(alignment: .leading, spacing: 0) {
+    private var infoContent: some View {
+        VStack(alignment: .leading, spacing: 0) {
             header
 
             heroSection
-                .padding(.top, aspect == .square ? 18 : (aspect == .landscape ? 32 : 28))
+                .padding(.top, headerToHeroGap)
 
             contextSection
-                .padding(.top, aspect == .square ? 12 : 18)
+                .padding(.top, levelGap)
 
             if let quote = formattedFieldQuote {
                 quoteLine(quote)
-                    .padding(.top, aspect == .square ? 10 : 16)
+                    .padding(.top, levelGap)
             }
 
             if detail != .none {
-                Spacer(minLength: aspect == .square ? 12 : 20)
-
                 Rectangle()
                     .fill(skin.rule)
                     .frame(height: 1)
+                    .padding(.top, levelGap)
 
                 detailSection
-                    .padding(.top, aspect == .square ? 14 : 20)
-            } else {
-                Spacer(minLength: 0)
+                    .padding(.top, levelGap)
             }
         }
-        .padding(.top, topPad)
-        .padding(.bottom, pad)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var stackedInfoPanel: some View {
+        let topPad: CGFloat = if skin.fullBleedVisual {
+            pad
+        } else {
+            aspect == .square ? 36 : 44
+        }
+
+        return infoContent
+            .padding(.top, topPad)
+            .padding(.bottom, pad)
+            .padding(.horizontal, pad)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(skin.fullBleedVisual ? skin.panelColor : Color.clear)
+            .overlay(alignment: .top) {
+                if skin.fullBleedVisual {
+                    Rectangle()
+                        .fill(skin.rule)
+                        .frame(height: 1)
+                }
+            }
+    }
+
+    private func landscapeInfoPanel(width: CGFloat) -> some View {
+        let leadingPad: CGFloat = skin.fullBleedVisual ? pad : 52
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Spacer(minLength: 0)
+            infoContent
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, pad)
         .padding(.leading, leadingPad)
         .padding(.trailing, pad)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(width: width, height: canvasSize.height, alignment: .leading)
         .background(skin.fullBleedVisual ? skin.panelColor : Color.clear)
-        .overlay(alignment: aspect == .landscape ? .leading : .top) {
+        .overlay(alignment: .leading) {
             if skin.fullBleedVisual {
                 Rectangle()
                     .fill(skin.rule)
-                    .frame(
-                        width: aspect == .landscape ? 1 : nil,
-                        height: aspect == .landscape ? nil : 1
-                    )
+                    .frame(width: 1)
             }
         }
     }
@@ -604,13 +617,15 @@ struct ShareCardLayout<Visual: View>: View {
             let barHeight: CGFloat = aspect == .square ? 14 : 16
             let barRadius: CGFloat = skin.cornerRadius == 0 ? 0 : barHeight * 0.5
             let segmentRadius: CGFloat = skin.cornerRadius == 0 ? 0 : 3
-            let perRow = aspect == .landscape ? 2 : 3
+            let maxPerRow = aspect == .landscape ? 2 : 3
+            let rowCount = max(1, Int(ceil(Double(parts.count) / Double(maxPerRow))))
+            let perRow = Int(ceil(Double(parts.count) / Double(rowCount)))
             let rows = stride(from: 0, to: parts.count, by: perRow).map { start in
                 Array(parts[start..<min(start + perRow, parts.count)])
             }
 
             let barTrackColor = skin.barTrack
-            VStack(alignment: .leading, spacing: aspect == .square ? 14 : 16) {
+            VStack(alignment: .leading, spacing: aspect == .square ? 16 : 18) {
                 Canvas { context, size in
                     let fullRect = CGRect(origin: .zero, size: size)
                     let trackPath = Path(roundedRect: fullRect, cornerRadius: barRadius, style: .continuous)
@@ -640,7 +655,7 @@ struct ShareCardLayout<Visual: View>: View {
                 .frame(height: barHeight)
                 .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: aspect == .square ? 8 : 10) {
+                VStack(alignment: .leading, spacing: aspect == .square ? 12 : 14) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                         HStack(spacing: aspect == .landscape ? 20 : 24) {
                             ForEach(row) { part in
@@ -667,10 +682,20 @@ struct ShareCardLayout<Visual: View>: View {
                                 }
                                 .lineLimit(1)
                                 .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.legend, preferred: 0.92))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if row.count < perRow {
+                                ForEach(0..<(perRow - row.count), id: \.self) { _ in
+                                    Color.clear
+                                        .frame(maxWidth: .infinity, maxHeight: 1)
+                                        .accessibilityHidden(true)
+                                }
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

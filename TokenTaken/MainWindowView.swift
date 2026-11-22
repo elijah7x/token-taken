@@ -67,9 +67,9 @@ struct MainWindowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dimension: BreakdownDimension = .sources
     @State private var isPresentingShare = false
-    @State private var fieldHighlight: String?
-    @State private var cosmosHighlight: String?
+    @State private var highlight: String?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var locale
 
     private var isFirstLaunchCollecting: Bool {
         model.isEmpty && refreshCoordinator?.isRefreshing == true
@@ -103,8 +103,7 @@ struct MainWindowView: View {
         .onAppear { settings.applyAppearance() }
         .onChange(of: colorScheme) { ThemeAppIcon.apply(settings.theme) }
         .onChange(of: dimension) {
-            fieldHighlight = nil
-            cosmosHighlight = nil
+            highlight = nil
         }
     }
 
@@ -123,9 +122,21 @@ struct MainWindowView: View {
         dimension == .sources ? model.summary.bySource : model.summary.byModel
     }
 
-    private var soleActiveSourceName: String? {
-        let active = model.summary.bySource.filter { $0.counts.total > 0 }
-        return active.count == 1 ? active[0].name : nil
+    private var highlightBinding: Binding<String?> {
+        settings.theme == .liquidGlass ? .constant(nil) : $highlight
+    }
+
+    private var breakdownCard: some View {
+        let fieldCrops: [String: FieldCrop] = settings.theme == .field
+            ? FieldCrop.assign(fieldItems.filter { $0.counts.total > 0 })
+            : [:]
+        return BreakdownCard(
+            summary: model.summary,
+            dimension: dimension,
+            highlight: highlightBinding,
+            itemSubtitles: fieldCrops.mapValues { $0.label(locale: locale) },
+            itemColors: fieldCrops.mapValues(\.color)
+        )
     }
 
     @ViewBuilder
@@ -146,18 +157,13 @@ struct MainWindowView: View {
                     // clicks on anything laid out above it, so the switch row is a safe-area inset of the scroll view.
                     ScrollView {
                         VStack(alignment: .leading, spacing: 18) {
-                            FieldLandscapeView(items: fieldItems, highlight: $fieldHighlight)
+                            FieldLandscapeView(items: fieldItems, highlight: $highlight)
                             FieldCompositionStrip(counts: model.summary.total)
-                            FieldBreakdownList(
-                                items: fieldItems,
-                                total: model.summary.total.total,
-                                dimension: dimension,
-                                soleSource: soleActiveSourceName,
-                                highlight: $fieldHighlight
-                            )
+                            breakdownCard
                         }
                         .padding(.horizontal, 28)
                         .padding(.top, 8)
+                        .padding(.bottom, 24)
                     }
                     .scrollEdgeEffectHidden(true, for: .top)
                     .safeAreaInset(edge: .top, spacing: 0) { dimensionSwitchRow }
@@ -165,7 +171,7 @@ struct MainWindowView: View {
                     dimensionSwitchRow
 
                     if settings.theme == .cosmos {
-                        CosmosSceneView(summary: model.summary, dimension: dimension, highlight: $cosmosHighlight)
+                        CosmosSceneView(summary: model.summary, dimension: dimension, highlight: $highlight)
                             .frame(maxWidth: .infinity, minHeight: 280, maxHeight: .infinity)
                             .clipped()
                     } else if settings.theme == .liquidGlass && settings.liquidView == .lens {
@@ -187,15 +193,11 @@ struct MainWindowView: View {
                         .padding(.horizontal, 28)
                         .padding(.vertical, 20)
 
-                    BreakdownCard(
-                        summary: model.summary,
-                        dimension: dimension,
-                        highlight: settings.theme == .cosmos ? $cosmosHighlight : .constant(nil)
-                    )
-                    .padding(.horizontal, 28)
+                    breakdownCard
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 24)
                 }
             }
-            .padding(.bottom, 24)
         }
     }
 }

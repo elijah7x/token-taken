@@ -668,11 +668,21 @@ struct BreakdownCard: View {
     let summary: UsageSummary
     let dimension: BreakdownDimension
     @Binding var highlight: String?
+    let itemSubtitles: [String: String]
+    let itemColors: [String: Color]
 
-    init(summary: UsageSummary, dimension: BreakdownDimension, highlight: Binding<String?> = .constant(nil)) {
+    init(
+        summary: UsageSummary,
+        dimension: BreakdownDimension,
+        highlight: Binding<String?> = .constant(nil),
+        itemSubtitles: [String: String] = [:],
+        itemColors: [String: Color] = [:]
+    ) {
         self.summary = summary
         self.dimension = dimension
         self._highlight = highlight
+        self.itemSubtitles = itemSubtitles
+        self.itemColors = itemColors
     }
 
     // A footer that folds a single row saves nothing; show it instead.
@@ -681,6 +691,7 @@ struct BreakdownCard: View {
     @State private var showsAllModels = false
     @State private var showsAllSources = false
     @State private var cacheDetailModelID: String?
+    @FocusState private var focusedItemID: String?
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -733,6 +744,14 @@ struct BreakdownCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: dimension) {
             cacheDetailModelID = nil
+            focusedItemID = nil
+        }
+        .onChange(of: focusedItemID) { oldID, newID in
+            if let newID {
+                highlight = newID
+            } else if let oldID, highlight == oldID {
+                highlight = nil
+            }
         }
     }
 
@@ -757,14 +776,19 @@ struct BreakdownCard: View {
     private func row(_ item: Breakdown, modelColors: [String: Color], soleSource: String?) -> some View {
         let isModel = dimension == .models
         let isHighlighted = highlight == item.id
-        let color = isModel
-            ? (modelColors[item.id] ?? Palette.color(for: .output))
-            : Palette.color(forSource: item.id)
+        let isFocused = focusedItemID == item.id
+        let color = itemColors[item.id] ?? (
+            isModel
+                ? (modelColors[item.id] ?? Palette.color(for: .output))
+                : Palette.color(forSource: item.id)
+        )
+        let subtitle = itemSubtitles[item.id].flatMap { $0.isEmpty ? nil : $0 }
         let secondary = isModel ? soleSource : nil
+        let detailText = rowDetailText(subtitle: subtitle, secondary: secondary)
         let nameColor: Color = isHighlighted ? Palette.roleAccent : Palette.ink1
 
         let content = Group {
-            if let secondary {
+            if let detailText {
                 VStack(spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if ThemeChrome.showsSeriesSwatches {
@@ -792,10 +816,11 @@ struct BreakdownCard: View {
                     }
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("Mainly from \(secondary)")
+                        detailText
                             .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink2)
                             .lineLimit(1)
+                            .truncationMode(.tail)
 
                         Spacer(minLength: 8)
 
@@ -875,6 +900,10 @@ struct BreakdownCard: View {
             RadiusRole.badge.shape
                 .fill(isHighlighted ? Palette.barTrack : .clear)
         }
+        .overlay {
+            RadiusRole.badge.shape
+                .strokeBorder(isFocused ? Palette.roleAccent : .clear, lineWidth: 1)
+        }
         .contentShape(Rectangle())
 
         if isModel {
@@ -884,16 +913,17 @@ struct BreakdownCard: View {
                 content
             }
             .buttonStyle(.plain)
+            .focused($focusedItemID, equals: item.id)
             .onHover { inside in
                 if inside {
                     highlight = item.id
                 } else if highlight == item.id {
-                    highlight = nil
+                    highlight = focusedItemID
                 }
             }
             .help(item.name)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(Text(verbatim: item.name))
+            .accessibilityLabel(rowAccessibilityLabel(item, subtitle: subtitle))
             .accessibilityValue(rowAccessibilityValue(item, secondary: secondary))
             .accessibilityHint(Text("Shows cache details"))
             .accessibilityAddTraits(.isButton)
@@ -902,18 +932,40 @@ struct BreakdownCard: View {
             }
         } else {
             content
+                .focusable(interactions: .activate)
+                .focused($focusedItemID, equals: item.id)
                 .onHover { inside in
                     if inside {
                         highlight = item.id
                     } else if highlight == item.id {
-                        highlight = nil
+                        highlight = focusedItemID
                     }
                 }
                 .help(item.name)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text(verbatim: item.name))
+                .accessibilityLabel(rowAccessibilityLabel(item, subtitle: subtitle))
                 .accessibilityValue(rowAccessibilityValue(item, secondary: secondary))
         }
+    }
+
+    private func rowDetailText(subtitle: String?, secondary: String?) -> Text? {
+        switch (subtitle, secondary) {
+        case let (subtitle?, secondary?):
+            return Text(verbatim: "\(subtitle) · ") + Text("Mainly from \(secondary)")
+        case let (subtitle?, nil):
+            return Text(verbatim: subtitle)
+        case let (nil, secondary?):
+            return Text("Mainly from \(secondary)")
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private func rowAccessibilityLabel(_ item: Breakdown, subtitle: String?) -> Text {
+        if let subtitle {
+            return Text(verbatim: "\(item.name), \(subtitle)")
+        }
+        return Text(verbatim: item.name)
     }
 
     private func cacheDetailPresented(for modelID: String) -> Binding<Bool> {

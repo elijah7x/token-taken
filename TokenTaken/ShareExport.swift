@@ -106,6 +106,12 @@ struct ShareExportSheet: View {
     @FocusState private var focusedPeriod: Period?
     @FocusState private var focusedAspect: ShareAspect?
     @FocusState private var focusedDetail: ShareCardDetail?
+    @FocusState private var focusedTextField: SheetTextField?
+
+    private enum SheetTextField: Hashable {
+        case inscription
+        case signature
+    }
 
     private struct SnapshotQueryKey: Equatable {
         let period: Period
@@ -241,7 +247,7 @@ struct ShareExportSheet: View {
         HStack(spacing: 0) {
             previewPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(isCosmos ? 20 : 24)
+                .padding(16)
 
             Rectangle()
                 .fill(Palette.hairline)
@@ -249,11 +255,11 @@ struct ShareExportSheet: View {
                 .padding(.vertical, 20)
 
             controlColumn
-                .frame(width: isCosmos ? 324 : 308)
-                .padding(24)
+                .frame(width: 308)
+                .padding(20)
                 .background(isCosmos ? CosmosPalette.background : Color.clear)
         }
-        .frame(width: isCosmos ? 892 : 760, height: isCosmos ? 640 : (isField ? 656 : 620))
+        .frame(width: 980, height: 656)
         .background {
             ShareSheetBackdrop(
                 theme: settings.theme,
@@ -266,9 +272,11 @@ struct ShareExportSheet: View {
                 previewPeriod = model.period
             }
             seedFieldInscriptionIfNeeded()
+            focusedTextField = nil
         }
         .onChange(of: settings.theme) { _, _ in
             seedFieldInscriptionIfNeeded()
+            focusedTextField = nil
         }
         .onChange(of: snapshotQueryKey, initial: true) { _, key in
             let resolved = resolveShareSnapshot(for: key)
@@ -330,8 +338,8 @@ struct ShareExportSheet: View {
     private var previewPane: some View {
         GeometryReader { proxy in
             let canvasSize = cardCanvasSize
-            let availableWidth = max(1, proxy.size.width - 8)
-            let availableHeight = max(1, proxy.size.height - 8)
+            let availableWidth = max(1, proxy.size.width)
+            let availableHeight = max(1, proxy.size.height)
             let scale = min(availableWidth / canvasSize.width, availableHeight / canvasSize.height)
             let scaledWidth = canvasSize.width * scale
             let scaledHeight = canvasSize.height * scale
@@ -367,7 +375,7 @@ struct ShareExportSheet: View {
                 y: 6
             )
             .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-            .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: aspect)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: effectiveAspect)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text("Share card preview"))
@@ -440,7 +448,7 @@ struct ShareExportSheet: View {
                             shareToggleRow(title: "Inscription", isOn: $showInscription)
                             if showInscription {
                                 HStack(spacing: 6) {
-                                    fieldTextRow("A short note", text: $inscription, limit: ShareInscriptions.maxLength)
+                                    fieldTextRow("A short note", text: $inscription, limit: ShareInscriptions.maxLength, field: .inscription)
                                     Button {
                                         if let next = ShareInscriptions.random(for: settings.theme, locale: locale, excluding: inscription) {
                                             inscription = next
@@ -458,7 +466,7 @@ struct ShareExportSheet: View {
                             }
                             shareToggleRow(title: "Signature", isOn: $showSignature)
                             if showSignature {
-                                fieldTextRow("Your name", text: $signature, limit: 24)
+                                fieldTextRow("Your name", text: $signature, limit: 24, field: .signature)
                             }
                         }
                     }
@@ -501,9 +509,15 @@ struct ShareExportSheet: View {
         }
     }
 
-    private func fieldTextRow(_ title: LocalizedStringKey, text: Binding<String>, limit: Int) -> some View {
+    private func fieldTextRow(
+        _ title: LocalizedStringKey,
+        text: Binding<String>,
+        limit: Int,
+        field: SheetTextField
+    ) -> some View {
         TextField(title, text: text)
             .textFieldStyle(.plain)
+            .focused($focusedTextField, equals: field)
             .font(ThemeFont.make(13))
             .foregroundStyle(Palette.ink1)
             .padding(.horizontal, 10)
@@ -1929,6 +1943,7 @@ struct ShareCardView: View {
                 ($0, FieldCrop.color(for: $0))
             })
             let fieldItems = data.rankedItems(dimension: dimension)
+            let fieldCornerRadius = RadiusRole.card.value
             ShareCardLayout(
                 data: data,
                 aspect: aspect,
@@ -1953,28 +1968,46 @@ struct ShareCardView: View {
                     categoryOrder: Self.fieldCategoryOrder,
                     categoryColors: fieldCategoryColors,
                     uncategorizedColor: FieldPalette.muted.opacity(0.55),
-                    cornerRadius: 14,
+                    cornerRadius: fieldCornerRadius,
                     showsSeriesSwatches: true,
                     fullBleedVisual: false,
                     usesLiquidAtmosphere: false
                 ) {
                     if dataUnavailable || (fieldItems.isEmpty && data.isPartialScope && data.counts.total > 0) {
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous)
                             .fill(FieldPalette.panel)
-                            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous)
+                                    .strokeBorder(FieldPalette.rule, lineWidth: 1)
+                            }
                             .overlay {
                                 Text("Breakdown unavailable")
                                     .font(ThemeFont.make(aspect == .square ? 26 : 28, weight: .medium))
                                     .foregroundStyle(FieldPalette.muted)
                             }
-                            .aspectRatio(FieldSceneModel.size.width / FieldSceneModel.size.height, contentMode: .fit)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        FieldLandscapeView(
-                            items: fieldItems,
-                            highlight: .constant(nil),
-                            interactive: false,
-                            compact: true
-                        )
+                        GeometryReader { proxy in
+                            let slotSize = proxy.size
+                            let sceneAspect = FieldSceneModel.size.width / FieldSceneModel.size.height
+                            // Aspect-fill the slot and bleed past FieldLandscapeView's internal 1pt border and corners.
+                            let fillWidth = max(slotSize.width, slotSize.height * sceneAspect) + 4
+                            let fillHeight = fillWidth / sceneAspect
+
+                            FieldLandscapeView(
+                                items: fieldItems,
+                                highlight: .constant(nil),
+                                interactive: false,
+                                compact: true
+                            )
+                            .frame(width: fillWidth, height: fillHeight)
+                            .position(x: slotSize.width / 2, y: slotSize.height / 2)
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous)
+                                .strokeBorder(FieldPalette.rule, lineWidth: 1)
+                        }
                     }
                 }
             )
@@ -2314,13 +2347,61 @@ private final class SharePickerAnchor {
 private struct SharePickerAnchorRepresentable: NSViewRepresentable {
     let anchor: SharePickerAnchor
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
+    func makeNSView(context: Context) -> ShareSheetAnchorView {
+        let view = ShareSheetAnchorView(frame: .zero)
         anchor.view = view
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
+    func updateNSView(_ nsView: ShareSheetAnchorView, context: Context) {
         anchor.view = nsView
+    }
+}
+
+/// Anchors `NSSharingServicePicker` and clears AppKit's automatic initial text-field selection when the sheet opens.
+private final class ShareSheetAnchorView: NSView {
+    private var didClearInitialFocus = false
+    private weak var observedWindow: NSWindow?
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard !didClearInitialFocus else { return }
+        if let oldWindow = observedWindow {
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: oldWindow)
+            observedWindow = nil
+        }
+        guard let window else { return }
+        observedWindow = window
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowDidBecomeKey),
+            name: NSWindow.didBecomeKeyNotification,
+            object: window
+        )
+        if window.isKeyWindow {
+            clearInitialTextFieldFocus(in: window)
+        }
+    }
+
+    @objc private func windowDidBecomeKey() {
+        guard let window else { return }
+        clearInitialTextFieldFocus(in: window)
+    }
+
+    private func clearInitialTextFieldFocus(in window: NSWindow) {
+        guard !didClearInitialFocus else { return }
+        didClearInitialFocus = true
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+        observedWindow = nil
+        Task { @MainActor [weak window] in
+            guard let window,
+                  window.firstResponder is NSTextView || window.firstResponder is NSTextField
+            else { return }
+            window.makeFirstResponder(nil)
+        }
     }
 }
