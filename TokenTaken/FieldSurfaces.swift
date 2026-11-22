@@ -540,8 +540,22 @@ struct FieldShareCard: View {
             .minimumScaleFactor(0.8)
     }
 
+    @ViewBuilder
     private var field: some View {
-        FieldLandscapeView(items: items, highlight: .constant(nil), interactive: false)
+        if items.isEmpty && data.isPartialScope && data.counts.total > 0 {
+            // The scoped breakdown could not be loaded; never present a nonzero card as an empty farm.
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(FieldPalette.panel)
+                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(FieldPalette.rule, lineWidth: 1))
+                .overlay(
+                    Text("Breakdown unavailable")
+                        .font(FieldFont.serif(30))
+                        .foregroundStyle(FieldPalette.muted)
+                )
+                .aspectRatio(5.0 / 3.0, contentMode: .fit)
+        } else {
+            FieldLandscapeView(items: items, highlight: .constant(nil), interactive: false)
+        }
     }
 
     private struct CompositionPart: Identifiable {
