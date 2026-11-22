@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
 ### Added
 
 - Retained local long-term hourly usage history (`hourly_history`, schema 7) as the base for weekly, monthly, and yearly recaps: sparse per-source hours with floor semantics, never synced, about 2–3 MB per year for a heavy user; collectors now emit hourly rows for their whole readable history and the first collection after upgrading backfills it once ([ADR-0015](docs/decisions/0015-hourly-history.md)).
