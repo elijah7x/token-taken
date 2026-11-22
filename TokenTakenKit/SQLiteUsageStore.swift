@@ -84,7 +84,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                 );
                 """)
             if version < 2 {
-                try execute("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS daily_usage; DROP TABLE IF EXISTS hourly_usage; DROP TABLE IF EXISTS hourly_history;")
+                try execute("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS daily_usage; DROP TABLE IF EXISTS hourly_usage; DROP TABLE IF EXISTS hourly_history; DROP TABLE IF EXISTS hourly_history_epochs;")
                 let names = try columnNames(in: "health")
                 if !names.contains("skipped_records") {
                     try execute("ALTER TABLE health ADD COLUMN skipped_records INTEGER NOT NULL DEFAULT 0;")
@@ -118,6 +118,10 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                     event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
                     PRIMARY KEY (device_id, source_id, hour_start)
                 );
+                CREATE TABLE IF NOT EXISTS hourly_history_epochs (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+                    PRIMARY KEY (device_id, source_id)
+                );
                 CREATE TABLE IF NOT EXISTS history_epochs (
                     device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
                     time_zone TEXT,
@@ -141,7 +145,8 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             if !(try columnNames(in: "history_epochs").contains("time_zone")) {
                 try execute("ALTER TABLE history_epochs ADD COLUMN time_zone TEXT;")
             }
-            // Schema 7 adds the sparse long-term `hourly_history` table above without modifying existing tables (ADR-0015).
+            // Schema 7 adds the sparse long-term `hourly_history` table and its own applied epoch in `hourly_history_epochs`
+            // above without modifying existing tables (ADR-0015).
             try execute("PRAGMA user_version = \(Self.schemaVersion); COMMIT;")
         } catch {
             try? execute("ROLLBACK;")
@@ -248,9 +253,11 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             do {
                 // Hourly history is absolute time, so a collection time-zone change never moves it; only an
                 // intentional epoch bump from a complete read may lower or delete stored hours (ADR-0015).
-                let priorEpoch = try storedHistoryState(sourceID: sourceID, deviceID: deviceID)?.epoch
+                // The hourly epoch is tracked apart from the daily one and only advances once a complete read has
+                // applied it, so a bump first seen by a read with skipped records still rebaselines later.
+                let priorHourlyEpoch = try storedHourlyEpoch(sourceID: sourceID, deviceID: deviceID)
                 let completeRead = batch.skippedRecords == 0
-                let hourlyRebaseline = completeRead && epoch != nil && priorEpoch != nil && priorEpoch != epoch
+                let hourlyRebaseline = completeRead && epoch != nil && priorHourlyEpoch != nil && priorHourlyEpoch != epoch
                 let rebaseline: Bool
                 if authoritative {
                     try adoptDaily(batch.daily, sourceID: sourceID, deviceID: deviceID, epoch: epoch)
@@ -263,7 +270,10 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                         try adoptHourlyHistory(hourlyHistory, sourceID: sourceID, deviceID: deviceID)
                     } else {
                         try mergeHourlyHistory(hourlyHistory, sourceID: sourceID, deviceID: deviceID,
-                            rebaseline: hourlyRebaseline)
+                            rebaseline: hourlyRebaseline, completeRead: completeRead)
+                    }
+                    if let epoch, completeRead || priorHourlyEpoch == nil {
+                        try recordHourlyEpoch(epoch, sourceID: sourceID, deviceID: deviceID)
                     }
                 }
                 let clear = try prepare("DELETE FROM hourly_usage WHERE source_id = ? AND device_id = ?;")
@@ -355,6 +365,27 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         try bind(sourceID, to: statement, at: 2)
         guard try next(statement) else { return nil }
         return HistoryState(epoch: text(statement, 0), timeZone: optionalText(statement, 1))
+    }
+
+    private func storedHourlyEpoch(sourceID: String, deviceID: String) throws -> String? {
+        let statement = try prepare("SELECT epoch FROM hourly_history_epochs WHERE device_id = ? AND source_id = ?;")
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        guard try next(statement) else { return nil }
+        return text(statement, 0)
+    }
+
+    private func recordHourlyEpoch(_ epoch: String, sourceID: String, deviceID: String) throws {
+        let statement = try prepare("""
+            INSERT INTO hourly_history_epochs (device_id, source_id, epoch) VALUES (?, ?, ?)
+            ON CONFLICT(device_id, source_id) DO UPDATE SET epoch = excluded.epoch;
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        try bind(epoch, to: statement, at: 3)
+        try step(statement)
     }
 
     private func record(epoch: String, timeZone: String, sourceID: String, deviceID: String) throws {
@@ -455,7 +486,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     /// When `rebaseline` is true, hours strictly after the earliest batch hour adopt the batch exactly
     /// (deleting absent hours), while earlier hours keep the floor rule. Only changed rows are written.
     private func mergeHourlyHistory(
-        _ records: [HourlyUsage], sourceID: String, deviceID: String, rebaseline: Bool
+        _ records: [HourlyUsage], sourceID: String, deviceID: String, rebaseline: Bool, completeRead: Bool
     ) throws {
         let batchByHour = try indexedHourlyHistory(records)
         guard let earliest = batchByHour.keys.min() else { return }
@@ -479,10 +510,25 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             for hourStart in stored.keys where hourStart > earliest && batchByHour[hourStart] == nil {
                 toDelete.append(hourStart)
             }
+        } else if completeRead {
+            // A move to a zone with a different minute offset (for example UTC+5:30) re-buckets the same events
+            // on other boundaries. A complete read re-reports everything from its earliest hour on, so stored
+            // hours on the old boundaries that overlap that range are superseded rather than kept beside the new
+            // ones; an old hour straddling the earliest new boundary goes too, trading part of a pruned hour for
+            // never double-counting.
+            let alignments = Set(batchByHour.keys.map(Self.hourAlignment))
+            for hourStart in stored.keys
+            where hourStart + 3_600 > earliest && !alignments.contains(Self.hourAlignment(hourStart)) {
+                toDelete.append(hourStart)
+            }
         }
         try writeHourlyHistoryDiff(
             toDelete: toDelete, toUpdate: toUpdate, toInsert: toInsert, sourceID: sourceID, deviceID: deviceID
         )
+    }
+
+    private static func hourAlignment(_ hourStart: Int64) -> Int64 {
+        ((hourStart % 3_600) + 3_600) % 3_600
     }
 
     /// Adopts an authoritative account-scoped source's sparse hourly history from its earliest reported hour on,
@@ -729,11 +775,13 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     }
 
     private func deleteHistoryEpochs(deviceID: String, sourceID: String) throws {
-        let statement = try prepare("DELETE FROM history_epochs WHERE device_id = ? AND source_id = ?;")
-        defer { sqlite3_finalize(statement) }
-        try bind(deviceID, to: statement, at: 1)
-        try bind(sourceID, to: statement, at: 2)
-        try step(statement)
+        for table in ["history_epochs", "hourly_history_epochs"] {
+            let statement = try prepare("DELETE FROM \(table) WHERE device_id = ? AND source_id = ?;")
+            defer { sqlite3_finalize(statement) }
+            try bind(deviceID, to: statement, at: 1)
+            try bind(sourceID, to: statement, at: 2)
+            try step(statement)
+        }
     }
 
     private func deleteUnusedAccountDevice(id: String) throws {

@@ -41,6 +41,8 @@ final class HistoryRetentionTests: XCTestCase {
             let sql = """
                 INSERT INTO history_epochs (device_id, source_id, epoch) VALUES ('device-a', 'claude', '\(epoch)')
                 ON CONFLICT(device_id, source_id) DO UPDATE SET epoch = excluded.epoch;
+                INSERT INTO hourly_history_epochs (device_id, source_id, epoch) VALUES ('device-a', 'claude', '\(epoch)')
+                ON CONFLICT(device_id, source_id) DO UPDATE SET epoch = excluded.epoch;
                 """
             XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
         }
@@ -544,6 +546,42 @@ final class HistoryRetentionTests: XCTestCase {
         try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 50)], skippedRecords: 1),
             sourceID: "claude", deviceID: "device-a", hourlyHistory: [historyHour(1, input: 50)])
         XCTAssertEqual(try store.hourlyHistory(), [h1, h2])
+    }
+
+    func testHourlyHistoryEpochWaitsForCompleteReadToRebaseline() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let h1 = historyHour(1, input: 100)
+        let h2 = historyHour(2, input: 200)
+        let h3 = historyHour(3, input: 300)
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 600)]),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: [h1, h2, h3])
+        setEpoch("0+tokscale-4.21.0")
+        // The bump is first seen by a read with skipped records: the daily epoch advances, hours keep the floor.
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 600)], skippedRecords: 1),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: [historyHour(1, input: 100)])
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2, h3])
+        // The next complete read still applies the hourly rebaseline.
+        let h2Lower = historyHour(2, input: 50)
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 150)]),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: [h1, h2Lower])
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2Lower])
+    }
+
+    func testHourlyHistoryReplacesOldBoundariesAfterHalfHourZoneMove() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let onHour = [historyHour(1, input: 100), historyHour(2, input: 200), historyHour(3, input: 300)]
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 600)]),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: onHour)
+        // After moving to UTC+5:30 the same events land on half-hour boundaries; logs before hour 2 are pruned.
+        let halfHour = [historyHour(2, input: 250), historyHour(3, input: 250)].map { row -> HourlyUsage in
+            var row = row
+            row.hourStart = row.hourStart.addingTimeInterval(1_800)
+            return row
+        }
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 600, zone: "Asia/Kolkata")]),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: halfHour)
+        // Hour 1 ends before the batch starts and is kept; old-boundary hours 2 and 3 overlap it and are superseded.
+        XCTAssertEqual(try store.hourlyHistory(), [onHour[0]] + halfHour)
     }
 
     func testHourlyHistoryKeepsZeroTokenHoursWithEvents() throws {
