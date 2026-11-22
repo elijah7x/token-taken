@@ -1868,6 +1868,7 @@ struct ShareCardView: View {
     var reduceTransparencyOverride: Bool? = nil
     var colorSchemeContrastOverride: ColorSchemeContrast? = nil
 
+    @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -2063,7 +2064,10 @@ struct ShareCardView: View {
                             increasedContrast: effectiveContrast == .increased
                         )
                     }
-                }
+                },
+                peakText: liquidView == .lens
+                    ? LensShareSnapshot(buckets: lensBuckets, data: data, dimension: dimension).frozenTimeText(locale: locale)
+                    : nil
             )
         }
     }

@@ -20,7 +20,7 @@ enum ShareCardDetail: String, CaseIterable, Identifiable {
 
 enum ShareCardMetrics {
     /// Minimum rendered point size after `minimumScaleFactor` at the 1080pt short-side canvas.
-    static let minimumScaledPointSize: CGFloat = 22
+    static let minimumScaledPointSize: CGFloat = 24
 
     static func visualSize(for aspect: ShareAspect) -> CGSize {
         let canvas = aspect.canvasSize
@@ -45,7 +45,7 @@ enum ShareCardMetrics {
         }
     }
 
-    /// Guarantees `minimumScaleFactor` never scales a text element below `minimumScaledPointSize` (22pt).
+    /// Guarantees `minimumScaleFactor` never scales a text element below `minimumScaledPointSize` (24pt).
     static func safeScaleFactor(for size: CGFloat, preferred: CGFloat = 0.75) -> CGFloat {
         let floorFactor = min(1, minimumScaledPointSize / max(1, size))
         return min(1, max(preferred, floorFactor))
@@ -174,6 +174,8 @@ struct ShareCardLayout<Visual: View>: View {
     let dataUnavailable: Bool
     let reduceTransparency: Bool
     let skin: ShareCardSkin<Visual>
+    /// Lens only: the frozen peak bucket's time, so a peak between axis ticks can still be dated.
+    var peakText: String? = nil
 
     @Environment(\.locale) private var locale
     @Environment(\.colorScheme) private var scheme
@@ -407,8 +409,8 @@ struct ShareCardLayout<Visual: View>: View {
                 .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.cost, preferred: 0.80))
         } else {
             costSummaryText
-                .lineLimit(1)
-                .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.cost, preferred: 0.72))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -438,12 +440,22 @@ struct ShareCardLayout<Visual: View>: View {
         VStack(alignment: .leading, spacing: aspect == .square ? 6 : 8) {
             contextLine
 
+            if let peakText {
+                Text(verbatim: String(localized: "Peak · \(peakText)", locale: locale))
+                    .font(ThemeFont.make(type.l2, weight: .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(skin.ink3)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if let rank {
                 Text("Last 30 days · about top \(UsageRank.formatted(rank)) (estimate)")
                     .font(ThemeFont.make(type.l2, weight: .regular))
                     .monospacedDigit()
                     .foregroundStyle(skin.ink3)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l2, preferred: 0.80))
             }
         }
@@ -457,7 +469,8 @@ struct ShareCardLayout<Visual: View>: View {
                 .font(ThemeFont.make(type.l2, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(skin.ink2)
-                .lineLimit(1)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
                 .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l2, preferred: 0.80))
 
         case .source(_, let name):
@@ -490,19 +503,20 @@ struct ShareCardLayout<Visual: View>: View {
     // MARK: - Field Quote Line
 
     private func quoteLine(_ text: String) -> some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .top, spacing: 14) {
             Rectangle()
                 .fill(skin.accent)
-                .frame(width: 3, height: type.inscription)
+                .frame(width: 3)
+                .frame(maxHeight: .infinity)
                 .accessibilityHidden(true)
 
             Text(verbatim: text)
                 .font(ThemeFont.make(type.inscription, weight: .regular))
                 .foregroundStyle(skin.ink1)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.inscription, preferred: 0.78))
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - L3 Detail
