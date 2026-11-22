@@ -51,8 +51,29 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertEqual(rows.reduce(Int64(0)) { $0 + $1.eventCount }, 14)
         XCTAssertEqual(rows.reduce(Int64(0)) { $0 + $1.counts.total }, 1_600)
         let later = now.addingTimeInterval(72 * 3_600)
-        XCTAssertTrue(try TokscaleCollector.parseHourly(data: Data(contentsOf: url), client: "claude", deviceID: "test",
-            timeZone: TimeZone(identifier: "America/New_York")!, now: later).isEmpty)
+        let olderRows = try TokscaleCollector.parseHourly(data: Data(contentsOf: url), client: "claude", deviceID: "test",
+            timeZone: TimeZone(identifier: "America/New_York")!, now: later)
+        XCTAssertEqual(olderRows.count, 4)
+        XCTAssertTrue(olderRows.allSatisfy { $0.sourceID == "claude" })
+    }
+
+    func testParseHourlyEmitsHoursOlderThan48HoursAndExcludesFutureHours() throws {
+        let data = Data(#"""
+            {"entries":[
+              {"hour":"2026-11-01 08:00","input":10,"output":2,"cacheRead":3,"cacheWrite":1,"messageCount":1},
+              {"hour":"2026-11-11 06:00","input":20,"output":4,"cacheRead":0,"cacheWrite":0,"messageCount":2},
+              {"hour":"2026-11-11 07:00","input":30,"output":6,"cacheRead":0,"cacheWrite":0,"messageCount":1}
+            ]}
+            """#.utf8)
+        let utc = TimeZone(identifier: "UTC")!
+        let now = ISO8601DateFormatter().date(from: "2026-11-11T06:30:00Z")!
+        let rows = try TokscaleCollector.parseHourly(data: data, client: "claude", deviceID: "test", timeZone: utc, now: now)
+        XCTAssertEqual(rows.map(\.hourStart), [
+            ISO8601DateFormatter().date(from: "2026-11-01T08:00:00Z")!,
+            ISO8601DateFormatter().date(from: "2026-11-11T06:00:00Z")!,
+        ])
+        XCTAssertEqual(rows[0].counts, TokenCounts(input: 10, cacheRead: 3, cacheWrite: 1, output: 2))
+        XCTAssertEqual(rows[0].eventCount, 1)
     }
 
     // Droid repeats an assistant line without id dedupe in tokscale 4.21.0, so events is 2 while token totals are unchanged.
@@ -291,6 +312,7 @@ final class TokscaleCollectorTests: XCTestCase {
         XCTAssertEqual(graphLines.count, 1)
         XCTAssertTrue(graphLines.first?.contains("-c claude,codex") == true)
         XCTAssertEqual(hourlyLines.count, 2)
+        XCTAssertTrue(hourlyLines.allSatisfy { $0.contains("--since 2020-01-01") })
     }
 
     func testStateSkipsUnchangedClientsAndRerunsOnlyChangedOnes() async throws {

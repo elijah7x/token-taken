@@ -292,7 +292,7 @@ final class GrokCollectorTests: XCTestCase {
             timestampMs: ms("2026-11-19T16:30:00Z"),
             usage: ["inputTokens": 200, "outputTokens": 20]
         )
-        // Older than 48h window: included in daily, excluded from hourly.
+        // Older than 48h: included in both daily and hourly history.
         let oldTurn = try turnCompletedLine(
             promptID: "p-old",
             modelID: "grok-4.7",
@@ -314,6 +314,7 @@ final class GrokCollectorTests: XCTestCase {
         ])
 
         XCTAssertEqual(batch.hourly.map(\.hourStart), [
+            ISO8601DateFormatter().date(from: "2026-11-15T10:00:00Z")!,
             ISO8601DateFormatter().date(from: "2026-11-19T15:00:00Z")!,
             ISO8601DateFormatter().date(from: "2026-11-19T16:00:00Z")!,
         ])

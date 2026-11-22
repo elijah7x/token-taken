@@ -14,7 +14,7 @@ public struct PiCollector: UsageCollector {
     private let timeZone: TimeZone
     /// When set, scan results are persisted here and later refreshes scan only what changed.
     private let stateDirectory: URL?
-    /// Defines "the last 48 hours" for the hourly buckets; injectable so tests can pin it.
+    /// Defines the upper bound (`currentHour`) for hourly buckets and future-date guards; injectable so tests can pin it.
     private let now: @Sendable () -> Date
 
     public init(
@@ -75,7 +75,7 @@ public struct PiCollector: UsageCollector {
 ///   `unknown`.
 /// - A file without a `session` header is still read record by record instead of being discarded.
 ///
-/// Daily totals cover every event; hourly buckets keep only the last 48 hours in the collector's time zone.
+/// Daily totals and hourly buckets cover every event up to the current hour in the collector's time zone.
 struct PiFormatScan: Sendable {
     /// pi groups model-less tool, compaction, and branch-summary usage in this bucket.
     static let toolsSummariesModel = "tools/summaries"
@@ -1141,7 +1141,6 @@ struct PiFormatScan: Sendable {
         let calendar: Calendar
         let now: Date
         let currentHour: Date
-        let cutoff: Date
 
         var daily: [DailyKey: DailyTotals] = [:]
         var hourly: [Date: HourlyTotals] = [:]
@@ -1162,7 +1161,6 @@ struct PiFormatScan: Sendable {
             let currentHour = calendar.dateInterval(of: .hour, for: now)?.start
                 ?? Date(timeIntervalSince1970: (now.timeIntervalSince1970 / 3_600).rounded(.down) * 3_600)
             self.currentHour = currentHour
-            self.cutoff = currentHour.addingTimeInterval(-47 * 3_600)
         }
 
         mutating func beginCapture(models: [String]) {
@@ -1224,7 +1222,7 @@ struct PiFormatScan: Sendable {
             daily[dailyKey] = dailyTotals
 
             guard let hourStart = calendar.dateInterval(of: .hour, for: date)?.start,
-                  hourStart >= cutoff, hourStart <= currentHour else { return }
+                  hourStart <= currentHour else { return }
             var hourlyTotals = hourly[hourStart] ?? HourlyTotals()
             hourlyTotals.counts += counts
             hourlyTotals.eventCount += 1

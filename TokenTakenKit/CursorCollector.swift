@@ -70,7 +70,7 @@ public struct CursorCollector: UsageCollector {
         let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
         var aggregator = Aggregator(
             deviceID: accountDevice.id, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, cutoff: currentHour.addingTimeInterval(-47 * 3_600),
+            currentHour: currentHour,
             maxDate: now.addingTimeInterval(86_400)
         )
         aggregator.add(export.rows)
@@ -418,7 +418,6 @@ public struct CursorCollector: UsageCollector {
         let timeZone: TimeZone
         let calendar: Calendar
         let currentHour: Date
-        let cutoff: Date
         let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
@@ -444,7 +443,7 @@ public struct CursorCollector: UsageCollector {
                 record.eventCount += 1
                 daily[key] = record
 
-                guard hour >= cutoff, hour <= currentHour else { continue }
+                guard hour <= currentHour else { continue }
                 var hourRow = hourly[hour] ?? HourlyUsage(
                     hourStart: hour, deviceID: deviceID, sourceID: "cursor",
                     counts: .zero, eventCount: 0, reasoningKnown: true

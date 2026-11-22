@@ -268,7 +268,13 @@ public protocol UsageStore: Sendable {
     /// Throws rather than returning partial data, so callers never report incomplete totals as complete.
     func records() throws -> [UsageRecord]
     func hourly() throws -> [HourlyUsage]
+    /// Long-term sparse hourly history retained locally (ADR-0015). Defaults to empty for stores that do not retain it.
+    func hourlyHistory() throws -> [HourlyUsage]
     var devices: [Device] { get }
+}
+
+public extension UsageStore {
+    func hourlyHistory() throws -> [HourlyUsage] { [] }
 }
 
 extension Calendar {

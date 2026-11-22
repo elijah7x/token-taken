@@ -80,10 +80,9 @@ public struct DevinCollector: UsageCollector {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
-        let earliestHour = calendar.startOfDay(for: calendar.date(byAdding: .day, value: -2, to: now) ?? now)
         var aggregator = Aggregator(
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, earliestHour: earliestHour,
+            currentHour: currentHour,
             maxDate: now.addingTimeInterval(86_400)
         )
         var seen: Set<String> = []
@@ -792,7 +791,6 @@ public struct DevinCollector: UsageCollector {
         let timeZone: TimeZone
         let calendar: Calendar
         let currentHour: Date
-        let earliestHour: Date
         let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
@@ -825,7 +823,7 @@ public struct DevinCollector: UsageCollector {
             record.counts += counts
             record.eventCount += 1
             daily[key] = record
-            if hour >= earliestHour, hour <= currentHour {
+            if hour <= currentHour {
                 var row = hourly[hour] ?? HourlyUsage(
                     hourStart: hour, deviceID: deviceID, sourceID: "devin",
                     counts: .zero, eventCount: 0, reasoningKnown: false

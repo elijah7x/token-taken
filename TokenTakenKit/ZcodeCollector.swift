@@ -46,10 +46,9 @@ public struct ZcodeCollector: UsageCollector {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
-        let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
         var aggregator = Aggregator(
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, cutoff: cutoff, maxDate: now.addingTimeInterval(86_400)
+            currentHour: currentHour, maxDate: now.addingTimeInterval(86_400)
         )
 
         try SQLiteSnapshotReader.withReadableDatabase(
@@ -309,7 +308,6 @@ public struct ZcodeCollector: UsageCollector {
         let timeZone: TimeZone
         let calendar: Calendar
         let currentHour: Date
-        let cutoff: Date
         let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
@@ -342,7 +340,7 @@ public struct ZcodeCollector: UsageCollector {
             record.counts += usage.counts
             record.eventCount += 1
             daily[key] = record
-            if hour >= cutoff, hour <= currentHour {
+            if hour <= currentHour {
                 var row = hourly[hour] ?? HourlyUsage(
                     hourStart: hour, deviceID: deviceID, sourceID: "zcode",
                     counts: .zero, eventCount: 0, reasoningKnown: true

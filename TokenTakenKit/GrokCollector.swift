@@ -83,7 +83,6 @@ public struct GrokCollector: UsageCollector {
             timeZone: timeZone,
             calendar: calendar,
             currentHour: currentHour,
-            cutoff: currentHour.addingTimeInterval(-47 * 3_600),
             maxDate: now.addingTimeInterval(86_400)
         )
 
@@ -651,7 +650,6 @@ public struct GrokCollector: UsageCollector {
         let timeZone: TimeZone
         let calendar: Calendar
         let currentHour: Date
-        let cutoff: Date
         let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
@@ -693,7 +691,7 @@ public struct GrokCollector: UsageCollector {
             row.eventCount += calls
             daily[dailyKey] = row
 
-            guard hour >= cutoff, hour <= currentHour else { return }
+            guard hour <= currentHour else { return }
             var hourRow = hourly[hour] ?? HourlyUsage(
                 hourStart: hour,
                 deviceID: deviceID,

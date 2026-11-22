@@ -191,9 +191,7 @@ public struct TokscaleCollector: UsageCollector {
     private func collect(clients availableClients: [String], zone: TimeZone, now: Date) async throws -> CollectionBatch {
         try await verifyEngineVersionIfNeeded()
         try ensureSettings(timeZone: zone)
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = zone
-        let since = UsageDay.string(from: calendar.date(byAdding: .day, value: -2, to: now)!, in: zone)
+        let since = "2020-01-01"
         // One hourly run per source, with all of its clients, so the engine deduplicates within the source.
         var sourceGroups: [[String]] = []
         var groupIndex: [String: Int] = [:]
@@ -344,7 +342,6 @@ public struct TokscaleCollector: UsageCollector {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
-        let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
         var totals: [Date: HourlyUsage] = [:]
         for entry in report.entries {
             guard let hour = formatter.date(from: entry.hour), formatter.string(from: hour) == entry.hour,
@@ -353,7 +350,7 @@ public struct TokscaleCollector: UsageCollector {
             }
             let counts = TokenCounts(input: entry.input, cacheRead: entry.cacheRead, cacheWrite: entry.cacheWrite, output: entry.output)
             guard valid(counts) else { throw CollectorError.invalidOutput("tokscale output was invalid") }
-            guard hour >= cutoff, hour <= currentHour else { continue }
+            guard hour <= currentHour else { continue }
             var row = totals[hour] ?? HourlyUsage(hourStart: hour, deviceID: deviceID, sourceID: sourceID, counts: .zero, eventCount: 0, reasoningKnown: false)
             row.counts += counts
             row.eventCount += entry.messageCount

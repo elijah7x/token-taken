@@ -14,7 +14,7 @@ This privacy policy applies to **Token Taken** for macOS (including the `token-t
 
 On macOS, Token Taken reads coding-agent logs, local databases, and configuration files strictly read-only on your Mac. It never modifies or deletes your agent logs.
 
-- **Local usage database:** Aggregated token counts (by day, hour, model, source, and local device) and source health status are stored locally in `~/Library/Application Support/Token Taken/` (`usage.sqlite`). Cost estimates are not stored in the database.
+- **Local usage database:** Aggregated token counts (by day and model, by rolling 48-hour window, and in a sparse long-term per-source hourly history without model or content, plus local device) and source health status are stored locally in `~/Library/Application Support/Token Taken/` (`usage.sqlite`). Cost estimates are not stored in the database.
 - **Bundled pricing:** Cost estimates are computed locally in memory from a price table bundled inside the app. No network request is made to fetch pricing.
 - **Excluded content:** Conversation prompts, model responses, file paths, project or repository names, and credentials are never stored in Token Taken's usage database or exports. The only exception in local logs is that during macOS self-updates, the updater writes `install.sh` output to a local file (`~/Library/Application Support/Token Taken/Updates/<version>-<build>/install.log`), which can contain file paths on this Mac; this log stays local only, is never transmitted, and is deleted on the next app launch cleanup.
 
@@ -35,7 +35,7 @@ iCloud Drive sync is opt-in and disabled by default. When you enable it in Token
   - Monthly daily files (`usage-YYYY-MM.json`): `schemaVersion` and `records`, where each daily record encodes `day`, `timeZoneID`, `deviceID`, `sourceID`, `modelID`, `rawModelID`, `counts` (`input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`), and `eventCount`.
   - Rolling 48-hour file (`hourly.json`): `schemaVersion` and `records`, where each hourly record encodes `hourStart`, `deviceID`, `sourceID`, `counts` (`input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`), `eventCount`, and `reasoningKnown`.
   - Account publication files (`account-<shortID>-usage-YYYY-MM.json` and `account-<shortID>-hourly.json`): encode the same daily (`day`, `timeZoneID`, `deviceID`, `sourceID`, `modelID`, `rawModelID`, `counts` with `input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`, and `eventCount`) and hourly (`hourStart`, `deviceID`, `sourceID`, `counts` with `input`, `cacheRead`, `cacheWrite`, `output`, `reasoning`, `uncategorized`, `cacheWrite1h`, `eventCount`, and `reasoningKnown`) fields inside the publishing Mac's folder, keyed by the hashed `account-<source>-<hash32>` `deviceID`.
-- Synced files never contain prompts, responses, file paths, project or repository names, credentials, or cost figures.
+- Synced files never contain prompts, responses, file paths, project or repository names, credentials, or cost figures. Long-term hourly history (`hourly_history`) stays local on your Mac and is not synced to iCloud Drive; only the rolling 48-hour `hourly.json` snapshot is synced.
 - Turning iCloud Drive sync off immediately stops reading and writing sync data; previously uploaded files remain in your iCloud Drive under your control.
 
 ## Optional Sync to iPhone (macOS & iOS, off by default)

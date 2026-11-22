@@ -96,8 +96,8 @@ final class CursorCollectorTests: XCTestCase {
         CursorCollector(home: directory, timeZone: utc, now: now, fetch: fetch)
     }
 
-    /// Reordered columns, a quoted model name, a cache-write row, a degenerate zero row and a row outside the
-    /// hourly window. `Total Tokens` carries a wrong number on purpose: it is never counted.
+    /// Reordered columns, a quoted model name, a cache-write row, a degenerate zero row and an older historical
+    /// row. `Total Tokens` carries a wrong number on purpose: it is never counted.
     private var export: String {
         """
         Cost,Total Tokens,Date,Model,Output Tokens,Cache Read,Input (w/o Cache Write),Input (w/ Cache Write)\r
@@ -143,9 +143,16 @@ final class CursorCollectorTests: XCTestCase {
         XCTAssertEqual(auto.eventCount, 1)
         XCTAssertEqual(try XCTUnwrap(daily["2026-10-01|old-model"]).counts, TokenCounts(input: 2, cacheRead: 3, cacheWrite: 0, output: 4))
 
-        // Only the last 48 hours get hourly rows; older days stay daily-only.
-        XCTAssertEqual(batch.hourly.count, 1)
-        let hour = try XCTUnwrap(batch.hourly.first)
+        // All historical hours up to currentHour get hourly rows.
+        XCTAssertEqual(batch.hourly.count, 2)
+        let oldHour = batch.hourly[0]
+        XCTAssertEqual(oldHour.hourStart, ISO8601DateFormatter().date(from: "2026-10-01T05:00:00Z"))
+        XCTAssertEqual(oldHour.deviceID, device.id)
+        XCTAssertEqual(oldHour.counts, TokenCounts(input: 2, cacheRead: 3, cacheWrite: 0, output: 4))
+        XCTAssertEqual(oldHour.eventCount, 1)
+        XCTAssertTrue(oldHour.reasoningKnown)
+
+        let hour = batch.hourly[1]
         XCTAssertEqual(hour.hourStart, ISO8601DateFormatter().date(from: "2026-11-09T10:00:00Z"))
         XCTAssertEqual(hour.deviceID, device.id)
         XCTAssertEqual(hour.counts, claude.counts + composer.counts)

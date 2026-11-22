@@ -7,9 +7,14 @@ public enum StoreError: Error, Sendable {
 }
 
 public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
-    public static let schemaVersion = 6
+    public static let schemaVersion = 7
     private let queue = DispatchQueue(label: "io.github.elijah7x.TokenTaken.store")
     private let db: OpaquePointer
+
+    private enum HourlyTable: String {
+        case hourlyUsage = "hourly_usage"
+        case hourlyHistory = "hourly_history"
+    }
 
     public init(url: URL, readOnly: Bool = false) throws {
         if !readOnly {
@@ -79,7 +84,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                 );
                 """)
             if version < 2 {
-                try execute("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS daily_usage; DROP TABLE IF EXISTS hourly_usage;")
+                try execute("DROP TABLE IF EXISTS usage; DROP TABLE IF EXISTS daily_usage; DROP TABLE IF EXISTS hourly_usage; DROP TABLE IF EXISTS hourly_history;")
                 let names = try columnNames(in: "health")
                 if !names.contains("skipped_records") {
                     try execute("ALTER TABLE health ADD COLUMN skipped_records INTEGER NOT NULL DEFAULT 0;")
@@ -100,6 +105,13 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                     PRIMARY KEY (device_id, source_id, model_id, day)
                 );
                 CREATE TABLE IF NOT EXISTS hourly_usage (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
+                    input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                    output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                    event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
+                    PRIMARY KEY (device_id, source_id, hour_start)
+                );
+                CREATE TABLE IF NOT EXISTS hourly_history (
                     device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
                     input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
                     output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
@@ -129,6 +141,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             if !(try columnNames(in: "history_epochs").contains("time_zone")) {
                 try execute("ALTER TABLE history_epochs ADD COLUMN time_zone TEXT;")
             }
+            // Schema 7 adds the sparse long-term `hourly_history` table above without modifying existing tables (ADR-0015).
             try execute("PRAGMA user_version = \(Self.schemaVersion); COMMIT;")
         } catch {
             try? execute("ROLLBACK;")
@@ -163,11 +176,20 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     }
 
     public func hourly() throws -> [HourlyUsage] {
+        try readHourly(from: .hourlyUsage)
+    }
+
+    /// Returns long-term sparse hourly history retained locally (ADR-0015).
+    public func hourlyHistory() throws -> [HourlyUsage] {
+        try readHourly(from: .hourlyHistory)
+    }
+
+    private func readHourly(from table: HourlyTable) throws -> [HourlyUsage] {
         try queue.sync {
             let statement = try prepare("""
                 SELECT hour_start, device_id, source_id, input, cache_read, cache_write,
                        output, reasoning, uncategorized, event_count, reasoning_known
-                FROM hourly_usage ORDER BY hour_start, device_id, source_id;
+                FROM \(table.rawValue) ORDER BY hour_start, device_id, source_id;
                 """)
             defer { sqlite3_finalize(statement) }
             var result: [HourlyUsage] = []
@@ -203,22 +225,46 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     /// earliest day keep the floor rule, because the batch is no evidence for them. An empty batch stores nothing.
     ///
     /// `appliesEpoch` is false when the runner re-stores cached rows for unchanged inputs: those rows were produced under
-    /// the stored epoch, so they neither rebaseline nor record the current one.
+    /// the stored epoch, so they neither rebaseline nor record the current one, and do not touch `hourly_history`.
+    ///
+    /// `hourlyHistory` carries sparse long-term per-hour rows for this source/device (ADR-0015), merged in the same
+    /// transaction when `appliesEpoch` is true.
     public func replace(
-        batch: CollectionBatch, sourceID: String, deviceID: String, authoritative: Bool = false, appliesEpoch: Bool = true
+        batch: CollectionBatch,
+        sourceID: String,
+        deviceID: String,
+        authoritative: Bool = false,
+        appliesEpoch: Bool = true,
+        hourlyHistory: [HourlyUsage] = []
     ) throws {
         guard batch.daily.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID && $0.dayInterval != nil }),
-              batch.hourly.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID }) else {
+              batch.hourly.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID }),
+              hourlyHistory.allSatisfy({ $0.sourceID == sourceID && $0.deviceID == deviceID }) else {
             throw StoreError.sql("Collection batch does not match its source/device or contains an invalid day")
         }
         let epoch = appliesEpoch ? HistoryEpochs.epoch(for: sourceID) : nil
         try queue.sync {
             try execute("BEGIN IMMEDIATE;")
             do {
+                // Hourly history is absolute time, so a collection time-zone change never moves it; only an
+                // intentional epoch bump from a complete read may lower or delete stored hours (ADR-0015).
+                let priorEpoch = try storedHistoryState(sourceID: sourceID, deviceID: deviceID)?.epoch
+                let completeRead = batch.skippedRecords == 0
+                let hourlyRebaseline = completeRead && epoch != nil && priorEpoch != nil && priorEpoch != epoch
+                let rebaseline: Bool
                 if authoritative {
                     try adoptDaily(batch.daily, sourceID: sourceID, deviceID: deviceID, epoch: epoch)
+                    rebaseline = false
                 } else {
-                    try mergeDaily(batch.daily, sourceID: sourceID, deviceID: deviceID, epoch: epoch)
+                    rebaseline = try mergeDaily(batch.daily, sourceID: sourceID, deviceID: deviceID, epoch: epoch)
+                }
+                if appliesEpoch && !hourlyHistory.isEmpty {
+                    if authoritative && completeRead {
+                        try adoptHourlyHistory(hourlyHistory, sourceID: sourceID, deviceID: deviceID)
+                    } else {
+                        try mergeHourlyHistory(hourlyHistory, sourceID: sourceID, deviceID: deviceID,
+                            rebaseline: hourlyRebaseline)
+                    }
                 }
                 let clear = try prepare("DELETE FROM hourly_usage WHERE source_id = ? AND device_id = ?;")
                 defer { sqlite3_finalize(clear) }
@@ -249,6 +295,34 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     private struct StoredDaily {
         var totals: [String: Int64] = [:]
         var days = Set<String>()
+    }
+
+    private struct StoredHourlyRow: Equatable {
+        let counts: TokenCounts
+        let eventCount: Int64
+        let reasoningKnown: Bool
+
+        var total: Int64 { counts.total }
+
+        init(_ usage: HourlyUsage) {
+            // `hourly_history` does not store `cacheWrite1h`, so drop it before diffing against stored rows.
+            counts = TokenCounts(
+                input: usage.counts.input,
+                cacheRead: usage.counts.cacheRead,
+                cacheWrite: usage.counts.cacheWrite,
+                output: usage.counts.output,
+                reasoning: usage.counts.reasoning,
+                uncategorized: usage.counts.uncategorized
+            )
+            eventCount = usage.eventCount
+            reasoningKnown = usage.reasoningKnown
+        }
+
+        init(counts: TokenCounts, eventCount: Int64, reasoningKnown: Bool) {
+            self.counts = counts
+            self.eventCount = eventCount
+            self.reasoningKnown = reasoningKnown
+        }
     }
 
     private func storedDaily(sourceID: String, deviceID: String) throws -> StoredDaily {
@@ -303,9 +377,9 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
     /// Merges one source's daily snapshot into the store. Counted usage is a floor: a stored day is replaced only
     /// when the batch total is not smaller, and a stored day the batch no longer reports is kept, so an agent
     /// pruning its own logs cannot shrink history. A day never mixes stored and batch rows, so a model rename
-    /// cannot leave a stale row behind (ADR-0008).
-    private func mergeDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String?) throws {
-        guard !records.isEmpty else { return }
+    /// cannot leave a stale row behind (ADR-0008). Returns whether this merge triggered a rebaseline.
+    private func mergeDaily(_ records: [UsageRecord], sourceID: String, deviceID: String, epoch: String?) throws -> Bool {
+        guard !records.isEmpty else { return false }
         let stored = try storedDaily(sourceID: sourceID, deviceID: deviceID)
         let batchDays = Dictionary(grouping: records, by: \.day)
         let batchTotals = batchDays.mapValues { rows in rows.reduce(Int64(0)) { $0 + $1.counts.total } }
@@ -339,6 +413,155 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         }
         try insertDaily(records.filter { adopted.contains($0.day) }, sourceID: sourceID, deviceID: deviceID)
         if let epoch { try record(epoch: epoch, timeZone: batchZoneKey, sourceID: sourceID, deviceID: deviceID) }
+        return rebaseline
+    }
+
+    private func indexedHourlyHistory(_ records: [HourlyUsage]) throws -> [Int64: StoredHourlyRow] {
+        var byHour: [Int64: StoredHourlyRow] = [:]
+        byHour.reserveCapacity(records.count)
+        for record in records {
+            let row = StoredHourlyRow(record)
+            guard row.total > 0 || row.eventCount > 0 else { continue }
+            let hourStart = Int64(record.hourStart.timeIntervalSince1970)
+            guard byHour.updateValue(row, forKey: hourStart) == nil else {
+                throw StoreError.sql("Duplicate hour_start in hourly history")
+            }
+        }
+        return byHour
+    }
+
+    private func storedHourlyHistory(sourceID: String, deviceID: String) throws -> [Int64: StoredHourlyRow] {
+        let statement = try prepare("""
+            SELECT hour_start, input, cache_read, cache_write, output, reasoning, uncategorized,
+                   event_count, reasoning_known
+            FROM hourly_history WHERE device_id = ? AND source_id = ?;
+            """)
+        defer { sqlite3_finalize(statement) }
+        try bind(deviceID, to: statement, at: 1)
+        try bind(sourceID, to: statement, at: 2)
+        var stored: [Int64: StoredHourlyRow] = [:]
+        while try next(statement) {
+            let hourStart = sqlite3_column_int64(statement, 0)
+            stored[hourStart] = StoredHourlyRow(
+                counts: counts(statement, start: 1),
+                eventCount: sqlite3_column_int64(statement, 7),
+                reasoningKnown: sqlite3_column_int(statement, 8) != 0
+            )
+        }
+        return stored
+    }
+
+    /// Merges one source's sparse long-term hourly history using per-hour floor semantics (ADR-0015).
+    /// When `rebaseline` is true, hours strictly after the earliest batch hour adopt the batch exactly
+    /// (deleting absent hours), while earlier hours keep the floor rule. Only changed rows are written.
+    private func mergeHourlyHistory(
+        _ records: [HourlyUsage], sourceID: String, deviceID: String, rebaseline: Bool
+    ) throws {
+        let batchByHour = try indexedHourlyHistory(records)
+        guard let earliest = batchByHour.keys.min() else { return }
+        let stored = try storedHourlyHistory(sourceID: sourceID, deviceID: deviceID)
+        var toInsert: [(Int64, StoredHourlyRow)] = []
+        var toUpdate: [(Int64, StoredHourlyRow)] = []
+        for (hourStart, row) in batchByHour {
+            if let existing = stored[hourStart] {
+                let notSmaller = row.total > existing.total
+                    || (row.total == existing.total && row.eventCount >= existing.eventCount)
+                let adopt = (rebaseline && hourStart > earliest) || notSmaller
+                if adopt && row != existing {
+                    toUpdate.append((hourStart, row))
+                }
+            } else {
+                toInsert.append((hourStart, row))
+            }
+        }
+        var toDelete: [Int64] = []
+        if rebaseline {
+            for hourStart in stored.keys where hourStart > earliest && batchByHour[hourStart] == nil {
+                toDelete.append(hourStart)
+            }
+        }
+        try writeHourlyHistoryDiff(
+            toDelete: toDelete, toUpdate: toUpdate, toInsert: toInsert, sourceID: sourceID, deviceID: deviceID
+        )
+    }
+
+    /// Adopts an authoritative account-scoped source's sparse hourly history from its earliest reported hour on,
+    /// keeping earlier stored hours and writing only rows that actually changed.
+    private func adoptHourlyHistory(_ records: [HourlyUsage], sourceID: String, deviceID: String) throws {
+        let batchByHour = try indexedHourlyHistory(records)
+        guard let earliest = batchByHour.keys.min() else { return }
+        let stored = try storedHourlyHistory(sourceID: sourceID, deviceID: deviceID)
+        var toInsert: [(Int64, StoredHourlyRow)] = []
+        var toUpdate: [(Int64, StoredHourlyRow)] = []
+        for (hourStart, row) in batchByHour {
+            if let existing = stored[hourStart] {
+                if row != existing {
+                    toUpdate.append((hourStart, row))
+                }
+            } else {
+                toInsert.append((hourStart, row))
+            }
+        }
+        let toDelete = stored.keys.filter { $0 > earliest && batchByHour[$0] == nil }
+        try writeHourlyHistoryDiff(
+            toDelete: toDelete, toUpdate: toUpdate, toInsert: toInsert, sourceID: sourceID, deviceID: deviceID
+        )
+    }
+
+    private func writeHourlyHistoryDiff(
+        toDelete: [Int64],
+        toUpdate: [(Int64, StoredHourlyRow)],
+        toInsert: [(Int64, StoredHourlyRow)],
+        sourceID: String,
+        deviceID: String
+    ) throws {
+        if !toDelete.isEmpty {
+            let delete = try prepare("DELETE FROM hourly_history WHERE device_id = ? AND source_id = ? AND hour_start = ?;")
+            defer { sqlite3_finalize(delete) }
+            for hourStart in toDelete.sorted() {
+                sqlite3_reset(delete)
+                sqlite3_clear_bindings(delete)
+                try bind(deviceID, to: delete, at: 1)
+                try bind(sourceID, to: delete, at: 2)
+                try check(sqlite3_bind_int64(delete, 3, hourStart))
+                try step(delete)
+            }
+        }
+        if !toUpdate.isEmpty {
+            let update = try prepare("""
+                UPDATE hourly_history
+                SET input = ?, cache_read = ?, cache_write = ?, output = ?, reasoning = ?, uncategorized = ?,
+                    event_count = ?, reasoning_known = ?
+                WHERE device_id = ? AND source_id = ? AND hour_start = ?;
+                """)
+            defer { sqlite3_finalize(update) }
+            for (hourStart, row) in toUpdate.sorted(by: { $0.0 < $1.0 }) {
+                sqlite3_reset(update)
+                sqlite3_clear_bindings(update)
+                try bind(row.counts, to: update, at: 1)
+                try check(sqlite3_bind_int64(update, 7, row.eventCount))
+                try check(sqlite3_bind_int(update, 8, row.reasoningKnown ? 1 : 0))
+                try bind(deviceID, to: update, at: 9)
+                try bind(sourceID, to: update, at: 10)
+                try check(sqlite3_bind_int64(update, 11, hourStart))
+                try step(update)
+            }
+        }
+        if !toInsert.isEmpty {
+            let insert = try prepare("INSERT INTO hourly_history VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);")
+            defer { sqlite3_finalize(insert) }
+            for (hourStart, row) in toInsert.sorted(by: { $0.0 < $1.0 }) {
+                sqlite3_reset(insert)
+                sqlite3_clear_bindings(insert)
+                try bind(deviceID, to: insert, at: 1)
+                try bind(sourceID, to: insert, at: 2)
+                try check(sqlite3_bind_int64(insert, 3, hourStart))
+                try bind(row.counts, to: insert, at: 4)
+                try check(sqlite3_bind_int64(insert, 10, row.eventCount))
+                try check(sqlite3_bind_int(insert, 11, row.reasoningKnown ? 1 : 0))
+                try step(insert)
+            }
+        }
     }
 
     /// Adopts a complete account-scoped snapshot: stored days at or after the batch's earliest day are replaced by
@@ -388,8 +611,8 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         }
     }
 
-    /// Moves daily and hourly rows for `sourceID` from a superseded account device to `newDeviceID` when
-    /// `newDeviceID` has no rows for that day/hour, drops remaining legacy rows for that source, deletes the
+    /// Moves daily, hourly, and hourly-history rows for `sourceID` from a superseded account device to `newDeviceID`
+    /// when `newDeviceID` has no rows for that day/hour, drops remaining legacy rows for that source, deletes the
     /// legacy `history_epochs` row for `(legacyDeviceID, sourceID)`, and deletes the legacy `devices` row if no
     /// rows remain for other sources.
     public func migrateAccountDevice(from legacyDeviceID: String, to newDeviceID: String, sourceID: String) throws {
@@ -411,11 +634,13 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
                 try moveDailyDays(daysToMove, from: legacyDeviceID, to: newDeviceID, sourceID: sourceID)
                 try deleteDaily(deviceID: legacyDeviceID, sourceID: sourceID)
 
-                let existingHours = try storedHours(sourceID: sourceID, deviceID: newDeviceID)
-                let legacyHours = try storedHours(sourceID: sourceID, deviceID: legacyDeviceID)
-                let hoursToMove = legacyHours.subtracting(existingHours).sorted()
-                try moveHourlyBuckets(hoursToMove, from: legacyDeviceID, to: newDeviceID, sourceID: sourceID)
-                try deleteHourly(deviceID: legacyDeviceID, sourceID: sourceID)
+                for table in [HourlyTable.hourlyUsage, HourlyTable.hourlyHistory] {
+                    let existingHours = try storedHours(in: table, sourceID: sourceID, deviceID: newDeviceID)
+                    let legacyHours = try storedHours(in: table, sourceID: sourceID, deviceID: legacyDeviceID)
+                    let hoursToMove = legacyHours.subtracting(existingHours).sorted()
+                    try moveHourlyBuckets(hoursToMove, in: table, from: legacyDeviceID, to: newDeviceID, sourceID: sourceID)
+                    try deleteHourly(in: table, deviceID: legacyDeviceID, sourceID: sourceID)
+                }
 
                 try deleteHistoryEpochs(deviceID: legacyDeviceID, sourceID: sourceID)
                 try deleteUnusedAccountDevice(id: legacyDeviceID)
@@ -468,8 +693,8 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         try step(statement)
     }
 
-    private func storedHours(sourceID: String, deviceID: String) throws -> Set<Int64> {
-        let statement = try prepare("SELECT hour_start FROM hourly_usage WHERE device_id = ? AND source_id = ?;")
+    private func storedHours(in table: HourlyTable, sourceID: String, deviceID: String) throws -> Set<Int64> {
+        let statement = try prepare("SELECT hour_start FROM \(table.rawValue) WHERE device_id = ? AND source_id = ?;")
         defer { sqlite3_finalize(statement) }
         try bind(deviceID, to: statement, at: 1)
         try bind(sourceID, to: statement, at: 2)
@@ -478,9 +703,11 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         return hours
     }
 
-    private func moveHourlyBuckets(_ hours: [Int64], from legacyDeviceID: String, to newDeviceID: String, sourceID: String) throws {
+    private func moveHourlyBuckets(
+        _ hours: [Int64], in table: HourlyTable, from legacyDeviceID: String, to newDeviceID: String, sourceID: String
+    ) throws {
         guard !hours.isEmpty else { return }
-        let statement = try prepare("UPDATE hourly_usage SET device_id = ? WHERE device_id = ? AND source_id = ? AND hour_start = ?;")
+        let statement = try prepare("UPDATE \(table.rawValue) SET device_id = ? WHERE device_id = ? AND source_id = ? AND hour_start = ?;")
         defer { sqlite3_finalize(statement) }
         for hourStart in hours {
             sqlite3_reset(statement)
@@ -493,8 +720,8 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         }
     }
 
-    private func deleteHourly(deviceID: String, sourceID: String) throws {
-        let statement = try prepare("DELETE FROM hourly_usage WHERE device_id = ? AND source_id = ?;")
+    private func deleteHourly(in table: HourlyTable, deviceID: String, sourceID: String) throws {
+        let statement = try prepare("DELETE FROM \(table.rawValue) WHERE device_id = ? AND source_id = ?;")
         defer { sqlite3_finalize(statement) }
         try bind(deviceID, to: statement, at: 1)
         try bind(sourceID, to: statement, at: 2)
@@ -515,6 +742,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             WHERE id = ? AND kind = 'account'
               AND NOT EXISTS (SELECT 1 FROM daily_usage WHERE device_id = ?)
               AND NOT EXISTS (SELECT 1 FROM hourly_usage WHERE device_id = ?)
+              AND NOT EXISTS (SELECT 1 FROM hourly_history WHERE device_id = ?)
               AND NOT EXISTS (SELECT 1 FROM history_epochs WHERE device_id = ?);
             """)
         defer { sqlite3_finalize(statement) }
@@ -522,6 +750,7 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
         try bind(id, to: statement, at: 2)
         try bind(id, to: statement, at: 3)
         try bind(id, to: statement, at: 4)
+        try bind(id, to: statement, at: 5)
         try step(statement)
     }
 

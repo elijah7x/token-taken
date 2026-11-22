@@ -115,6 +115,7 @@ An account-level source's whole-history export is authoritative, not prunable, s
 - History epochs are a Token Taken constant, not engine state: every source starts at revision `1`, and tokscale-collected sources append the pinned engine version (`1+tokscale-4.21.0`). A release raises a source's revision only when it intentionally lowers or moves already-counted usage, such as a deduplication or date-attribution fix.
 - The last applied epoch and collection time zone key are stored per `(deviceID, sourceID)` in `history_epochs` (added in schema version 3; `time_zone` added in schema version 6). A missing row is the first run after the upgrade: record the current epoch and zone key and use the normal merge, so existing rows are protected immediately and are never rebaselined unseen. A `NULL` `time_zone` on an existing row after upgrading to schema version 6 likewise records the new zone key without rebaselining unseen.
 - Daily merge and hourly replacement happen in one transaction. Reading, sync publication and aggregation need no change because `daily_usage` remains the resolved view.
+- Long-term sparse hourly history (`hourly_history`, schema version 7) is retained locally in the same transaction under the same per-hour floor and rebaseline semantics ([ADR-0015](../decisions/0015-hourly-history.md)), dropping all-zero rows and carrying no model dimension. `hourly_usage` keeps its rolling 48-hour snapshot semantics, and existing readers, CLI exports, and sync publication remain unchanged.
 
 ## Estimated usage rank
 

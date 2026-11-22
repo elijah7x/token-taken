@@ -18,6 +18,7 @@ The store replaced every `daily_usage` row of a `(device, source)` with the new 
 - The applied epoch and collection time zone key are persisted per `(device_id, source_id)` in `history_epochs` (introduced in schema version 3, migrated in place from version 2; nullable `time_zone` added in schema version 6, migrated in place from version 5). A missing row means the first run after the upgrade: record the current epoch and zone key and use the normal merge, so existing data is protected immediately. A `NULL` `time_zone` on a row migrated to schema version 6 means no zone rebaseline on that run; record the new zone key instead.
 - An epoch and zone key are applied and recorded only by a real collection with a non-empty daily batch. When the runner re-stores cached rows for unchanged inputs (or receives an empty daily batch with hourly rows) it neither rebaselines nor records the current epoch/zone, and every collector's collection stamp includes its sources' epochs, so a bump re-reads unchanged inputs once (added 2026-11-14 after build 28 recorded Devin's revision 3 without applying it).
 - Hourly rows keep their snapshot semantics: the 48-hour window is replaced by each successful collection. Daily merge and hourly replacement share one transaction.
+- Long-term sparse hourly history (`hourly_history`) follows the same per-hour floor and rebaseline semantics in [ADR-0015](0015-hourly-history.md).
 - `daily_usage` remains the resolved view, so readers, aggregation, CLI export and iCloud sync publication are unchanged.
 
 ## Consequences

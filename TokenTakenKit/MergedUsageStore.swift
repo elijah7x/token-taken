@@ -50,6 +50,11 @@ public final class MergedUsageStore: UsageStore, @unchecked Sendable {
         return rows
     }
 
+    /// Returns local long-term hourly history only: `hourly_history` is not synced across devices (ADR-0015).
+    public func hourlyHistory() throws -> [HourlyUsage] {
+        try local.hourlyHistory()
+    }
+
     public var devices: [Device] {
         var result = local.devices
         var seen = Set(result.map(\.id))

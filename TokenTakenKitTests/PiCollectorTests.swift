@@ -125,25 +125,29 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertEqual(batch.daily.reduce(Int64(0)) { $0 + $1.eventCount }, 8)
     }
 
-    func testHourlyBucketsCoverTheLast48HoursOnly() async throws {
+    func testHourlyBucketsIncludeHistoryOlderThan48Hours() async throws {
         let batch = try await collector(root: try makeRoot(files: ["session-a.jsonl"])).collect()
         let formatter = ISO8601DateFormatter()
 
         XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, [
-            "2026-11-10T08:00:00Z", "2026-11-10T09:00:00Z", "2026-11-10T20:00:00Z",
+            "2026-11-07T10:00:00Z", "2026-11-10T08:00:00Z", "2026-11-10T09:00:00Z", "2026-11-10T20:00:00Z",
         ])
 
-        let first = batch.hourly[0]
-        XCTAssertEqual(first.counts, TokenCounts(input: 328, cacheRead: 100, cacheWrite: 15, output: 70, reasoning: 28))
-        XCTAssertEqual(first.eventCount, 5)
-        XCTAssertFalse(first.reasoningKnown, "branch_summary and toolResult reported no reasoning.")
+        XCTAssertEqual(batch.hourly[0].counts, TokenCounts(input: 5, output: 5))
+        XCTAssertEqual(batch.hourly[0].eventCount, 1)
+        XCTAssertTrue(batch.hourly[0].reasoningKnown)
 
-        XCTAssertEqual(batch.hourly[1].counts, TokenCounts(input: 40, output: 20))
-        XCTAssertEqual(batch.hourly[1].eventCount, 1)
-        XCTAssertFalse(batch.hourly[1].reasoningKnown)
+        let second = batch.hourly[1]
+        XCTAssertEqual(second.counts, TokenCounts(input: 328, cacheRead: 100, cacheWrite: 15, output: 70, reasoning: 28))
+        XCTAssertEqual(second.eventCount, 5)
+        XCTAssertFalse(second.reasoningKnown, "branch_summary and toolResult reported no reasoning.")
 
-        XCTAssertEqual(batch.hourly[2].counts, TokenCounts(input: 11, output: 3, reasoning: 1))
-        XCTAssertTrue(batch.hourly[2].reasoningKnown)
+        XCTAssertEqual(batch.hourly[2].counts, TokenCounts(input: 40, output: 20))
+        XCTAssertEqual(batch.hourly[2].eventCount, 1)
+        XCTAssertFalse(batch.hourly[2].reasoningKnown)
+
+        XCTAssertEqual(batch.hourly[3].counts, TokenCounts(input: 11, output: 3, reasoning: 1))
+        XCTAssertTrue(batch.hourly[3].reasoningKnown)
         XCTAssertTrue(batch.hourly.allSatisfy { $0.sourceID == "pi" && $0.deviceID == "device-a" })
     }
 
@@ -352,7 +356,7 @@ final class PiCollectorTests: XCTestCase {
         let kolkata = try XCTUnwrap(TimeZone(identifier: "Asia/Kolkata"))
         let root = directory.appendingPathComponent("kolkata", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        // `now` is 2026-11-11T06:00:00Z (11:30 IST): currentHour is 05:30Z, cutoff is 47h earlier (2026-11-09T06:30:00Z).
+        // `now` is 2026-11-11T06:00:00Z (11:30 IST): currentHour is 05:30Z; all past half-hour buckets are emitted.
         let lines = [
             #"{"type":"message","id":"k-old","timestamp":"2026-11-09T06:29:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":1,"output":1}}}"#,
             #"{"type":"message","id":"k-edge","timestamp":"2026-11-09T06:30:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":2,"output":1}}}"#,
@@ -364,6 +368,7 @@ final class PiCollectorTests: XCTestCase {
         let batch = try await collector(root: root, timeZone: kolkata).collect()
         let formatter = ISO8601DateFormatter()
         XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, [
+            "2026-11-09T05:30:00Z",
             "2026-11-09T06:30:00Z",
             "2026-11-11T04:30:00Z",
             "2026-11-11T05:30:00Z",
@@ -442,6 +447,27 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertEqual(batch.daily.count, 1)
         XCTAssertEqual(batch.daily.first?.counts, TokenCounts(input: 20, output: 5))
         XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, ["2026-11-10T09:00:00Z"])
+    }
+
+    func testPiFormatScanEmitsHoursOlderThan48HoursAndExcludesFutureHour() async throws {
+        let root = directory.appendingPathComponent("old-and-future-hours", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // `now` is 2026-11-11T06:00:00Z: include 10 days earlier and currentHour, exclude +2h (still <= now + 24h).
+        let lines = [
+            #"{"type":"message","id":"h-old","timestamp":"2026-11-01T04:15:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":12,"output":3}}}"#,
+            #"{"type":"message","id":"h-curr","timestamp":"2026-11-11T06:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":24,"output":6}}}"#,
+            #"{"type":"message","id":"h-future","timestamp":"2026-11-11T08:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":36,"output":9}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try Data(lines.utf8).write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        let formatter = ISO8601DateFormatter()
+        XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, [
+            "2026-11-01T04:00:00Z",
+            "2026-11-11T06:00:00Z",
+        ])
+        XCTAssertEqual(batch.hourly[0].counts, TokenCounts(input: 12, output: 3))
+        XCTAssertEqual(batch.hourly[0].eventCount, 1)
     }
 }
 

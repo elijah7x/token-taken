@@ -685,4 +685,29 @@ final class AntigravityCollectorTests: XCTestCase {
         XCTAssertTrue(batch.daily.isEmpty)
         XCTAssertEqual(batch.skippedRecords, 1)
     }
+
+    func testHourlyEmitsHistoryOlderThan48HoursAndExcludesFutureHour() async throws {
+        let home = try makeHome()
+        try makeDirectory(cliRoot(home))
+        // `Self.now` is 2026-11-11T06:00:00Z.
+        let oldStamp = milliseconds("2026-11-01T04:15:00Z")
+        let currentStamp = milliseconds("2026-11-11T06:00:00Z")
+        let futureStamp = milliseconds("2026-11-11T08:00:00Z")
+        try writeDatabase(at: cliRoot(home).appendingPathComponent("history.db"), rows: [
+            blob(Row(responseID: "resp-old", model: "gemini-4-argon", input: 100, output: 20, explicit: oldStamp)),
+            blob(Row(responseID: "resp-curr", model: "gemini-4-argon", input: 200, output: 40, explicit: currentStamp)),
+            blob(Row(responseID: "resp-future", model: "gemini-4-argon", input: 300, output: 60, explicit: futureStamp)),
+        ])
+
+        let batch = try await collector(home: home).collect()
+        let formatter = ISO8601DateFormatter()
+
+        XCTAssertEqual(batch.hourly.map { formatter.string(from: $0.hourStart) }, [
+            "2026-11-01T04:00:00Z",
+            "2026-11-11T06:00:00Z",
+        ])
+        XCTAssertEqual(batch.hourly[0].counts, TokenCounts(input: 100, output: 20))
+        XCTAssertEqual(batch.hourly[0].eventCount, 1)
+        XCTAssertEqual(batch.hourly[1].counts, TokenCounts(input: 200, output: 40))
+    }
 }

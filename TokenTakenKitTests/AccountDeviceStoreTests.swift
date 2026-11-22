@@ -76,7 +76,7 @@ final class AccountDeviceStoreTests: XCTestCase {
 
         XCTAssertEqual(store.devices, [Device(id: "device-a", name: "Test Mac", kind: .mac)])
         XCTAssertEqual(try store.records().map(\.day), ["2026-11-02"])
-        XCTAssertEqual(try userVersion(), 6)
+        XCTAssertEqual(try userVersion(), Int32(SQLiteUsageStore.schemaVersion))
     }
 
     func testAccountDeviceRoundTripsItsKind() throws {
@@ -303,6 +303,110 @@ final class AccountDeviceStoreTests: XCTestCase {
             record("2026-11-01", input: 30, device: accountID),
             freshDay,
         ]))
+    }
+
+    func testMigrateAccountDeviceMovesHourlyHistoryRowsAndRetainsDeviceWhileOtherSourceRemains() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let legacyID = "account-cursor-fedcba9876543210fedcba9876543210"
+        let legacyDevice = Device(id: legacyID, name: "Cursor", kind: .account)
+        try store.upsert(device: legacyDevice)
+        try store.upsert(device: accountDevice)
+
+        let oldHourMissingOnNew = Date(timeIntervalSince1970: 1_762_002_000)
+        let oldHourConflict = Date(timeIntervalSince1970: 1_762_005_600)
+        let otherSourceHour = Date(timeIntervalSince1970: 1_762_009_200)
+
+        let legacyMissing = HourlyUsage(
+            hourStart: oldHourMissingOnNew, deviceID: legacyID, sourceID: "cursor",
+            counts: TokenCounts(input: 45), eventCount: 2, reasoningKnown: true
+        )
+        let legacyConflict = HourlyUsage(
+            hourStart: oldHourConflict, deviceID: legacyID, sourceID: "cursor",
+            counts: TokenCounts(input: 999), eventCount: 9, reasoningKnown: true
+        )
+        let newConflict = HourlyUsage(
+            hourStart: oldHourConflict, deviceID: accountID, sourceID: "cursor",
+            counts: TokenCounts(input: 12), eventCount: 1, reasoningKnown: true
+        )
+        let legacyOtherSource = HourlyUsage(
+            hourStart: otherSourceHour, deviceID: legacyID, sourceID: "other-account",
+            counts: TokenCounts(input: 33), eventCount: 1, reasoningKnown: false
+        )
+
+        try store.replace(
+            batch: CollectionBatch(daily: [record("2026-11-01", input: 45, device: legacyID)]),
+            sourceID: "cursor", deviceID: legacyID,
+            hourlyHistory: [legacyMissing, legacyConflict]
+        )
+        try store.replace(
+            batch: CollectionBatch(),
+            sourceID: "other-account", deviceID: legacyID,
+            hourlyHistory: [legacyOtherSource]
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [record("2026-11-02", input: 12, device: accountID)]),
+            sourceID: "cursor", deviceID: accountID,
+            authoritative: true,
+            hourlyHistory: [newConflict]
+        )
+
+        try store.migrateAccountDevice(from: legacyID, to: accountID, sourceID: "cursor")
+
+        // Another source still has hourly_history rows on legacyID, so the legacy device row stays.
+        XCTAssertEqual(Set(store.devices), Set([legacyDevice, accountDevice]))
+        XCTAssertEqual(Set(try store.hourlyHistory()), Set([
+            HourlyUsage(
+                hourStart: oldHourMissingOnNew, deviceID: accountID, sourceID: "cursor",
+                counts: TokenCounts(input: 45), eventCount: 2, reasoningKnown: true
+            ),
+            newConflict,
+            legacyOtherSource,
+        ]))
+
+        // Once the remaining source migrates too, legacyID has no rows left and is removed.
+        try store.migrateAccountDevice(from: legacyID, to: accountID, sourceID: "other-account")
+        XCTAssertEqual(store.devices, [accountDevice])
+        XCTAssertEqual(Set(try store.hourlyHistory()), Set([
+            HourlyUsage(
+                hourStart: oldHourMissingOnNew, deviceID: accountID, sourceID: "cursor",
+                counts: TokenCounts(input: 45), eventCount: 2, reasoningKnown: true
+            ),
+            newConflict,
+            HourlyUsage(
+                hourStart: otherSourceHour, deviceID: accountID, sourceID: "other-account",
+                counts: TokenCounts(input: 33), eventCount: 1, reasoningKnown: false
+            ),
+        ]))
+    }
+
+    func testAuthoritativeReplaceAdoptsHourlyHistoryFromEarliestHour() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        func cursorHour(_ offset: Int, input: Int64) -> HourlyUsage {
+            HourlyUsage(
+                hourStart: Date(timeIntervalSince1970: 1_762_002_000 + Double(offset) * 3_600),
+                deviceID: accountID, sourceID: "cursor",
+                counts: TokenCounts(input: input), eventCount: 1, reasoningKnown: true
+            )
+        }
+        let h1 = cursorHour(1, input: 100)
+        let h2 = cursorHour(2, input: 100)
+        let h3 = cursorHour(3, input: 100)
+        let h4 = cursorHour(4, input: 100)
+        try store.replace(
+            batch: CollectionBatch(daily: [record("2026-11-01", input: 400)]),
+            sourceID: "cursor", deviceID: accountID,
+            hourlyHistory: [h1, h2, h3, h4]
+        )
+
+        let h2Lowered = cursorHour(2, input: 40)
+        let h4Raised = cursorHour(4, input: 200)
+        try store.replace(
+            batch: CollectionBatch(daily: [record("2026-11-01", input: 240)]),
+            sourceID: "cursor", deviceID: accountID,
+            authoritative: true,
+            hourlyHistory: [h2Lowered, h4Raised]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2Lowered, h4Raised])
     }
 
     private func historyEpochCount(deviceID: String) throws -> Int {

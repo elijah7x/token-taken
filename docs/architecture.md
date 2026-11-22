@@ -52,9 +52,9 @@ The engine interface is selected by [ADR-0003](decisions/0003-usage-engine.md), 
 ### Store
 
 - Owns the local database under `~/Library/Application Support/Token Taken/`.
-- SQLite schema version 6 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)` and `hourly_usage` keyed by `(device_id, source_id, hour_start)`, plus devices (with their `mac` or `account` kind), history epochs (with last applied collection time zone), and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
+- SQLite schema version 7 stores `daily_usage` keyed by `(device_id, source_id, model_id, day)`, rolling 48-hour `hourly_usage` keyed by `(device_id, source_id, hour_start)`, and sparse long-term `hourly_history` keyed by `(device_id, source_id, hour_start)` (no model column, no all-zero rows; [ADR-0015](decisions/0015-hourly-history.md)), plus devices (with their `mac` or `account` kind), history epochs (with last applied collection time zone), and health. Counts include unpriced `uncategorized` tokens; daily rows include time zone/raw model/event count; hourly rows include event count/reasoning knowledge.
 - Rebuilds usage-cache tables when migrating an older version, retaining devices and health metadata and marking health stale. Rejects newer unknown schemas. The CLI opens read-only and asks the app to migrate an old cache.
-- Merges one source/device's daily history and replaces its 48-hour hourly snapshot in a single transaction. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()` and `hourly()` throw on failed reads.
+- Merges one source/device's daily history and sparse long-term hourly history and replaces its 48-hour hourly snapshot in a single transaction, writing only changed `hourly_history` rows. A serial queue, WAL, and busy timeout coordinate local access; `UsageStore.records()`, `hourly()`, and `hourlyHistory()` throw on failed reads.
 - Preserves cached rows and last success on failed/unavailable collection. Source health tracks skipped records and `ok`, `unavailable`, `failed`, `stale`, and `notInstalled` states; health read/write errors remain visible through throwing reads and runner results.
 
 See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merge rules follow `docs/contracts/sync.md`.
@@ -73,7 +73,7 @@ See ADR-0005 for the rebuild policy. Sync snapshots, device tombstones, and merg
 
 - Uses the opt-in iCloud Drive folder `iCloud Drive/Token Taken/`, stored on disk at `~/Library/Mobile Documents/com~apple~CloudDocs/Token Taken/`. Sync is off by default.
 - Gives each Mac a random UUID `deviceId` created on first launch. Hardware identifiers are not used.
-- Writes only `Token Taken/v1/devices/<deviceId>/`, containing `device.json`, atomically rewritten monthly daily-history `usage-YYYY-MM.json` snapshots, and a rolling per-source `hourly.json`. Each folder has one writer.
+- Writes only `Token Taken/v1/devices/<deviceId>/`, containing `device.json`, atomically rewritten monthly daily-history `usage-YYYY-MM.json` snapshots, and a rolling per-source `hourly.json`. Each folder has one writer. Local long-term `hourly_history` is not synced ([ADR-0015](decisions/0015-hourly-history.md)).
 - Reads and merges every device folder. A removed device leaves a tombstone and does not resurrect unless the user re-enables it.
 - Preserves daily local-date labels and collection zones per model; preserves absolute hourly instants per source without model attribution. Both kinds include event counts and uncategorized tokens; hourly rows preserve reasoning knowledge and explicit zero coverage. Hourly activity is never added to daily totals.
 - Never cross-deduplicates device-local sources. Account-level sources (today only Cursor) are folded to one whole publication per account before totals form, so a signed-in Mac never counts the account a second time; see [ADR-0010](decisions/0010-cursor-account-usage.md).
@@ -119,7 +119,7 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 ## Data flow
 
 1. Collectors return daily and hourly batches with device attribution. Missing locations throw `sourceUnavailable`, never a successful empty snapshot.
-2. The runner merges each successful source/device's daily history and replaces its 48-hour hourly snapshot transactionally, then records source health. Complete reads establish 48 hours of explicit hourly coverage; partial reads do not invent missing zero rows. Failures preserve cached data.
+2. The runner merges each successful source/device's daily history and sparse long-term hourly history and replaces its 48-hour hourly snapshot transactionally, then records source health. Complete reads establish 48 hours of explicit hourly coverage; partial reads do not invent missing zero rows. Failures preserve cached data.
 3. Opt-in sync (off by default) writes daily history and a separate rolling hourly snapshot to this Mac's folder and reads other device folders, preserving single-writer ownership and tombstones. An account-level source's rows are published inside that folder and collapse to one whole publication per account when read; device-local sources keep per-device attribution.
 4. `TokenTakenKit` applies viewer-calendar period boundaries to original daily date labels for totals and breakdowns, without shifting them. The Day chart instead reads actual hourly rows in viewer-local hours, including DST and coverage gaps; it can differ from the daily total because hourly reasoning is unavailable or zones/coverage differ. Pricing adds versioned estimates at read time.
 5. The main window, menu bar extra, and CLI query that shared pipeline. They do not implement separate aggregation rules.

@@ -114,7 +114,7 @@ final class SQLiteUsageStoreTests: XCTestCase {
         XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
         defer { sqlite3_finalize(version) }
         XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
-        XCTAssertEqual(sqlite3_column_int(version, 0), 6)
+        XCTAssertEqual(sqlite3_column_int(version, 0), Int32(SQLiteUsageStore.schemaVersion))
     }
 
     func testMigrationFromVersion5AddsEpochTimeZoneWithoutRebaselining() throws {
@@ -171,7 +171,7 @@ final class SQLiteUsageStoreTests: XCTestCase {
             XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
             defer { sqlite3_finalize(version) }
             XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
-            XCTAssertEqual(sqlite3_column_int(version, 0), 6)
+            XCTAssertEqual(sqlite3_column_int(version, 0), Int32(SQLiteUsageStore.schemaVersion))
 
             var zoneStmt: OpaquePointer?
             XCTAssertEqual(sqlite3_prepare_v2(handle, "SELECT time_zone FROM history_epochs WHERE device_id = 'device-a' AND source_id = 'claude';", -1, &zoneStmt, nil), SQLITE_OK)
@@ -325,6 +325,186 @@ final class SQLiteUsageStoreTests: XCTestCase {
         XCTAssertFalse(message.contains("/tmp/"))
         XCTAssertFalse(message.contains("~"))
         XCTAssertEqual(try store.health().first?.errorMessage, message)
+    }
+
+    func testMigrationFromVersion6CreatesHourlyHistoryAndPreservesExistingData() throws {
+        let epoch = HistoryEpochs.epoch(for: "claude")
+        let hourTimestamp: Int64 = 1_762_682_400
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        let sql = """
+            CREATE TABLE devices (
+                id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'mac'
+            );
+            INSERT INTO devices VALUES ('device-a', 'Test Mac', 1000, 'mac');
+            CREATE TABLE health (
+                source_id TEXT PRIMARY KEY, last_attempt REAL, last_success REAL,
+                record_count INTEGER NOT NULL, error TEXT,
+                skipped_records INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'stale'
+            );
+            INSERT INTO health VALUES ('claude', 1000, 900, 1, NULL, 0, 'ok');
+            CREATE TABLE daily_usage (
+                device_id TEXT NOT NULL, source_id TEXT NOT NULL, model_id TEXT NOT NULL,
+                raw_model_id TEXT NOT NULL, day TEXT NOT NULL, time_zone TEXT NOT NULL,
+                input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                event_count INTEGER NOT NULL, cache_write_1h INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (device_id, source_id, model_id, day)
+            );
+            INSERT INTO daily_usage VALUES
+                ('device-a', 'claude', 'model-a', 'raw-model-a', '2026-11-09', 'Asia/Shanghai', 100, 20, 10, 30, 5, 7, 3, 0);
+            CREATE TABLE hourly_usage (
+                device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
+                input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
+                PRIMARY KEY (device_id, source_id, hour_start)
+            );
+            INSERT INTO hourly_usage VALUES
+                ('device-a', 'claude', \(hourTimestamp), 4, 0, 0, 5, 0, 6, 2, 0);
+            CREATE TABLE history_epochs (
+                device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+                time_zone TEXT,
+                PRIMARY KEY (device_id, source_id)
+            );
+            INSERT INTO history_epochs VALUES ('device-a', 'claude', '\(epoch)', 'Asia/Shanghai');
+            PRAGMA user_version = 6;
+            """
+        XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+
+        XCTAssertThrowsError(try SQLiteUsageStore(url: databaseURL, readOnly: true))
+        let historyRow = HourlyUsage(
+            hourStart: Date(timeIntervalSince1970: Double(hourTimestamp - 72 * 3_600)),
+            deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 42, output: 8), eventCount: 2, reasoningKnown: true
+        )
+        do {
+            let store = try SQLiteUsageStore(url: databaseURL)
+            XCTAssertEqual(store.devices, [Device(id: "device-a", name: "Test Mac")])
+            XCTAssertEqual(try store.health().first?.state, .ok)
+            XCTAssertEqual(try store.records(), [record()])
+            XCTAssertEqual(try store.hourly(), [HourlyUsage(
+                hourStart: Date(timeIntervalSince1970: Double(hourTimestamp)),
+                deviceID: "device-a", sourceID: "claude",
+                counts: TokenCounts(input: 4, output: 5, uncategorized: 6), eventCount: 2, reasoningKnown: false
+            )])
+            XCTAssertEqual(try store.hourlyHistory(), [])
+            try store.replace(
+                batch: CollectionBatch(daily: [record()]),
+                sourceID: "claude", deviceID: "device-a",
+                hourlyHistory: [historyRow]
+            )
+        }
+
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        do {
+            defer { sqlite3_close(handle) }
+            var version: OpaquePointer?
+            XCTAssertEqual(sqlite3_prepare_v2(handle, "PRAGMA user_version;", -1, &version, nil), SQLITE_OK)
+            defer { sqlite3_finalize(version) }
+            XCTAssertEqual(sqlite3_step(version), SQLITE_ROW)
+            XCTAssertEqual(sqlite3_column_int(version, 0), 7)
+        }
+        let readOnly = try SQLiteUsageStore(url: databaseURL, readOnly: true)
+        XCTAssertEqual(try readOnly.hourlyHistory(), [historyRow])
+    }
+
+    func testRunnerPopulatesSparseHourlyHistoryAndUnchangedPathDoesNotTouchIt() async throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let currentHour = Calendar.current.dateInterval(of: .hour, for: now)!.start
+        let oldHour = HourlyUsage(
+            hourStart: currentHour.addingTimeInterval(-72 * 3_600),
+            deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 100), eventCount: 2, reasoningKnown: true
+        )
+        let recentStart = currentHour.addingTimeInterval(-3_600)
+        let recentPartA = HourlyUsage(
+            hourStart: recentStart, deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 30), eventCount: 1, reasoningKnown: true
+        )
+        let recentPartB = HourlyUsage(
+            hourStart: recentStart, deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(output: 20), eventCount: 2, reasoningKnown: false
+        )
+        let zeroHour = HourlyUsage(
+            hourStart: currentHour.addingTimeInterval(-5 * 3_600),
+            deviceID: "device-a", sourceID: "claude",
+            counts: .zero, eventCount: 0, reasoningKnown: true
+        )
+        let futureHour = HourlyUsage(
+            hourStart: currentHour.addingTimeInterval(3_600),
+            deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 50), eventCount: 1, reasoningKnown: true
+        )
+        let mergedRecent = HourlyUsage(
+            hourStart: recentStart, deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 30, output: 20), eventCount: 3, reasoningKnown: false
+        )
+
+        let firstRunner = CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [SuccessfulCollector(batch: CollectionBatch(
+                daily: [record()],
+                hourly: [oldHour, recentPartA, recentPartB, zeroHour, futureHour]
+            ))]
+        )
+        let firstResults = await firstRunner.runAll(now: now)
+        XCTAssertEqual(firstResults.first?.state, .ok)
+        XCTAssertEqual(try store.hourly().count, 48)
+        XCTAssertEqual(try store.hourlyHistory(), [oldHour, mergedRecent])
+
+        var handle: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &handle), SQLITE_OK)
+        let guardSQL = """
+            CREATE TRIGGER guard_hh_ins BEFORE INSERT ON hourly_history BEGIN SELECT RAISE(FAIL, 'unexpected insert'); END;
+            CREATE TRIGGER guard_hh_upd BEFORE UPDATE ON hourly_history BEGIN SELECT RAISE(FAIL, 'unexpected update'); END;
+            CREATE TRIGGER guard_hh_del BEFORE DELETE ON hourly_history BEGIN SELECT RAISE(FAIL, 'unexpected delete'); END;
+            """
+        XCTAssertEqual(sqlite3_exec(handle, guardSQL, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(handle)
+
+        let unchangedRunner = CollectionRunner(
+            store: store,
+            device: Device(id: "device-a", name: "Test Mac"),
+            collectors: [SuccessfulCollector(batch: CollectionBatch(unchangedSourceIDs: ["claude"]))]
+        )
+        let secondResults = await unchangedRunner.runAll(now: now.addingTimeInterval(3_600))
+        XCTAssertEqual(secondResults.first?.state, .ok)
+        XCTAssertEqual(try store.hourly().count, 48)
+        XCTAssertEqual(try store.hourlyHistory(), [oldHour, mergedRecent])
+    }
+
+    func testMergedUsageStoreHourlyHistoryReturnsLocalRowsOnly() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let localDevice = Device(id: "device-a", name: "Local Mac")
+        try store.upsert(device: localDevice)
+        let localHistory = HourlyUsage(
+            hourStart: Date(timeIntervalSince1970: 1_762_002_000),
+            deviceID: "device-a", sourceID: "claude",
+            counts: TokenCounts(input: 75), eventCount: 2, reasoningKnown: false
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [record()]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [localHistory]
+        )
+        let remoteDevice = Device(id: "device-b", name: "Remote Mac")
+        let remoteHourly = HourlyUsage(
+            hourStart: Date(timeIntervalSince1970: 1_762_005_600),
+            deviceID: "device-b", sourceID: "claude",
+            counts: TokenCounts(input: 99), eventCount: 1, reasoningKnown: false
+        )
+        let remoteSnapshot = RemoteDeviceSnapshot(
+            device: remoteDevice,
+            daily: [record(device: "device-b")],
+            hourly: [remoteHourly],
+            status: RemoteDeviceStatus(deviceID: "device-b", displayName: "Remote Mac", lastWrite: now, state: .ok)
+        )
+        let merged = MergedUsageStore(local: store, remote: [remoteSnapshot])
+        XCTAssertEqual(try merged.hourlyHistory(), [localHistory])
     }
 }
 

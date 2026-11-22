@@ -475,4 +475,37 @@ final class DevinCollectorTests: XCTestCase {
         XCTAssertTrue(batch.daily.isEmpty)
         XCTAssertEqual(batch.skippedRecords, 1)
     }
+
+    func testHourlyEmitsHistoryOlderThan48HoursAndExcludesFutureHour() async throws {
+        let now = ISO8601DateFormatter().date(from: "2026-01-12T12:30:00Z")!
+        try makeDatabase(
+            sessions: [Session(id: "session-a", title: nil, model: "swe-2")],
+            rows: [
+                Row(rowID: 1, session: "session-a", createdAt: seconds("2026-01-02T06:00:00Z"),
+                    message: chatMessage(
+                        requestID: "old-row", generationModel: "swe-2",
+                        startedGenerationAt: "2026-01-02T06:15:00.000Z", input: 15
+                    )),
+                Row(rowID: 2, session: "session-a", createdAt: seconds("2026-01-12T12:00:00Z"),
+                    message: chatMessage(
+                        requestID: "curr-row", generationModel: "swe-2",
+                        startedGenerationAt: "2026-01-12T12:05:00.000Z", input: 25
+                    )),
+                Row(rowID: 3, session: "session-a", createdAt: seconds("2026-01-12T14:00:00Z"),
+                    message: chatMessage(
+                        requestID: "future-hour-row", generationModel: "swe-2",
+                        startedGenerationAt: "2026-01-12T14:05:00.000Z", input: 35
+                    )),
+            ]
+        )
+
+        let batch = try await collector(now: now).collect()
+
+        XCTAssertEqual(batch.hourly.map(\.hourStart), [
+            ISO8601DateFormatter().date(from: "2026-01-02T06:00:00Z")!,
+            ISO8601DateFormatter().date(from: "2026-01-12T12:00:00Z")!,
+        ])
+        XCTAssertEqual(batch.hourly[0].counts, TokenCounts(input: 15))
+        XCTAssertEqual(batch.hourly[1].counts, TokenCounts(input: 25))
+    }
 }

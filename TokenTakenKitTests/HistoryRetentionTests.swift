@@ -404,4 +404,217 @@ final class HistoryRetentionTests: XCTestCase {
         XCTAssertEqual(try store.hourly(), [second])
         XCTAssertEqual(try store.records(), [daily])
     }
+
+    private func historyHour(
+        _ offsetHours: Int,
+        input: Int64,
+        output: Int64 = 0,
+        cacheWrite1h: Int64 = 0,
+        eventCount: Int64 = 1,
+        reasoningKnown: Bool = false,
+        source: String = "claude",
+        device: String = "device-a"
+    ) -> HourlyUsage {
+        let base: TimeInterval = 1_762_002_000
+        return HourlyUsage(
+            hourStart: Date(timeIntervalSince1970: base + Double(offsetHours) * 3_600),
+            deviceID: device,
+            sourceID: source,
+            counts: TokenCounts(input: input, output: output, cacheWrite1h: cacheWrite1h),
+            eventCount: eventCount,
+            reasoningKnown: reasoningKnown
+        )
+    }
+
+    private func installHourlyHistoryWriteGuards() {
+        withHandle { handle in
+            let sql = """
+                CREATE TRIGGER guard_hh_ins BEFORE INSERT ON hourly_history BEGIN SELECT RAISE(FAIL, 'unexpected insert'); END;
+                CREATE TRIGGER guard_hh_upd BEFORE UPDATE ON hourly_history BEGIN SELECT RAISE(FAIL, 'unexpected update'); END;
+                CREATE TRIGGER guard_hh_del BEFORE DELETE ON hourly_history BEGIN SELECT RAISE(FAIL, 'unexpected delete'); END;
+                """
+            XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+        }
+    }
+
+    private func dropHourlyHistoryWriteGuards() {
+        withHandle { handle in
+            let sql = """
+                DROP TRIGGER IF EXISTS guard_hh_ins;
+                DROP TRIGGER IF EXISTS guard_hh_upd;
+                DROP TRIGGER IF EXISTS guard_hh_del;
+                """
+            XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+        }
+    }
+
+    func testHourlyHistoryFloorMergeAndZeroRowExclusion() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let zero = historyHour(0, input: 0, eventCount: 0)
+        let h1 = historyHour(1, input: 100, eventCount: 2)
+        let h2 = historyHour(2, input: 200, eventCount: 1)
+        let h3 = historyHour(3, input: 50, eventCount: 1)
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 350)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [zero, h1, h2, h3]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2, h3])
+
+        let h1Smaller = historyHour(1, input: 40, eventCount: 1)
+        let h2Larger = historyHour(2, input: 250, eventCount: 3, reasoningKnown: true)
+        let h4New = historyHour(4, input: 80, eventCount: 2)
+        let h5Zero = historyHour(5, input: 0, eventCount: 0)
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 370)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1Smaller, h2Larger, h4New, h5Zero]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2Larger, h3, h4New])
+    }
+
+    func testHourlyHistoryEqualTotalUpdatesChangedFields() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let initial = historyHour(1, input: 100, output: 0, eventCount: 1, reasoningKnown: false)
+        let updated = historyHour(1, input: 60, output: 40, eventCount: 2, reasoningKnown: true)
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 100)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [initial]
+        )
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 100)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [updated]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [updated])
+    }
+
+    func testHourlyHistoryRebaselinesOnEpochButNotZoneChange() throws {
+        // Epoch change rebaseline: hours strictly after earliest batch hour adopt batch (absent deleted),
+        // while hours at or before earliest batch hour keep the floor rule.
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let h1 = historyHour(1, input: 100)
+        let h2 = historyHour(2, input: 200)
+        let h3 = historyHour(3, input: 50)
+        let h4 = historyHour(4, input: 90)
+        try store.replace(
+            batch: CollectionBatch(daily: [
+                record(day: "2026-11-05", input: 300),
+                record(day: "2026-11-06", input: 140),
+            ]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1, h2, h3, h4]
+        )
+        setEpoch("0+tokscale-4.21.0")
+        let h2Smaller = historyHour(2, input: 80)
+        let h4Smaller = historyHour(4, input: 40)
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-06", input: 120)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h2Smaller, h4Smaller]
+        )
+        // h1 (< earliest) kept; h2 (== earliest) keeps floor (200 > 80); h3 (> earliest, absent) deleted;
+        // h4 (> earliest) lowered to 40.
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2, h4Smaller])
+
+        // A zone-key change never moves absolute hours, so it keeps the floor rule.
+        let h5 = historyHour(5, input: 70)
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-06", input: 190)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h2, h4Smaller, h5]
+        )
+        let h4ZoneLowered = historyHour(4, input: 20)
+        try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-06", input: 190, zone: "America/New_York")]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h2Smaller, h4ZoneLowered]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2, h4Smaller, h5])
+    }
+
+    func testHourlyHistoryKeepsFloorOnEpochChangeWithSkippedRecords() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let h1 = historyHour(1, input: 100)
+        let h2 = historyHour(2, input: 200)
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 300)]),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: [h1, h2])
+        setEpoch("0+tokscale-4.21.0")
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 50)], skippedRecords: 1),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: [historyHour(1, input: 50)])
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2])
+    }
+
+    func testHourlyHistoryKeepsZeroTokenHoursWithEvents() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let request = historyHour(1, input: 0, eventCount: 2)
+        try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-05", input: 1)]),
+            sourceID: "claude", deviceID: "device-a", hourlyHistory: [request, historyHour(2, input: 0, eventCount: 0)])
+        XCTAssertEqual(try store.hourlyHistory(), [request])
+    }
+
+    func testHourlyHistorySteadyStateSecondApplyWritesNothing() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let h1 = historyHour(1, input: 100, eventCount: 2)
+        let h2 = historyHour(2, input: 200, output: 15, eventCount: 3, reasoningKnown: true)
+        let daily = [record(day: "2026-11-05", input: 315)]
+        try store.replace(
+            batch: CollectionBatch(daily: daily),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1, h2]
+        )
+
+        installHourlyHistoryWriteGuards()
+        // Identical persisted columns (even with non-zero cacheWrite1h) must produce zero writes.
+        let h2WithCacheWrite1h = historyHour(2, input: 200, output: 15, cacheWrite1h: 50, eventCount: 3, reasoningKnown: true)
+        try store.replace(
+            batch: CollectionBatch(daily: daily),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1, h2WithCacheWrite1h]
+        )
+        // Cached re-store (`appliesEpoch: false`) must not touch hourly_history even if passed rows differ.
+        try store.replace(
+            batch: CollectionBatch(daily: daily),
+            sourceID: "claude", deviceID: "device-a",
+            appliesEpoch: false,
+            hourlyHistory: [historyHour(9, input: 999)]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2])
+
+        // Confirm the guard actually catches a real write.
+        let h2Grown = historyHour(2, input: 250, output: 15, eventCount: 4, reasoningKnown: true)
+        XCTAssertThrowsError(try store.replace(
+            batch: CollectionBatch(daily: daily),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1, h2Grown]
+        ))
+
+        dropHourlyHistoryWriteGuards()
+        try store.replace(
+            batch: CollectionBatch(daily: daily),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1, h2Grown]
+        )
+        XCTAssertEqual(try store.hourlyHistory(), [h1, h2Grown])
+    }
+
+    func testHourlyHistoryRollsBackWithDailyAndHourly() throws {
+        let store = try SQLiteUsageStore(url: databaseURL)
+        let h1 = historyHour(1, input: 100)
+        let daily = record(day: "2026-11-05", input: 100)
+        try store.replace(
+            batch: CollectionBatch(daily: [daily], hourly: [h1]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [h1]
+        )
+        let h2 = historyHour(2, input: 200)
+        let invalid = CollectionBatch(daily: [record(day: "2026-11-05", input: 300)], hourly: [h1, h1])
+        XCTAssertThrowsError(try store.replace(
+            batch: invalid, sourceID: "claude", deviceID: "device-a", hourlyHistory: [h1, h2]
+        ))
+        XCTAssertEqual(try store.records(), [daily])
+        XCTAssertEqual(try store.hourly(), [h1])
+        XCTAssertEqual(try store.hourlyHistory(), [h1])
+    }
 }

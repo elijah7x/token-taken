@@ -340,7 +340,6 @@ public struct AntigravityCollector: UsageCollector {
         let timeZone: TimeZone
         let calendar: Calendar
         let currentHour: Date
-        let cutoff: Date
         let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
@@ -357,7 +356,6 @@ public struct AntigravityCollector: UsageCollector {
             self.calendar = calendar
             let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
             self.currentHour = currentHour
-            cutoff = currentHour.addingTimeInterval(-47 * 3_600)
             maxDate = now.addingTimeInterval(86_400)
         }
 
@@ -429,7 +427,7 @@ public struct AntigravityCollector: UsageCollector {
             record.eventCount += 1
             daily[key] = record
 
-            guard hour >= cutoff, hour <= currentHour else { return }
+            guard hour <= currentHour else { return }
             var hourlyRow = hourly[hour] ?? HourlyUsage(
                 hourStart: hour, deviceID: deviceID, sourceID: AntigravityCollector.sourceID,
                 counts: .zero, eventCount: 0, reasoningKnown: true

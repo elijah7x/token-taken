@@ -36,12 +36,16 @@ public struct CollectionStamp: Codable, Hashable, Sendable {
     /// History epochs of the collector's sources. A bumped epoch changes the stamp, so unchanged inputs are re-read
     /// once and the correction rebaselines instead of the cached rows being re-stored under the new epoch.
     public var historyEpochs: [String]?
+    /// Raised when collectors start emitting a wider hourly range (ADR-0015), so unchanged inputs are re-read once
+    /// and the long-term hourly history is backfilled on upgrade.
+    public var hourlyRange: Int?
 
     public init(formatVersion: Int, engineVersion: String? = nil, timeZone: TimeZone = .current, sourceIDs: [String] = []) {
         self.timeZoneID = timeZone.identifier
         self.formatVersion = formatVersion
         self.engineVersion = engineVersion
         self.historyEpochs = sourceIDs.isEmpty ? nil : sourceIDs.map { "\($0)=\(HistoryEpochs.epoch(for: $0))" }
+        self.hourlyRange = 1
     }
 }
 

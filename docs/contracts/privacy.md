@@ -4,7 +4,7 @@ Status: Implemented v1 (2026-11-14)
 
 ## Local-first collection
 
-- Usage data is collected and stored locally first in `~/Library/Application Support/Token Taken/`; a network connection is not required for local statistics.
+- Usage data is collected and stored locally first in `~/Library/Application Support/Token Taken/`; a network connection is not required for local statistics. Local storage includes sparse long-term per-source hourly aggregates (`hourly_history`, hour granularity only, no model or content), which stay local and are not synced ([ADR-0015](../decisions/0015-hourly-history.md), [sync.md](sync.md)).
 - Agent logs, databases, configuration, and credentials are read-only inputs. The app, engine adapter, and CLI MUST NOT modify, move, or delete them.
 - Collection MUST be limited to the locations and APIs required for enabled sources. Enabling sync does not enable additional source collection.
 

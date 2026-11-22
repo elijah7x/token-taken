@@ -73,7 +73,7 @@ public struct MiniMaxCodeCollector: UsageCollector {
         let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
         var aggregator = Aggregator(
             deviceID: deviceID, timeZone: timeZone, calendar: calendar,
-            currentHour: currentHour, cutoff: currentHour.addingTimeInterval(-47 * 3_600),
+            currentHour: currentHour,
             maxDate: now.addingTimeInterval(86_400)
         )
 
@@ -167,7 +167,6 @@ public struct MiniMaxCodeCollector: UsageCollector {
         let timeZone: TimeZone
         let calendar: Calendar
         let currentHour: Date
-        let cutoff: Date
         let maxDate: Date
 
         var daily: [Key: UsageRecord] = [:]
@@ -234,7 +233,7 @@ public struct MiniMaxCodeCollector: UsageCollector {
             row.eventCount += 1
             daily[dailyKey] = row
 
-            guard hour >= cutoff, hour <= currentHour else { return }
+            guard hour <= currentHour else { return }
             var hourRow = hourly[hour] ?? HourlyUsage(
                 hourStart: hour, deviceID: deviceID, sourceID: "mcode",
                 counts: .zero, eventCount: 0, reasoningKnown: true

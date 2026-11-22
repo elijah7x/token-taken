@@ -96,10 +96,11 @@ public actor CollectionRunner {
                         )
                         do {
                             let scoped = sourceBatch(cachedBatch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
-                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
+                            // Cached re-store advances the 48h window without touching long-term hourly history (ADR-0015).
+                            try store.replace(batch: scoped.batch, sourceID: sourceID, deviceID: targetDeviceID,
                                 appliesEpoch: false)
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
-                                recordCount: scoped.daily.count, skippedRecords: skipped)
+                                recordCount: scoped.batch.daily.count, skippedRecords: skipped)
                         } catch {
                             health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
                                 now: now, message: Self.message(for: error), state: .failed)
@@ -132,10 +133,11 @@ public actor CollectionRunner {
                                 }
                             }
                             let scoped = sourceBatch(batch, sourceID: sourceID, deviceID: targetDeviceID, now: now)
-                            try store.replace(batch: scoped, sourceID: sourceID, deviceID: targetDeviceID,
-                                authoritative: batch.authoritativeSourceIDs.contains(sourceID))
+                            try store.replace(batch: scoped.batch, sourceID: sourceID, deviceID: targetDeviceID,
+                                authoritative: batch.authoritativeSourceIDs.contains(sourceID),
+                                hourlyHistory: scoped.hourlyHistory)
                             health = SourceHealth(sourceID: sourceID, lastAttempt: now, lastSuccess: now,
-                                recordCount: scoped.daily.count, skippedRecords: batch.skippedRecords)
+                                recordCount: scoped.batch.daily.count, skippedRecords: batch.skippedRecords)
                         } catch {
                             health = failedHealth(sourceID: sourceID, existing: existing, cachedRecordCount: cachedCount,
                                 now: now, message: Self.message(for: error), state: .failed)
@@ -175,21 +177,19 @@ public actor CollectionRunner {
         return results
     }
 
-    private func sourceBatch(_ batch: CollectionBatch, sourceID: String, deviceID: String, now: Date) -> CollectionBatch {
+    private struct ScopedBatch {
+        let batch: CollectionBatch
+        let hourlyHistory: [HourlyUsage]
+    }
+
+    private func sourceBatch(_ batch: CollectionBatch, sourceID: String, deviceID: String, now: Date) -> ScopedBatch {
         let calendar = Calendar.current
         let currentHour = calendar.dateInterval(of: .hour, for: now)!.start
         let cutoff = currentHour.addingTimeInterval(-47 * 3_600)
-        var hours = Dictionary(grouping: batch.hourly.filter {
-            $0.sourceID == sourceID && $0.hourStart >= cutoff && $0.hourStart <= currentHour
-        }, by: \.hourStart).mapValues { rows in
-            var row = rows[0]
-            for other in rows.dropFirst() {
-                row.counts += other.counts
-                row.eventCount += other.eventCount
-                row.reasoningKnown = row.reasoningKnown && other.reasoningKnown
-            }
-            return row
-        }
+        let mergedAll = Self.mergeHours(batch.hourly.filter {
+            $0.sourceID == sourceID && $0.hourStart <= currentHour
+        })
+        var hours = mergedAll.filter { $0.key >= cutoff }
         // Persist coverage as zero rows only after a complete successful read, never after a failure.
         if batch.skippedRecords == 0 {
             for offset in 0..<48 {
@@ -201,8 +201,27 @@ public actor CollectionRunner {
                 }
             }
         }
-        return CollectionBatch(daily: batch.daily.filter { $0.sourceID == sourceID },
-            hourly: hours.values.sorted { $0.hourStart < $1.hourStart }, skippedRecords: batch.skippedRecords)
+        let hourlyHistory = mergedAll.values
+            .filter { $0.counts.total > 0 || $0.eventCount > 0 }
+            .sorted { $0.hourStart < $1.hourStart }
+        let scoped = CollectionBatch(
+            daily: batch.daily.filter { $0.sourceID == sourceID },
+            hourly: hours.values.sorted { $0.hourStart < $1.hourStart },
+            skippedRecords: batch.skippedRecords
+        )
+        return ScopedBatch(batch: scoped, hourlyHistory: hourlyHistory)
+    }
+
+    private static func mergeHours(_ rows: [HourlyUsage]) -> [Date: HourlyUsage] {
+        Dictionary(grouping: rows, by: \.hourStart).mapValues { group in
+            var row = group[0]
+            for other in group.dropFirst() {
+                row.counts += other.counts
+                row.eventCount += other.eventCount
+                row.reasoningKnown = row.reasoningKnown && other.reasoningKnown
+            }
+            return row
+        }
     }
 
     private func collectAll() async -> [Outcome] {

@@ -27,7 +27,7 @@ public struct OmpCollector: UsageCollector {
     private let timeZone: TimeZone
     /// When set, scan results are persisted here and later refreshes scan only what changed.
     private let stateDirectory: URL?
-    /// Defines "the last 48 hours" for the hourly buckets; injectable so tests can pin it.
+    /// Defines the upper bound (`currentHour`) for hourly buckets and future-date guards; injectable so tests can pin it.
     private let now: @Sendable () -> Date
 
     public init(
