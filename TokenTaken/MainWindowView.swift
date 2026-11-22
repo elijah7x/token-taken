@@ -78,8 +78,8 @@ struct MainWindowView: View {
     var body: some View {
         HStack(spacing: 0) {
             Tray(isFirstLaunchCollecting: isFirstLaunchCollecting)
-                .frame(width: settings.theme == .cosmos ? 252 : 264)
-                .padding(settings.theme == .cosmos ? 0 : 8)
+                .frame(width: 264)
+                .padding(ThemeChrome.trayInset)
 
             Group {
                 switch router.route {
@@ -167,6 +167,7 @@ struct MainWindowView: View {
                     if settings.theme == .cosmos {
                         CosmosSceneView(summary: model.summary, dimension: dimension, highlight: $cosmosHighlight)
                             .frame(maxWidth: .infinity, minHeight: 280, maxHeight: .infinity)
+                            .clipped()
                     } else if settings.theme == .liquidGlass && settings.liquidView == .lens {
                         LensView(
                             buckets: model.lensBuckets,
@@ -182,20 +183,19 @@ struct MainWindowView: View {
                             .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
                     }
 
-                    Rectangle().fill(Palette.hairline).frame(height: 1)
+                    Rectangle().fill(Palette.hairline).frame(height: ThemeChrome.ruleWidth)
                         .padding(.horizontal, 28)
-                        .padding(.vertical, settings.theme == .cosmos ? 12 : 24)
+                        .padding(.vertical, 20)
 
                     BreakdownCard(
                         summary: model.summary,
                         dimension: dimension,
                         highlight: settings.theme == .cosmos ? $cosmosHighlight : .constant(nil)
                     )
-                        .padding(.horizontal, 28)
-                        .background(settings.theme == .cosmos ? CosmosPalette.background : .clear)
+                    .padding(.horizontal, 28)
                 }
             }
-            .padding(.bottom, settings.theme == .cosmos ? 16 : 24)
+            .padding(.bottom, 24)
         }
     }
 }
@@ -212,27 +212,25 @@ private struct DimensionSwitchRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            if ThemeRuntime.isCosmos {
-                Spacer(minLength: 12)
-            }
-
             Group {
-                if ThemeRuntime.isCosmos {
+                switch ThemeKind.current {
+                case .cosmos:
+                    let shape = RadiusRole.control.shape
                     HStack(spacing: 0) {
                         segment(.sources, label: "Harnesses · \(summary.bySource.count)")
                         segment(.models, label: "Models · \(summary.byModel.count)")
                     }
-                    .background(CosmosPalette.background)
-                    .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-                } else if ThemeRuntime.isField {
+                    .background { shape.fill(CosmosPalette.background) }
+                    .overlay { shape.strokeBorder(CosmosPalette.controlRule, lineWidth: ThemeChrome.ruleWidth) }
+                case .field:
                     HStack(spacing: 2) {
                         segment(.sources, label: "Harnesses · \(summary.bySource.count)")
                         segment(.models, label: "Models · \(summary.byModel.count)")
                     }
                     .padding(2)
-                    .background(Capsule().fill(FieldPalette.panel))
-                    .overlay(Capsule().strokeBorder(FieldPalette.rule, lineWidth: 1))
-                } else {
+                    .background { Capsule().fill(Palette.cardSurface) }
+                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
+                case .liquidGlass:
                     GlassEffectContainer(spacing: 0) {
                         HStack(spacing: 2) {
                             segment(.sources, label: "Harnesses · \(summary.bySource.count)")
@@ -240,8 +238,8 @@ private struct DimensionSwitchRow: View {
                         }
                         .padding(2)
                     }
-                    .background(Capsule().fill(Palette.barTrack))
-                    .overlay(Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : 0.5))
+                    .background { Capsule().fill(Palette.barTrack) }
+                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : ThemeChrome.ruleWidth) }
                 }
             }
             .fixedSize(horizontal: true, vertical: false)
@@ -253,26 +251,11 @@ private struct DimensionSwitchRow: View {
             Button {
                 isPresentingShare = true
             } label: {
-                if ThemeRuntime.isCosmos {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.up")
-                            .accessibilityHidden(true)
-                        Text("Share snapshot")
-                    }
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CosmosPalette.ink2)
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
-                    .background(CosmosPalette.background)
-                    .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-                    .contentShape(Rectangle())
-                } else {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(ThemeRuntime.isField ? FieldPalette.ink : Palette.ink2)
-                        .frame(width: 28, height: 28)
-                        .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
-                }
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Palette.ink2)
+                    .frame(width: 28, height: 28)
+                    .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
             }
             .buttonStyle(.plain)
             .keyboardShortcut("s", modifiers: [.command, .shift])
@@ -287,21 +270,8 @@ private struct DimensionSwitchRow: View {
             select(target)
         } label: {
             Text(label)
-                .font(
-                    ThemeRuntime.isCosmos
-                        ? .system(size: 11, weight: isSelected ? .semibold : .medium)
-                        : ThemeRuntime.isField
-                            ? FieldFont.serif(12.5, weight: isSelected ? .semibold : .regular)
-                            : .system(size: 12, weight: isSelected ? .semibold : .medium)
-                )
-                .foregroundStyle(
-                    ThemeRuntime.isCosmos
-                        ? (isSelected ? CosmosPalette.ink : CosmosPalette.ink3)
-                        : ThemeRuntime.isField
-                            ? (isSelected ? FieldPalette.ink : FieldPalette.muted)
-                            : (isSelected ? Palette.ink1 : Palette.ink2)
-                )
-                .monospacedDigit()
+                .font(ThemeFont.make(12, weight: isSelected ? .semibold : .medium, numeric: true))
+                .foregroundStyle(isSelected ? Palette.ink1 : Palette.ink2)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minHeight: 24)
@@ -340,34 +310,38 @@ private struct DimensionSegmentSurface: ViewModifier {
     let namespace: Namespace.ID
 
     func body(content: Content) -> some View {
-        if ThemeRuntime.isCosmos {
+        switch ThemeKind.current {
+        case .cosmos:
+            let shape = RadiusRole.control.shape
             content
                 .frame(minHeight: 28)
-                .background(Rectangle().fill(isSelected ? CosmosPalette.selection : .clear))
-                .contentShape(Rectangle())
-        } else if ThemeRuntime.isField {
+                .background { shape.fill(isSelected ? CosmosPalette.selection : .clear) }
+                .contentShape(shape)
+        case .field:
             if isSelected {
                 content
                     .background { Capsule().fill(FieldPalette.hedge.opacity(0.16)) }
-                    .overlay { Capsule().strokeBorder(FieldPalette.rule, lineWidth: 1) }
+                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
                     .contentShape(Capsule())
             } else {
                 content
                     .contentShape(Capsule())
             }
-        } else if !isSelected {
-            content
-                .contentShape(Capsule())
-        } else if reduceTransparency {
-            content
-                .background { Capsule().fill(Palette.cardSurface) }
-                .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
-                .contentShape(Capsule())
-        } else {
-            content
-                .themedGlass(.regular.interactive(), in: .capsule)
-                .glassEffectID("breakdownDimension", in: namespace)
-                .contentShape(Capsule())
+        case .liquidGlass:
+            if !isSelected {
+                content
+                    .contentShape(Capsule())
+            } else if reduceTransparency {
+                content
+                    .background { Capsule().fill(Palette.cardSurface) }
+                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
+                    .contentShape(Capsule())
+            } else {
+                content
+                    .themedGlass(.regular.interactive(), in: .capsule)
+                    .glassEffectID("breakdownDimension", in: namespace)
+                    .contentShape(Capsule())
+            }
         }
     }
 }
@@ -385,7 +359,7 @@ private struct Tray: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.tray, style: .continuous)
+        let shape = RadiusRole.tray.shape
         VStack(alignment: .leading, spacing: 0) {
             // Clear band for the traffic lights, which sit inside the tray.
             Color.clear.frame(height: 46)
@@ -393,26 +367,24 @@ private struct Tray: View {
             switch router.route {
             case .dashboard:
                 Group {
-                    if ThemeRuntime.isCosmos {
-                        CosmosPeriodPicker()
-                    } else if ThemeRuntime.isField {
-                        FieldPeriodPicker()
-                    } else {
+                    if ThemeKind.current == .liquidGlass {
                         PeriodSlider()
+                    } else {
+                        ThemedPeriodPicker()
                     }
                 }
-                .padding(.top, ThemeRuntime.isCosmos ? 14 : 22)
+                .padding(.top, 20)
 
                 SummaryRail(summary: model.summary, isCollecting: isFirstLaunchCollecting)
-                    .padding(.top, ThemeRuntime.isCosmos ? 14 : 28)
-                    .padding(.horizontal, ThemeRuntime.isCosmos ? 0 : 4)
+                    .padding(.top, 24)
+                    .padding(.horizontal, 4)
 
                 Spacer(minLength: 20)
 
                 TrayDevices(summary: model.summary, isCollecting: isFirstLaunchCollecting)
-                    .padding(.horizontal, ThemeRuntime.isCosmos ? 0 : 4)
+                    .padding(.horizontal, 4)
 
-                Rectangle().fill(Palette.hairline).frame(height: 1)
+                Rectangle().fill(Palette.hairline).frame(height: ThemeChrome.ruleWidth)
                     .padding(.vertical, 12)
 
                 TrayFooter(isFirstLaunchCollecting: isFirstLaunchCollecting)
@@ -421,14 +393,14 @@ private struct Tray: View {
                     .padding(.top, 10)
             }
         }
-        .padding(.horizontal, ThemeRuntime.isCosmos ? 16 : 20)
+        .padding(.horizontal, 20)
         .padding(.top, 8)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
         .background { shape.fill(Palette.traySurface) }
-        .overlay { shape.strokeBorder(Palette.trayRim, lineWidth: ThemeRuntime.isCosmos ? 1 : 0.5) }
+        .overlay { shape.strokeBorder(Palette.trayRim, lineWidth: ThemeChrome.ruleWidth) }
         .shadow(
-            color: .black.opacity(ThemeRuntime.isCosmos ? 0 : (reduceTransparency ? 0 : (scheme == .dark ? 0.30 : 0.07))),
+            color: .black.opacity(ThemeChrome.trayInset == 0 || reduceTransparency ? 0 : (scheme == .dark ? 0.30 : 0.07)),
             radius: 14,
             x: 0,
             y: 4
@@ -446,25 +418,13 @@ private struct TrayFooter: View {
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
 
     var body: some View {
-        if ThemeRuntime.isCosmos {
-            VStack(alignment: .leading, spacing: 8) {
-                TimelineView(.everyMinute) { context in
-                    modeIndicator(now: context.date)
-                }
-                HStack(spacing: 8) {
-                    RefreshNowButton(refreshCoordinator: refreshCoordinator, showsLabel: true)
-                    TraySettingsButton()
-                }
+        HStack(spacing: 6) {
+            TimelineView(.everyMinute) { context in
+                modeIndicator(now: context.date)
             }
-        } else {
-            HStack(spacing: 6) {
-                TimelineView(.everyMinute) { context in
-                    modeIndicator(now: context.date)
-                }
-                Spacer(minLength: 4)
-                RefreshNowButton(refreshCoordinator: refreshCoordinator)
-                TraySettingsButton()
-            }
+            Spacer(minLength: 4)
+            RefreshNowButton(refreshCoordinator: refreshCoordinator)
+            TraySettingsButton()
         }
     }
 
@@ -477,7 +437,7 @@ private struct TrayFooter: View {
                     .foregroundStyle(Palette.ink3)
                     .accessibilityHidden(true)
                 Text("Local only")
-                    .font(.system(size: 11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(Palette.ink2)
                     .lineLimit(1)
             }
@@ -495,7 +455,7 @@ private struct TrayFooter: View {
                             .foregroundStyle(Palette.healthWarn)
                             .accessibilityHidden(true)
                         Text("iCloud sync")
-                            .font(.system(size: 11.5, weight: .semibold))
+                            .font(ThemeFont.role(.sectionHeader))
                             .foregroundStyle(Palette.healthWarn)
                             .lineLimit(1)
                         Image(systemName: "exclamationmark.triangle.fill")
@@ -517,7 +477,7 @@ private struct TrayFooter: View {
                         .foregroundStyle(Palette.ink3)
                         .accessibilityHidden(true)
                     Text("iCloud sync")
-                        .font(.system(size: 11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink2)
                         .lineLimit(1)
                     Circle()
@@ -571,22 +531,11 @@ private struct TraySettingsButton: View {
         Button {
             router.openSettings()
         } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .accessibilityHidden(true)
-                if ThemeRuntime.isCosmos {
-                    Text("Settings")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                }
-            }
-            .font(.system(size: ThemeRuntime.isCosmos ? 11 : 12, weight: .medium))
-            .foregroundStyle(Palette.ink2)
-            .padding(.horizontal, ThemeRuntime.isCosmos ? 6 : 0)
-            .frame(width: ThemeRuntime.isCosmos ? nil : 28, height: 28)
-            .frame(maxWidth: ThemeRuntime.isCosmos ? .infinity : nil)
-            .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
+            Image(systemName: "gearshape")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Palette.ink2)
+                .frame(width: 28, height: 28)
+                .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
         }
         .buttonStyle(.plain)
         .help(Text("Settings (⌘,)"))
@@ -596,7 +545,6 @@ private struct TraySettingsButton: View {
 
 struct RefreshNowButton: View {
     let refreshCoordinator: RefreshCoordinator?
-    var showsLabel = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var isSpinning = false
@@ -607,10 +555,6 @@ struct RefreshNowButton: View {
 
     private var showsUpdatingText: Bool {
         isRefreshing && reduceMotion
-    }
-
-    private var showsAnyLabel: Bool {
-        (ThemeRuntime.isCosmos && showsLabel) || showsUpdatingText
     }
 
     var body: some View {
@@ -629,17 +573,12 @@ struct RefreshNowButton: View {
                     Text("Updating…")
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
-                } else if ThemeRuntime.isCosmos && showsLabel {
-                    Text("Refresh now")
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
                 }
             }
-            .font(.system(size: ThemeRuntime.isCosmos ? 11 : 12, weight: .medium))
+            .font(ThemeFont.role(.control))
             .foregroundStyle(Palette.ink2)
-            .padding(.horizontal, showsAnyLabel ? 8 : 0)
-            .frame(width: showsAnyLabel ? nil : 28, height: 28)
-            .frame(maxWidth: ThemeRuntime.isCosmos && showsLabel ? .infinity : nil)
+            .padding(.horizontal, showsUpdatingText ? 8 : 0)
+            .frame(width: showsUpdatingText ? nil : 28, height: 28)
             .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency, isCapsule: showsUpdatingText))
         }
         .buttonStyle(.plain)
@@ -661,43 +600,47 @@ private struct RoundGlassControlSurface: ViewModifier {
     var isCapsule = false
 
     func body(content: Content) -> some View {
-        if ThemeRuntime.isCosmos {
+        switch ThemeKind.current {
+        case .cosmos:
+            let shape = RadiusRole.control.shape
             content
-                .background(CosmosPalette.background)
-                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-                .contentShape(Rectangle())
-        } else if ThemeRuntime.isField {
-            if isCapsule {
-                content
-                    .background { Capsule().fill(FieldPalette.panel) }
-                    .overlay { Capsule().strokeBorder(FieldPalette.rule, lineWidth: 1) }
-                    .contentShape(Capsule())
-            } else {
-                content
-                    .background { Circle().fill(FieldPalette.panel) }
-                    .overlay { Circle().strokeBorder(FieldPalette.rule, lineWidth: 1) }
-                    .contentShape(Circle())
-            }
-        } else if reduceTransparency {
+                .background { shape.fill(CosmosPalette.background) }
+                .overlay { shape.strokeBorder(CosmosPalette.controlRule, lineWidth: ThemeChrome.ruleWidth) }
+                .contentShape(shape)
+        case .field:
             if isCapsule {
                 content
                     .background { Capsule().fill(Palette.cardSurface) }
-                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
+                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
                     .contentShape(Capsule())
             } else {
                 content
                     .background { Circle().fill(Palette.cardSurface) }
-                    .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: 1) }
+                    .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
                     .contentShape(Circle())
             }
-        } else if isCapsule {
-            content
-                .themedGlass(.regular.interactive(), in: .capsule)
-                .contentShape(Capsule())
-        } else {
-            content
-                .themedGlass(.regular.interactive(), in: .circle)
-                .contentShape(Circle())
+        case .liquidGlass:
+            if reduceTransparency {
+                if isCapsule {
+                    content
+                        .background { Capsule().fill(Palette.cardSurface) }
+                        .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
+                        .contentShape(Capsule())
+                } else {
+                    content
+                        .background { Circle().fill(Palette.cardSurface) }
+                        .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: 1) }
+                        .contentShape(Circle())
+                }
+            } else if isCapsule {
+                content
+                    .themedGlass(.regular.interactive(), in: .capsule)
+                    .contentShape(Capsule())
+            } else {
+                content
+                    .themedGlass(.regular.interactive(), in: .circle)
+                    .contentShape(Circle())
+            }
         }
     }
 }
@@ -724,12 +667,12 @@ private struct FirstLaunchCollectingCard: View {
 
             VStack(spacing: 8) {
                 Text("Collecting Token usage on this Mac for the first time")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(ThemeFont.role(.title, size: 17))
                     .foregroundStyle(Palette.ink1)
                     .multilineTextAlignment(.center)
 
                 Text(collectingSubtitle)
-                    .font(.system(size: 13))
+                    .font(ThemeFont.role(.body))
                     .foregroundStyle(Palette.ink2)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -742,7 +685,7 @@ private struct FirstLaunchCollectingCard: View {
                 .accessibilityLabel(Text("Collecting for the first time"))
 
             Text("Everything is computed offline on this Mac; logs are never modified or uploaded.")
-                .font(.system(size: 11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.ink3)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -949,8 +892,8 @@ private struct DashboardEmptyStateCard: View {
             }
         }
         return (
-            ThemeRuntime.isCosmos ? "circle.circle" : (ThemeRuntime.isField ? "leaf" : "drop"),
-            ThemeRuntime.isCosmos ? CosmosPalette.accent : (ThemeRuntime.isField ? FieldPalette.hedge : Palette.ink2),
+            ThemeKind.current == .cosmos ? "circle.circle" : (ThemeKind.current == .field ? "leaf" : "drop"),
+            ThemeKind.current == .cosmos ? Palette.roleAccent : (ThemeKind.current == .field ? FieldPalette.hedge : Palette.ink2),
             "No usage collected yet",
             Text("Token Taken reads supported agent logs on this Mac. Use Scan now in Settings › Harnesses, or turn on iCloud sync to view usage from other Macs.")
         )
@@ -964,25 +907,25 @@ private struct DashboardEmptyStateCard: View {
                 .foregroundStyle(content.color)
                 .frame(width: 48, height: 48)
                 .background {
-                    RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.inner, style: .continuous)
+                    RadiusRole.inner.shape
                         .fill(Palette.barTrack)
                 }
                 .accessibilityHidden(true)
 
             VStack(spacing: 8) {
                 Text(content.title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(ThemeFont.role(.title, size: 17))
                     .foregroundStyle(Palette.ink1)
                     .multilineTextAlignment(.center)
 
                 content.detail
-                    .font(.system(size: 13))
+                    .font(ThemeFont.role(.body))
                     .foregroundStyle(Palette.ink2)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
+            if reduceTransparency && ThemeKind.current == .liquidGlass {
                 Button("Open Settings…", action: openSettings)
                     .buttonStyle(.bordered)
                     .controlSize(.regular)

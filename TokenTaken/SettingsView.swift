@@ -3,27 +3,8 @@ import ServiceManagement
 import SwiftUI
 import TokenTakenKit
 
-private func settingsFont(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-    if ThemeRuntime.isField {
-        let nsWeight: NSFont.Weight = switch weight {
-        case .ultraLight: .ultraLight
-        case .thin: .thin
-        case .light: .light
-        case .medium: .medium
-        case .semibold: .semibold
-        case .bold: .bold
-        case .heavy: .heavy
-        case .black: .black
-        default: .regular
-        }
-        return FieldFont.serif(size, weight: nsWeight)
-    }
-    return .system(size: size, weight: weight)
-}
-
 /// The selected settings section on the themed window base; the tray carries the section list.
 struct SettingsView: View {
-    @Environment(AppSettings.self) private var settings
     @Environment(MainWindowRouter.self) private var router
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -38,9 +19,7 @@ struct SettingsView: View {
                 .id(router.settingsSection)
                 .transition(.opacity)
         }
-        .font(settings.theme == .field ? FieldFont.serif(13) : nil)
         .scrollIndicators(.automatic)
-        .background(settings.theme == .cosmos ? CosmosPalette.background : .clear)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: router.settingsSection)
     }
 
@@ -61,7 +40,6 @@ struct SettingsView: View {
 
 /// Settings section list shown in the tray, with a way back to the dashboard.
 struct SettingsSidebar: View {
-    @Environment(AppSettings.self) private var settings
     @Environment(MainWindowRouter.self) private var router
     @FocusState private var focusedSection: SettingsSection?
     @State private var isBackHovered = false
@@ -77,7 +55,7 @@ struct SettingsSidebar: View {
                         .font(.system(size: 11, weight: .semibold))
                         .accessibilityHidden(true)
                     Text("Overview")
-                        .font(settingsFont(13, weight: .medium))
+                        .font(ThemeFont.role(.bodyStrong))
                 }
                 .foregroundStyle(isBackHovered ? Palette.ink1 : Palette.ink2)
                 .padding(.horizontal, 10)
@@ -90,7 +68,7 @@ struct SettingsSidebar: View {
             .help(Text("Back to the overview (Esc)"))
 
             Text("Settings")
-                .font(settingsFont(22, weight: .bold))
+                .font(ThemeFont.make(22, weight: .bold))
                 .foregroundStyle(Palette.ink1)
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
@@ -124,12 +102,11 @@ struct SettingsSidebar: View {
                 Text("Local data · Read-only")
                     .lineLimit(1)
             }
-            .font(settingsFont(11.5))
+            .font(ThemeFont.role(.caption))
             .foregroundStyle(Palette.ink3)
             .padding(.horizontal, 10)
             .accessibilityElement(children: .combine)
         }
-        .font(settings.theme == .field ? FieldFont.serif(13) : nil)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .onAppear { focusedSection = router.settingsSection }
     }
@@ -152,7 +129,7 @@ private struct SettingsNavigationButton: View {
     private var isSelected: Bool { selection == section }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : 8, style: .continuous)
+        let shape = RadiusRole.control.shape
         Button {
             selection = section
         } label: {
@@ -164,35 +141,23 @@ private struct SettingsNavigationButton: View {
                 Text(section.title)
                 Spacer()
             }
-            .font(settingsFont(13, weight: isSelected ? .semibold : .medium))
+            .font(isSelected ? ThemeFont.role(.title) : ThemeFont.role(.bodyStrong))
             .foregroundStyle(isSelected ? Palette.roleAccent : (isHovered ? Palette.ink1 : Palette.ink2))
             .padding(.horizontal, 10)
             .frame(height: 36)
             .background {
-                if ThemeRuntime.isCosmos {
-                    shape.fill(isSelected ? CosmosPalette.selection : (isHovered ? CosmosPalette.track : .clear))
-                } else if ThemeRuntime.isField {
-                    shape.fill(isSelected || isHovered ? FieldPalette.paper : .clear)
-                } else {
-                    shape.fill(
-                        isSelected
-                            ? Palette.roleAccent.opacity(contrast == .increased ? 0.18 : 0.12)
-                            : (isHovered ? Palette.ink1.opacity(0.05) : .clear)
-                    )
-                }
+                shape.fill(
+                    isSelected
+                        ? Palette.roleAccent.opacity(contrast == .increased ? 0.18 : 0.12)
+                        : (isHovered ? Palette.ink1.opacity(0.06) : .clear)
+                )
             }
             .overlay {
-                if ThemeRuntime.isField && isSelected {
-                    shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
+                if isSelected {
+                    shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
                 }
             }
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(CosmosPalette.accent)
-                    .frame(width: 2)
-                    .opacity(ThemeRuntime.isCosmos && isSelected ? 1 : 0)
-            }
-            .contentShape(Rectangle())
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
@@ -210,6 +175,7 @@ struct GlassToggleStyle: ToggleStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         let spring: Animation? = reduceMotion ? nil : .spring(duration: 0.24, bounce: 0.15)
+        let shape = RadiusRole.card.shape
         Button {
             if let spring {
                 withAnimation(spring) {
@@ -219,15 +185,9 @@ struct GlassToggleStyle: ToggleStyle {
                 configuration.isOn.toggle()
             }
         } label: {
-            if ThemeRuntime.isCosmos {
-                toggleTrack(configuration: configuration)
-                    .contentShape(Rectangle())
-                    .animation(spring, value: configuration.isOn)
-            } else {
-                toggleTrack(configuration: configuration)
-                    .contentShape(Capsule())
-                    .animation(spring, value: configuration.isOn)
-            }
+            toggleTrack(configuration: configuration, shape: shape)
+                .contentShape(shape)
+                .animation(spring, value: configuration.isOn)
         }
         .buttonStyle(.plain)
         .opacity(isEnabled ? 1 : 0.45)
@@ -237,74 +197,50 @@ struct GlassToggleStyle: ToggleStyle {
         }
     }
 
-    private func toggleTrack(configuration: Configuration) -> some View {
+    private func toggleTrack(configuration: Configuration, shape: RoundedRectangle) -> some View {
         ZStack(alignment: configuration.isOn ? .trailing : .leading) {
-            track(isOn: configuration.isOn)
-            knob(isOn: configuration.isOn)
-                .padding(ThemeRuntime.isCosmos ? 3 : 2)
+            track(isOn: configuration.isOn, shape: shape)
+            knob(isOn: configuration.isOn, shape: shape)
+                .padding(3)
         }
         .frame(width: 40, height: 24)
     }
 
-    @ViewBuilder
-    private func track(isOn: Bool) -> some View {
-        if ThemeRuntime.isCosmos {
-            Rectangle()
-                .fill(isOn ? CosmosPalette.accent : CosmosPalette.track)
-                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-        } else if ThemeRuntime.isField {
-            Capsule()
-                .fill(isOn ? FieldPalette.accent : FieldPalette.paper)
-                .overlay {
-                    Capsule().strokeBorder(isOn ? FieldPalette.accent : FieldPalette.rule, lineWidth: 1)
-                }
-        } else if reduceTransparency {
-            Capsule()
-                .fill(isOn ? Palette.roleAccent : Palette.sidebarSurface)
-                .overlay {
-                    if !isOn {
-                        Capsule().strokeBorder(Palette.hairline, lineWidth: 1)
-                    }
-                }
-        } else {
-            ZStack {
-                Capsule()
+    private func track(isOn: Bool, shape: RoundedRectangle) -> some View {
+        ZStack {
+            if reduceTransparency {
+                shape
                     .fill(Palette.barTrack)
-                    .themedGlass(.regular, in: .capsule)
+                    .overlay {
+                        shape.strokeBorder(Palette.hairline, lineWidth: 1)
+                    }
                     .opacity(isOn ? 0 : 1)
-                Capsule()
-                    .fill(Palette.roleAccent)
-                    .opacity(isOn ? 1 : 0)
+            } else {
+                shape
+                    .fill(Palette.barTrack)
+                    .themedGlass(.regular, in: shape)
+                    .opacity(isOn ? 0 : 1)
             }
+            shape
+                .fill(Palette.roleAccent)
+                .overlay {
+                    shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
+                }
+                .opacity(isOn ? 1 : 0)
         }
     }
 
     @ViewBuilder
-    private func knob(isOn: Bool) -> some View {
-        if ThemeRuntime.isCosmos {
-            Rectangle()
-                .fill(isOn ? CosmosPalette.page : CosmosPalette.ink3)
-                .frame(width: 16, height: 16)
-                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-        } else if ThemeRuntime.isField {
-            Circle()
-                .fill(Color(hex: "#FBF8F0"))
-                .frame(width: 20, height: 20)
-                .overlay {
-                    Circle().strokeBorder(FieldPalette.rule, lineWidth: 0.75)
-                }
-        } else if reduceTransparency {
-            Circle()
-                .fill(Color.white)
-                .frame(width: 20, height: 20)
-                .overlay {
-                    Circle().strokeBorder(Palette.hairline, lineWidth: 0.5)
-                }
+    private func knob(isOn: Bool, shape: RoundedRectangle) -> some View {
+        let base = shape
+            .fill(isOn ? Palette.onAccent : Palette.ink2.opacity(reduceTransparency ? 1 : 0.85))
+            .frame(width: 18, height: 18)
+        if reduceTransparency {
+            base.overlay {
+                shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
+            }
         } else {
-            Circle()
-                .fill(Color.white.opacity(0.85))
-                .frame(width: 20, height: 20)
-                .themedGlass(.regular.interactive(), in: .circle)
+            base.themedGlass(.regular.interactive(), in: shape)
         }
     }
 }
@@ -340,7 +276,7 @@ private struct GlassMenuPicker<SelectionValue: Hashable, CurrentLabel: View, Opt
         } label: {
             HStack(spacing: 6) {
                 currentLabel
-                    .font(settingsFont(13))
+                    .font(ThemeFont.role(.body))
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
@@ -382,11 +318,11 @@ private struct SettingsGroupCaption<Trailing: View>: View {
         HStack(alignment: .center, spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(settingsFont(15, weight: .semibold))
+                    .font(ThemeFont.role(.sectionHeader))
                     .foregroundStyle(Palette.ink1)
                 if let description {
                     Text(description)
-                        .font(settingsFont(12))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -416,29 +352,17 @@ private struct SettingsRowsGroup<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.inner, style: .continuous)
+        let shape = RadiusRole.inner.shape
         VStack(alignment: .leading, spacing: 0) {
             content
         }
         .padding(.horizontal, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            if ThemeRuntime.isCosmos {
-                shape.fill(CosmosPalette.panel)
-            } else if ThemeRuntime.isField {
-                shape.fill(FieldPalette.panel)
-            } else {
-                shape.fill(reduceTransparency ? Palette.cardSurface : Palette.ink1.opacity(0.025))
-            }
+            shape.fill(Palette.cardSurface)
         }
         .overlay {
-            if ThemeRuntime.isCosmos {
-                shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
-            } else if ThemeRuntime.isField {
-                shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
-            } else if reduceTransparency {
-                shape.strokeBorder(Palette.hairline, lineWidth: 1)
-            }
+            shape.strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : ThemeChrome.ruleWidth)
         }
     }
 }
@@ -475,7 +399,7 @@ private struct SettingsScanActionPill: View {
                 }
 
                 Text(isRefreshing ? "Scanning…" : "Scan now")
-                    .font(settingsFont(12, weight: .medium))
+                    .font(ThemeFont.role(.control))
                     .foregroundStyle(Palette.ink1)
                     .lineLimit(1)
             }
@@ -501,20 +425,16 @@ private struct SettingsActionPillSurface: ViewModifier {
     let reduceTransparency: Bool
 
     func body(content: Content) -> some View {
-        if ThemeRuntime.isCosmos {
+        let shape = RadiusRole.card.shape
+        if reduceTransparency {
             content
-                .background(CosmosPalette.background)
-                .overlay(Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1))
-                .contentShape(Rectangle())
-        } else if reduceTransparency {
-            content
-                .background { Capsule().fill(Palette.cardSurface) }
-                .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: 1) }
-                .contentShape(Capsule())
+                .background { shape.fill(Palette.cardSurface) }
+                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 1) }
+                .contentShape(shape)
         } else {
             content
-                .themedGlass(.regular.interactive(), in: .capsule)
-                .contentShape(Capsule())
+                .themedGlass(.regular.interactive(), in: shape)
+                .contentShape(shape)
         }
     }
 }
@@ -528,11 +448,11 @@ private struct SettingsControlRow<Accessory: View>: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(settingsFont(13))
+                    .font(ThemeFont.role(.body))
                     .foregroundStyle(Palette.ink1)
                 if let help {
                     Text(help)
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -557,7 +477,7 @@ private struct SettingsHairline: View {
     var body: some View {
         Rectangle()
             .fill(Palette.hairline)
-            .frame(height: 1)
+            .frame(height: ThemeChrome.ruleWidth)
             .accessibilityHidden(true)
     }
 }
@@ -590,12 +510,14 @@ private struct SettingsSecondaryButton: View {
     }
 
     var body: some View {
-        if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
+        if reduceTransparency && ThemeKind.current == .liquidGlass {
             Button(title, action: action)
+                .font(ThemeFont.role(.control))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
         } else {
             Button(title, action: action)
+                .font(ThemeFont.role(.control))
                 .themedGlassButton()
                 .controlSize(.small)
         }
@@ -608,7 +530,6 @@ private struct GeneralSettingsTab: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AppModel.self) private var model
     @Environment(RefreshCoordinator.self) private var refreshCoordinator: RefreshCoordinator?
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -680,19 +601,11 @@ private struct GeneralSettingsTab: View {
                         SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Some text changes language after relaunch.")
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.ink3)
                                 .fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 12)
-                            if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
-                                Button("Relaunch") { settings.relaunch() }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                            } else {
-                                Button("Relaunch") { settings.relaunch() }
-                                    .themedGlassButton()
-                                    .controlSize(.small)
-                            }
+                            SettingsSecondaryButton("Relaunch") { settings.relaunch() }
                         }
                         .padding(.vertical, 8)
                         .frame(minHeight: 48)
@@ -728,7 +641,7 @@ private struct GeneralSettingsTab: View {
                     if let error = settings.launchAtLoginError {
                         SettingsHairline()
                         Text(error)
-                            .font(settingsFont(11.5))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
                             .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -738,18 +651,10 @@ private struct GeneralSettingsTab: View {
                         SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Allow Token Taken in System Settings › Login Items to finish.")
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.ink3)
                             Spacer(minLength: 12)
-                            if reduceTransparency && !ThemeRuntime.isCosmos && !ThemeRuntime.isField {
-                                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                            } else {
-                                Button("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
-                                    .themedGlassButton()
-                                    .controlSize(.small)
-                            }
+                            SettingsSecondaryButton("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                         }
                         .padding(.vertical, 8)
                         .frame(minHeight: 48)
@@ -760,11 +665,11 @@ private struct GeneralSettingsTab: View {
                     TimelineView(.everyMinute) { context in
                         HStack(spacing: 16) {
                             Text("Last updated")
-                                .font(settingsFont(13))
+                                .font(ThemeFont.role(.body))
                                 .foregroundStyle(Palette.ink1)
                             Spacer(minLength: 12)
                             lastUpdatedText(now: context.date)
-                                .font(settingsFont(13))
+                                .font(ThemeFont.role(.body))
                                 .foregroundStyle(Palette.ink2)
                                 .monospacedDigit()
                         }
@@ -776,7 +681,7 @@ private struct GeneralSettingsTab: View {
                     if let error = model.storageError {
                         SettingsHairline()
                         Text(error)
-                            .font(settingsFont(11.5))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
                             .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
@@ -841,9 +746,8 @@ private struct InterfaceTransparencySlider: View {
                 .help(reduceTransparency ? Text(reduceTransparencyHelp) : Text("Transparent"))
                 .accessibilityHidden(true)
             Text(value, format: .percent.precision(.fractionLength(0)))
-                .font(settingsFont(13))
+                .font(ThemeFont.role(.numericCaption))
                 .foregroundStyle(Palette.ink2)
-                .monospacedDigit()
                 .frame(width: 40, alignment: .trailing)
                 .accessibilityHidden(true)
         }
@@ -909,7 +813,7 @@ private struct SourcesSettingsTab: View {
                     SettingsRowsGroup {
                         if ledger.installed.isEmpty {
                             Text("No installed harnesses found")
-                                .font(settingsFont(13))
+                                .font(ThemeFont.role(.body))
                                 .foregroundStyle(Palette.ink3)
                                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                         } else {
@@ -968,7 +872,7 @@ private struct SourcesSettingsTab: View {
                 }
 
                 Text("Harnesses are identified automatically from local logs; no manual setup is needed.")
-                    .font(settingsFont(11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1094,7 +998,7 @@ private struct SourcesSettingsTab: View {
                 HStack(spacing: 9) {
                     SourceMonogramBadge(sourceID: entry.source.id, name: entry.source.name)
                     Text(verbatim: entry.source.name)
-                        .font(settingsFont(13))
+                        .font(ThemeFont.role(.body))
                         .foregroundStyle(Palette.ink1)
                         .lineLimit(1)
                 }
@@ -1103,12 +1007,11 @@ private struct SourcesSettingsTab: View {
                 Group {
                     if monthTokens > 0 {
                         Text("\(TokenFormat.short(monthTokens)) tokens")
-                            .font(settingsFont(13))
+                            .font(ThemeFont.role(.numericCaption))
                             .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
                     } else {
                         Text("No usage this month")
-                            .font(settingsFont(11.5))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink3)
                     }
                 }
@@ -1118,9 +1021,8 @@ private struct SourcesSettingsTab: View {
                 HStack(spacing: 8) {
                     SourceHealthLabel(state: entry.health.state)
                     Text(verbatim: entry.health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.numericCaption))
                         .foregroundStyle(Palette.ink3)
-                        .monospacedDigit()
                         .lineLimit(1)
                 }
                 .frame(width: 192, alignment: .trailing)
@@ -1128,7 +1030,7 @@ private struct SourcesSettingsTab: View {
 
             if let errorMessage {
                 Text(verbatim: errorMessage)
-                    .font(settingsFont(11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(entry.health.state == .failed ? SourceHealth.State.failed.dotColor : Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1149,7 +1051,7 @@ private struct SourcesSettingsTab: View {
                 HStack(spacing: 9) {
                     SourceMonogramBadge(sourceID: source.id, name: source.name)
                     Text(verbatim: source.name)
-                        .font(settingsFont(13))
+                        .font(ThemeFont.role(.body))
                         .foregroundStyle(Palette.ink1)
                         .lineLimit(1)
                 }
@@ -1162,17 +1064,16 @@ private struct SourcesSettingsTab: View {
                             if let health {
                                 SourceHealthLabel(state: health.state)
                                 Text(verbatim: health.lastSuccess.map { formattedDate($0, now: now) } ?? "—")
-                                    .font(settingsFont(11.5))
+                                    .font(ThemeFont.role(.numericCaption))
                                     .foregroundStyle(Palette.ink3)
-                                    .monospacedDigit()
                             } else {
                                 Text("Not collected yet")
-                                    .font(settingsFont(11.5))
+                                    .font(ThemeFont.role(.caption))
                                     .foregroundStyle(Palette.ink3)
                             }
                         } else {
                             Text("Off")
-                                .font(settingsFont(11.5, weight: .medium))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.ink3)
                         }
                     }
@@ -1186,14 +1087,14 @@ private struct SourcesSettingsTab: View {
             }
 
             Text("Reads Cursor's sign-in on this Mac and downloads this account's usage export from cursor.com. Credentials never leave the Mac; every signed-in Mac publishes the same account and Token Taken counts it once.")
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.ink3)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if isOn.wrappedValue, let errorMessage {
                 Text(verbatim: errorMessage)
-                    .font(settingsFont(11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(health?.state == .failed ? SourceHealth.State.failed.dotColor : Palette.ink3)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1220,7 +1121,7 @@ private struct SourcesSettingsTab: View {
                             .accessibilityHidden(true)
 
                         Text("Not installed (\(sources.count))")
-                            .font(settingsFont(13))
+                            .font(ThemeFont.role(.body))
                             .foregroundStyle(Palette.ink1)
                             .monospacedDigit()
 
@@ -1228,7 +1129,7 @@ private struct SourcesSettingsTab: View {
 
                         if !showsNotInstalled {
                             Text(verbatim: sources.map(\.name).joined(separator: " · "))
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.ink3)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
@@ -1264,7 +1165,7 @@ private struct SourcesSettingsTab: View {
                                 SourceMonogramBadge(sourceID: source.id, name: source.name, size: 20)
                                     .opacity(0.65)
                                 Text(verbatim: source.name)
-                                    .font(settingsFont(13))
+                                    .font(ThemeFont.role(.body))
                                     .foregroundStyle(Palette.ink2)
                                     .lineLimit(1)
                             }
@@ -1312,7 +1213,7 @@ private struct SourceHealthLabel: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
         }
-        .font(settingsFont(11.5, weight: state == .ok || state == .failed ? .semibold : .medium))
+        .font(ThemeFont.make(11, weight: state == .ok || state == .failed ? .semibold : .medium))
         .foregroundStyle(state.textColor)
         .accessibilityElement(children: .combine)
     }
@@ -1393,7 +1294,7 @@ private struct SyncSettingsTab: View {
                                 .foregroundStyle(Palette.healthWarn)
                                 .accessibilityHidden(true)
                             Text("iCloud Drive is not available on this Mac.")
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.healthWarn)
                         }
                         .padding(.vertical, 8)
@@ -1406,7 +1307,7 @@ private struct SyncSettingsTab: View {
                                 .foregroundStyle(Palette.healthWarn)
                                 .accessibilityHidden(true)
                             Text("Unavailable")
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.healthWarn)
                         }
                         .padding(.vertical, 8)
@@ -1447,16 +1348,16 @@ private struct SyncSettingsTab: View {
                 SettingsRowsGroup {
                     if !settings.syncEnabled {
                         Text("Turn on sync to see your other Macs here.")
-                            .font(settingsFont(11.5))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink3)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if model.remoteDevices.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("No other Macs yet")
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.ink3)
                             Text("Other Macs appear here once Token Taken runs on them with iCloud sync on and the same Apple ID.")
-                                .font(settingsFont(11.5))
+                                .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.ink3)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
@@ -1478,7 +1379,7 @@ private struct SyncSettingsTab: View {
 
                 if settings.syncEnabled, !model.remoteDevices.isEmpty {
                     Text("Missing a Mac? Check that it uses the same Apple ID and has iCloud sync on.")
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -1504,7 +1405,7 @@ private struct SyncSettingsTab: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     (device.displayName == device.deviceID ? Text("Unknown Mac") : Text(verbatim: device.displayName))
-                        .font(settingsFont(13))
+                        .font(ThemeFont.role(.body))
                         .foregroundStyle(Palette.ink1)
                     // An account published from this Mac is one account counted once, not another Mac.
                     if isAccount {
@@ -1518,7 +1419,7 @@ private struct SyncSettingsTab: View {
                         locale: settings.language.locale ?? locale
                     )
                     Text("Last synced \(relative)")
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                         .monospacedDigit()
                 }
@@ -1564,7 +1465,7 @@ private struct SyncSettingsTab: View {
                     .accessibilityHidden(true)
             }
             text
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(isWarning ? Palette.healthWarn : Palette.ink3)
                 .monospacedDigit()
         }
@@ -1576,27 +1477,17 @@ private struct SyncSettingsTab: View {
 
 private struct AccountBadge: View {
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+        let shape = RadiusRole.badge.shape
         Text("Account")
-            .font(settingsFont(11, weight: .medium))
+            .font(ThemeFont.make(11, weight: .medium))
             .foregroundStyle(Palette.ink2)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background {
-                if ThemeRuntime.isCosmos {
-                    shape.fill(CosmosPalette.background)
-                } else if ThemeRuntime.isField {
-                    shape.fill(FieldPalette.paper)
-                } else {
-                    shape.fill(Palette.ink1.opacity(0.06))
-                }
+                shape.fill(Palette.barTrack)
             }
             .overlay {
-                if ThemeRuntime.isCosmos {
-                    shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
-                } else if ThemeRuntime.isField {
-                    shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
-                }
+                shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
             }
             .fixedSize()
     }
@@ -1638,7 +1529,7 @@ private struct RemoteStatusLabel: View {
                 .accessibilityHidden(true)
             Text(title)
         }
-        .font(settingsFont(11.5, weight: state == .ok || state == .unavailable ? .semibold : .medium))
+        .font(ThemeFont.make(11, weight: state == .ok || state == .unavailable ? .semibold : .medium))
         .foregroundStyle(color)
         .accessibilityElement(children: .combine)
     }
@@ -1704,21 +1595,20 @@ private struct AboutSettingsTab: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(verbatim: "Token Taken")
-                        .font(settingsFont(19, weight: .bold))
+                        .font(ThemeFont.make(19, weight: .bold))
                         .tracking(-0.2)
                         .foregroundStyle(Palette.ink1)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text("Local Agent token usage")
-                            .font(settingsFont(12))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink3)
                         Text(verbatim: "·")
-                            .font(settingsFont(12))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink3)
                             .accessibilityHidden(true)
                         Text(verbatim: versionText)
-                            .font(settingsFont(12))
+                            .font(ThemeFont.role(.numericCaption))
                             .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
                     }
                 }
             }
@@ -1761,7 +1651,7 @@ private struct AboutSettingsTab: View {
                 HStack(spacing: 16) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Command-Line Tool")
-                            .font(settingsFont(13))
+                            .font(ThemeFont.role(.body))
                             .foregroundStyle(Palette.ink1)
                         cliStatusLabel
                     }
@@ -1798,7 +1688,7 @@ private struct AboutSettingsTab: View {
         switch cliStatus {
         case .installed(let url):
             Text("Installed at \(url.path)")
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.ink3)
                 .lineLimit(2)
                 .truncationMode(.middle)
@@ -1811,11 +1701,11 @@ private struct AboutSettingsTab: View {
                     .lineLimit(2)
                     .truncationMode(.middle)
             }
-            .font(settingsFont(11.5))
+            .font(ThemeFont.role(.caption))
             .foregroundStyle(Palette.healthWarn)
         case .notInstalled:
             Text("Not installed · Use token-taken in Terminal")
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.ink3)
         }
     }
@@ -1826,12 +1716,11 @@ private struct AboutSettingsTab: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("Version")
-                            .font(settingsFont(13))
+                            .font(ThemeFont.role(.body))
                             .foregroundStyle(Palette.ink1)
                         Text(verbatim: versionText)
-                            .font(settingsFont(13))
+                            .font(ThemeFont.role(.numericCaption, size: 13))
                             .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
                     }
                     updateStateLabel
                 }
@@ -1866,7 +1755,7 @@ private struct AboutSettingsTab: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
                         Text("What's New in \(notice.version)")
-                            .font(settingsFont(11.5, weight: .semibold))
+                            .font(ThemeFont.role(.sectionHeader))
                             .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                         Spacer(minLength: 8)
@@ -1898,7 +1787,7 @@ private struct AboutSettingsTab: View {
                     .controlSize(.mini)
                     .tint(Palette.roleAccent)
                 Text("Checking…")
-                    .font(settingsFont(11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(Palette.ink3)
             }
         } else {
@@ -1906,7 +1795,7 @@ private struct AboutSettingsTab: View {
             case .downloading(let fraction):
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Downloading update…")
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                     ProgressView(value: min(max(fraction, 0), 1))
                         .controlSize(.small)
@@ -1919,7 +1808,7 @@ private struct AboutSettingsTab: View {
                         .controlSize(.mini)
                         .tint(Palette.roleAccent)
                     Text("Verifying update…")
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                 }
             case .installing:
@@ -1928,17 +1817,17 @@ private struct AboutSettingsTab: View {
                         .controlSize(.mini)
                         .tint(Palette.roleAccent)
                     Text("Installing update…")
-                        .font(settingsFont(11.5))
+                        .font(ThemeFont.role(.caption))
                         .foregroundStyle(Palette.ink3)
                 }
             case .ready(let update):
                 Text("Version \(update.version.description) ready to install")
-                    .font(settingsFont(11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(Palette.roleAccent)
                     .monospacedDigit()
             case .failed(let message):
                 Text(message)
-                    .font(settingsFont(11.5))
+                    .font(ThemeFont.role(.caption))
                     .foregroundStyle(SourceHealth.State.failed.dotColor)
                     .fixedSize(horizontal: false, vertical: true)
             case .idle:
@@ -1970,30 +1859,30 @@ private struct AboutSettingsTab: View {
                         Text("Up to date")
                     }
                 }
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.ink3)
                 .monospacedDigit()
             }
         case .available(let update):
             Text("Version \(update.version.description) available")
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.roleAccent)
                 .monospacedDigit()
         case .failed(let message):
             Text(message)
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(SourceHealth.State.failed.dotColor)
                 .fixedSize(horizontal: false, vertical: true)
         case .unsupported:
             Text("Updates are disabled in development builds")
-                .font(settingsFont(11.5))
+                .font(ThemeFont.role(.caption))
                 .foregroundStyle(Palette.ink3)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
     private func releaseNotesBox(_ notes: String) -> some View {
-        let shape = RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
+        let shape = RadiusRole.badge.shape
         return ViewThatFits(in: .vertical) {
             releaseNotesContent(notes)
             ScrollView {
@@ -2004,20 +1893,10 @@ private struct AboutSettingsTab: View {
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
-            if ThemeRuntime.isCosmos {
-                shape.fill(CosmosPalette.background)
-            } else if ThemeRuntime.isField {
-                shape.fill(FieldPalette.panel)
-            } else {
-                shape.fill(Palette.ink1.opacity(0.03))
-            }
+            shape.fill(Palette.barTrack.opacity(0.5))
         }
         .overlay {
-            if ThemeRuntime.isCosmos {
-                shape.strokeBorder(CosmosPalette.controlRule, lineWidth: 1)
-            } else if ThemeRuntime.isField {
-                shape.strokeBorder(FieldPalette.rule, lineWidth: 1)
-            }
+            shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
         }
     }
 
@@ -2030,7 +1909,7 @@ private struct AboutSettingsTab: View {
         )) ?? AttributedString(notes)
 
         return Text(attributed)
-            .font(settingsFont(12))
+            .font(ThemeFont.role(.caption, size: 12))
             .foregroundStyle(Palette.ink2)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
@@ -2043,23 +1922,23 @@ private struct AboutSettingsTab: View {
 
     @ViewBuilder
     private func prominentActionButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        if ThemeRuntime.isCosmos {
-            Button(title, action: action)
-                .buttonStyle(CosmosProminentButtonStyle())
-                .controlSize(.small)
-        } else if ThemeRuntime.isField {
-            Button(title, action: action)
-                .buttonStyle(FieldProminentButtonStyle())
-                .controlSize(.small)
-        } else if reduceTransparency {
-            Button(title, action: action)
-                .buttonStyle(.borderedProminent)
-                .tint(Palette.roleAccent)
-                .controlSize(.small)
+        if ThemeKind.current == .liquidGlass {
+            if reduceTransparency {
+                Button(title, action: action)
+                    .font(ThemeFont.role(.control))
+                    .buttonStyle(.borderedProminent)
+                    .tint(Palette.roleAccent)
+                    .controlSize(.small)
+            } else {
+                Button(title, action: action)
+                    .font(ThemeFont.role(.control))
+                    .buttonStyle(.glassProminent)
+                    .tint(Palette.roleAccent)
+                    .controlSize(.small)
+            }
         } else {
             Button(title, action: action)
-                .buttonStyle(.glassProminent)
-                .tint(Palette.roleAccent)
+                .buttonStyle(SettingsProminentButtonStyle())
                 .controlSize(.small)
         }
     }
@@ -2108,31 +1987,16 @@ private struct AboutSettingsTab: View {
     }
 }
 
-private struct CosmosProminentButtonStyle: ButtonStyle {
+private struct SettingsProminentButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
+        let shape = RadiusRole.control.shape
         configuration.label
-            .font(.system(size: 12, weight: .semibold))
+            .font(ThemeFont.role(.control))
             .foregroundStyle(Palette.onAccent)
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
             .background(
-                Rectangle()
-                    .fill(CosmosPalette.accent.opacity(configuration.isPressed ? 0.85 : 1))
-            )
-            .contentShape(Rectangle())
-    }
-}
-
-private struct FieldProminentButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
-        configuration.label
-            .font(FieldFont.serif(12, weight: .semibold))
-            .foregroundStyle(Palette.onAccent)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(
-                shape.fill(FieldPalette.accent.opacity(configuration.isPressed ? 0.85 : 1))
+                shape.fill(Palette.roleAccent.opacity(configuration.isPressed ? 0.85 : 1))
             )
             .contentShape(shape)
     }
@@ -2145,11 +2009,11 @@ private struct AboutValueRow: View {
     var body: some View {
         HStack(spacing: 16) {
             Text(label)
-                .font(settingsFont(13))
+                .font(ThemeFont.role(.body))
                 .foregroundStyle(Palette.ink1)
             Spacer(minLength: 12)
             value
-                .font(settingsFont(13))
+                .font(ThemeFont.role(.body))
                 .foregroundStyle(Palette.ink2)
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)

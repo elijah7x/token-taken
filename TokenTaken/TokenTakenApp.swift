@@ -69,17 +69,16 @@ struct TokenTakenApp: App {
             withEnvironment(MenuBarContent().id(settings.formatRevision))
                 .onAppear { refreshCoordinator?.start() }
         } label: {
-            Group {
+            Label {
+                Text(TokenFormat.short(model.todaySummary.total.total))
+                    .font(ThemeFont.make(12, weight: .medium, numeric: true))
+            } icon: {
                 if settings.theme == .cosmos {
-                    Label {
-                        Text(TokenFormat.short(model.todaySummary.total.total))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    } icon: {
-                        Image(nsImage: CosmosMenuBarGlyph.templateImage)
-                            .accessibilityHidden(true)
-                    }
+                    Image(nsImage: CosmosMenuBarGlyph.templateImage)
+                        .accessibilityHidden(true)
                 } else {
-                    Label(TokenFormat.short(model.todaySummary.total.total), image: "MenuBarGlyph")
+                    Image("MenuBarGlyph")
+                        .accessibilityHidden(true)
                 }
             }
             .id(settings.formatRevision)

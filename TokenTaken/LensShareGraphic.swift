@@ -257,7 +257,7 @@ struct LensShareGraphic: View {
         .overlay {
             if snapshot.modelDetailUnavailable {
                 Text("Hourly collection has no model breakdown")
-                    .font(.system(size: 22, weight: .medium))
+                    .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(Palette.ink3)
                     .multilineTextAlignment(.center)
                     .padding(24)
@@ -286,9 +286,16 @@ struct LensShareGraphic: View {
         // Hourly buckets carry no model detail, so stop after the stage surface and let the overlay explain the gap.
         guard !snapshot.modelDetailUnavailable else { return }
 
+        // Minimum logical font sizes so ticks, sum pill, degraded badge, and empty state
+        // all render at >= 24pt on the 1080pt export canvas.
+        let tickFontSize = max(11.5, ceil(24.0 / scale))
+        let pillFontSize = max(12.0, ceil(24.0 / scale))
+        let badgeFontSize = max(11.0, ceil(24.0 / scale))
+        let emptyFontSize = max(12.5, ceil(24.0 / scale))
+
         let leftPad: CGFloat = 20
         let rightPad: CGFloat = 20
-        let bottomPad: CGFloat = 28
+        let bottomPad: CGFloat = max(30, ceil(tickFontSize * 1.45) + 12)
 
         func makePass(topPad: CGFloat) -> (
             layout: LensBarLayout,
@@ -334,7 +341,8 @@ struct LensShareGraphic: View {
             return (layout, plotRect, shiftX, lensMetrics)
         }
 
-        var pass = makePass(topPad: 42)
+        let baseTopPad = max(46, ceil(pillFontSize * 1.45) + 28)
+        var pass = makePass(topPad: baseTopPad)
         var degradedBadge: DegradedBadgeLayout?
         var minPillTop = stageRect.minY + 5
 
@@ -342,7 +350,8 @@ struct LensShareGraphic: View {
             let badge = resolveDegradedBadge(
                 in: context,
                 stageRect: stageRect,
-                lensCenterX: pass.lensMetrics?.rect.midX
+                lensCenterX: pass.lensMetrics?.rect.midX,
+                fontSize: badgeFontSize
             )
             degradedBadge = badge
             if let metrics = pass.lensMetrics, let range = snapshot.frozenRange, snapshot.frozenTotal > 0 {
@@ -352,11 +361,12 @@ struct LensShareGraphic: View {
                     isRange: range.count >= 2,
                     lensRect: metrics.rect,
                     stageRect: stageRect,
-                    minTop: minPillTop
+                    minTop: minPillTop,
+                    fontSize: pillFontSize
                 )
                 if badge.rect.insetBy(dx: -6, dy: -2).intersects(candidatePill.rect) {
                     minPillTop = badge.rect.maxY + 4
-                    pass = makePass(topPad: 62)
+                    pass = makePass(topPad: ceil(badge.rect.maxY + candidatePill.rect.height + 18))
                 }
             }
         }
@@ -376,6 +386,7 @@ struct LensShareGraphic: View {
             activeRange: showLens ? snapshot.frozenRange : nil,
             lensRect: lensMetrics?.rect,
             lensCornerRadius: lensMetrics?.cornerRadius ?? 0,
+            tickFontSize: tickFontSize,
             isDark: isDark,
             increased: increased
         )
@@ -391,6 +402,7 @@ struct LensShareGraphic: View {
                 lensRect: metrics.rect,
                 lensCornerRadius: metrics.cornerRadius,
                 minPillTop: minPillTop,
+                pillFontSize: pillFontSize,
                 isDark: isDark,
                 increased: increased
             )
@@ -400,7 +412,7 @@ struct LensShareGraphic: View {
             let emptyText = String(localized: "No usage in this period", locale: locale)
             let resolved = context.resolve(
                 Text(verbatim: emptyText)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: emptyFontSize, weight: .medium))
                     .foregroundStyle(Palette.ink3)
             )
             context.draw(resolved, at: CGPoint(x: plotRect.midX, y: plotRect.midY), anchor: .center)
@@ -525,6 +537,7 @@ struct LensShareGraphic: View {
         activeRange: ClosedRange<Int>?,
         lensRect: CGRect?,
         lensCornerRadius: CGFloat,
+        tickFontSize: CGFloat,
         isDark: Bool,
         increased: Bool
     ) {
@@ -552,13 +565,13 @@ struct LensShareGraphic: View {
             let isHighlighted = activeRange?.contains(tick.index) == true
             let resolved = context.resolve(
                 Text(verbatim: tick.label)
-                    .font(.system(size: 10.5, weight: isHighlighted ? .semibold : .regular))
+                    .font(.system(size: tickFontSize, weight: isHighlighted ? .semibold : .regular))
                     .monospacedDigit()
                     .foregroundStyle(isHighlighted ? Palette.ink1 : Palette.ink3)
             )
             context.draw(
                 resolved,
-                at: CGPoint(x: tick.centerX + shiftX, y: plotRect.maxY + 8.5),
+                at: CGPoint(x: tick.centerX + shiftX, y: plotRect.maxY + 8),
                 anchor: .top
             )
         }
@@ -603,6 +616,7 @@ struct LensShareGraphic: View {
         lensRect: CGRect,
         lensCornerRadius: CGFloat,
         minPillTop: CGFloat,
+        pillFontSize: CGFloat,
         isDark: Bool,
         increased: Bool
     ) {
@@ -810,7 +824,8 @@ struct LensShareGraphic: View {
                 isRange: isRange,
                 lensRect: lensRect,
                 stageRect: stageRect,
-                minTop: minPillTop
+                minTop: minPillTop,
+                fontSize: pillFontSize
             )
             drawSumPill(in: &context, pill: pill, isDark: isDark)
         }
@@ -832,7 +847,8 @@ struct LensShareGraphic: View {
         isRange: Bool,
         lensRect: CGRect,
         stageRect: CGRect,
-        minTop: CGFloat
+        minTop: CGFloat,
+        fontSize: CGFloat
     ) -> SumPillLayout {
         let formatted = TokenFormat.short(total)
         let pillString = isRange && lensRect.width >= 88
@@ -840,13 +856,13 @@ struct LensShareGraphic: View {
             : formatted
         let resolved = context.resolve(
             Text(verbatim: pillString)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: fontSize, weight: .semibold))
                 .monospacedDigit()
                 .foregroundStyle(Palette.ink1)
         )
-        let textSize = resolved.measure(in: CGSize(width: 240, height: 26))
-        let pillW = textSize.width + 14
-        let pillH: CGFloat = 19
+        let textSize = resolved.measure(in: CGSize(width: max(80, stageRect.width - 24), height: 40))
+        let pillW = textSize.width + 16
+        let pillH = max(22, ceil(textSize.height) + 8)
         let minCx = stageRect.minX + pillW * 0.5 + 8
         let maxCx = stageRect.maxX - pillW * 0.5 - 8
         let clampedX = minCx <= maxCx ? min(max(lensRect.midX, minCx), maxCx) : stageRect.midX
@@ -894,17 +910,18 @@ struct LensShareGraphic: View {
     private func resolveDegradedBadge(
         in context: GraphicsContext,
         stageRect: CGRect,
-        lensCenterX: CGFloat?
+        lensCenterX: CGFloat?,
+        fontSize: CGFloat
     ) -> DegradedBadgeLayout {
         let notice = String(localized: "Hourly collection has no model breakdown", locale: locale)
         let resolved = context.resolve(
             Text(verbatim: notice)
-                .font(.system(size: 9.5, weight: .medium))
+                .font(.system(size: fontSize, weight: .medium))
                 .foregroundStyle(Palette.ink2)
         )
-        let textSize = resolved.measure(in: CGSize(width: stageRect.width - 32, height: 22))
-        let badgeW = textSize.width + 14
-        let badgeH: CGFloat = 17
+        let textSize = resolved.measure(in: CGSize(width: max(80, stageRect.width - 32), height: 40))
+        let badgeW = textSize.width + 16
+        let badgeH = max(20, ceil(textSize.height) + 7)
         let placeTrailing = (lensCenterX ?? stageRect.midX) < stageRect.midX
         let badgeX = placeTrailing
             ? max(stageRect.minX + 10, stageRect.maxX - badgeW - 10)

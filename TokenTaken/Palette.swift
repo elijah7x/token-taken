@@ -476,14 +476,14 @@ struct SourceMonogramBadge: View {
             .font(.system(size: 10.5, weight: .bold, design: .monospaced))
             .minimumScaleFactor(0.75)
             .foregroundStyle(
-                ThemeRuntime.isCosmos
-                    ? CosmosPalette.ink2
-                    : (scheme == .dark ? color.mix(with: .white, by: 0.20) : color.mix(with: .black, by: 0.28))
+                ThemeChrome.showsSeriesSwatches
+                    ? (scheme == .dark ? color.mix(with: .white, by: 0.20) : color.mix(with: .black, by: 0.28))
+                    : Palette.ink2
             )
             .frame(width: size, height: size)
             .background {
-                RoundedRectangle(cornerRadius: ThemeRuntime.isCosmos ? 0 : Radius.badge, style: .continuous)
-                    .fill(ThemeRuntime.isCosmos ? CosmosPalette.track : color.opacity(0.14))
+                RadiusRole.badge.shape
+                    .fill(ThemeChrome.showsSeriesSwatches ? color.opacity(0.14) : Palette.barTrack)
             }
             .accessibilityHidden(true)
     }
@@ -610,24 +610,27 @@ extension View {
     /// Native glass, or an opaque panel with a ruled edge under Field and Cosmos.
     @ViewBuilder
     func themedGlass<S: Shape>(_ glass: Glass = .regular, in shape: S) -> some View {
-        if ThemeRuntime.isCosmos {
-            background(CosmosPalette.panel)
-                .overlay { Rectangle().stroke(CosmosPalette.controlRule, lineWidth: 1) }
-        } else if ThemeRuntime.isField {
+        switch ThemeKind.current {
+        case .cosmos:
+            let controlShape = RadiusRole.control.shape
+            background { controlShape.fill(CosmosPalette.panel) }
+                .overlay { controlShape.strokeBorder(CosmosPalette.controlRule, lineWidth: ThemeChrome.ruleWidth) }
+        case .field:
             background { shape.fill(FieldPalette.panel) }
-                .overlay { shape.stroke(FieldPalette.rule, lineWidth: 1) }
-        } else {
+                .overlay { shape.stroke(FieldPalette.rule, lineWidth: ThemeChrome.ruleWidth) }
+        case .liquidGlass:
             glassEffect(glass, in: shape)
         }
     }
 
     @ViewBuilder
     func themedGlassButton() -> some View {
-        if ThemeRuntime.isCosmos {
+        switch ThemeKind.current {
+        case .cosmos:
             buttonStyle(CosmosButtonStyle())
-        } else if ThemeRuntime.isField {
+        case .field:
             buttonStyle(FieldButtonStyle())
-        } else {
+        case .liquidGlass:
             buttonStyle(.glass)
         }
     }
@@ -635,42 +638,37 @@ extension View {
     /// Floating tooltip: Liquid Glass normally, an opaque surface under Field, Cosmos, or Reduce Transparency.
     @ViewBuilder
     func tooltipSurface(reduceTransparency: Bool, cornerRadius: CGFloat = Radius.inner) -> some View {
-        if ThemeRuntime.isCosmos {
-            background(CosmosPalette.background)
-                .overlay { Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1) }
+        let shape = cornerRadius == Radius.inner
+            ? RadiusRole.inner.shape
+            : RoundedRectangle(cornerRadius: ThemeKind.current == .cosmos ? 0 : cornerRadius, style: .continuous)
+        if ThemeKind.current == .cosmos {
+            background { shape.fill(CosmosPalette.background) }
+                .overlay { shape.strokeBorder(CosmosPalette.controlRule, lineWidth: ThemeChrome.ruleWidth) }
         } else if reduceTransparency {
             background {
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                shape
                     .fill(Palette.cardSurface)
                     .overlay {
-                        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                            .strokeBorder(Palette.hairline)
+                        shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
                     }
             }
         } else {
-            themedGlass(.regular, in: .rect(cornerRadius: cornerRadius))
+            themedGlass(.regular, in: shape)
         }
     }
 
     /// Rounded Atmosphere card, or a square opaque panel with a control-rule border under Cosmos.
-    @ViewBuilder
     func atmosphereCard(reduceTransparency: Bool, isDark: Bool) -> some View {
-        if ThemeRuntime.isCosmos {
-            background(CosmosPalette.panel)
-                .overlay { Rectangle().strokeBorder(CosmosPalette.controlRule, lineWidth: 1) }
-        } else {
-            let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-            self
-                .background { shape.fill(Palette.cardSurface) }
-                .clipShape(shape)
-                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: 0.5) }
-                .shadow(
-                    color: .black.opacity(reduceTransparency ? 0 : (isDark ? 0.22 : 0.04)),
-                    radius: 10,
-                    x: 0,
-                    y: 3
-                )
-        }
+        let shape = RadiusRole.card.shape
+        let borderColor = ThemeKind.current == .cosmos ? CosmosPalette.controlRule : Palette.hairline
+        let shadowOpacity: Double = (ThemeChrome.trayInset == 0 || reduceTransparency)
+            ? 0
+            : (isDark ? 0.22 : 0.04)
+        return self
+            .background { shape.fill(Palette.cardSurface) }
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(borderColor, lineWidth: ThemeChrome.ruleWidth) }
+            .shadow(color: .black.opacity(shadowOpacity), radius: 10, x: 0, y: 3)
     }
 }
 

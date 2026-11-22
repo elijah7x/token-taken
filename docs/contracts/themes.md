@@ -1,4 +1,4 @@
-Status: Draft v0 (2026-11-09)
+Status: Draft v1 (2026-11-22)
 
 # Theme contract
 
@@ -8,6 +8,18 @@ Status: Draft v0 (2026-11-09)
 - Theme IDs are `liquid-glass`, `sketchbook`, and `cosmos`. v1 ships Liquid Glass, Field (`sketchbook`), and Cosmos (宇宙); the token-based theme system exists from day one.
 - A theme applies app-wide: main window, menu bar extra, Settings, and share card. A Dock icon variant is optional and must be documented by the theme.
 - A new theme ships only when its token set is complete and its required screenshot set has been accepted.
+
+## Theme system
+
+- Themes define semantic roles once; feature views consume those roles and MUST NOT branch on the theme for layout.
+- Every theme provides values for four role sets:
+  - **Type roles**: `heroNumber`, `heroUnit`, `secondaryNumber`, `title`, `sectionHeader`, `body`, `bodyStrong`, `label`, `caption`, `numericCaption`, and `control`. Rank is fixed across themes: `heroNumber` always dominates, secondary figures such as estimated cost MUST NOT exceed the hero, and `caption` MUST NOT carry primary data.
+  - **Radius roles**: `tray`, `card`, `inner`, `control`, and `badge`. Cosmos answers `0` for all five; other themes share one continuous-corner radius ladder.
+  - **Chrome tokens**: tray inset, series swatches, rule width, and section rules.
+  - **Surfaces**: container materials and strokes are applied through the shared themed surface helpers rather than per-theme container forks.
+- Only signature visuals are theme-owned: Liquid Glass Confluence/Lens and vessel, Field farm and inscription, Cosmos Metal scene and menu bar glyph, collecting glyphs, and app icons. Each renders inside a slot reserved by a shared layout.
+- New features ship using roles only; introducing any per-theme layout requires a contract change first.
+- Every theme presents the same sidebar hierarchy in the same order: period title, hero total, exact count, cost, and notices.
 
 ## Information integrity
 
@@ -36,6 +48,18 @@ Status: Draft v0 (2026-11-09)
 - The menu-bar presentation follows the effective app appearance (Follow System by default), including a documented dark-only theme's forced dark appearance, and remains minimal.
 - It uses the same statistics semantics as the main app and MUST NOT introduce a separate total, hidden rounding rule, or theme-dependent meaning.
 
+## Share card
+
+- Every theme uses one shared share card layout with a theme-owned hero visual slot.
+- Portrait and square cards place the hero visual on top; landscape cards place it on the left.
+- The text column follows a fixed hierarchy:
+  - **Header**: app identity and period label.
+  - **L1**: hero total, plus an optional estimated cost line.
+  - **L2**: one context line, plus an optional rank line with its inline estimate disclaimer.
+  - **L3**: one supporting block chosen by a **Detail** control: **Top 3** (default), **Composition**, or **None**.
+- Field additionally supports its optional inscription and signature within the shared layout.
+- Text MUST remain at least `24pt` on the `1080pt` short side across all aspects and themes.
+
 ## Visual acceptance
 
 - Acceptance requires real screenshots of the built app, not mockups, in every supported appearance—both light and dark unless the theme is documented as dark only—compared against the approved reference design.
@@ -53,7 +77,7 @@ Status: Draft v0 (2026-11-09)
 - Below the field, a paper composition strip shows the five token categories (plus uncategorized when present), and the plot list keeps the shared breakdown details: the model cache detail popover and "Mainly from" lines.
 - The menu bar extra shows today's field with crop flags instead of signs.
 - The Field share card can carry an inscription (up to 40 characters) and a signature (up to 24). Both are written on the card only and are never saved or synced.
-- Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), and swaps the Dock and Finder icon at runtime to the bundled `FieldAppIcon.icns` (a hand-drawn coin whose T is a tree).
+- Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), uses the shared themed period picker with Field's furrow indicator, and swaps the Dock and Finder icon at runtime to the bundled `FieldAppIcon.icns` (a hand-drawn coin whose T is a tree).
 
 ## Cosmos (`cosmos`)
 
@@ -61,8 +85,8 @@ Status: Draft v0 (2026-11-09)
 - The disk consists of five contiguous radial bands whose widths encode category shares in `cacheRead`, `input`, `cacheWrite`, `output`, `reasoning` order—colored `#EAF2FF`, `#FFF0D2`, `#E8C48E`, `#D99A56`, and `#B65A35` respectively—plus an optional sixth outermost neutral band (`#8A93A3`) shown only when uncategorized tokens are greater than zero.
 - The top six sources or models become bodies. Relative share to the power 0.78 determines size, tokens per hour determines orbital speed, and stable identity selects the surface variant. Exact orbital angle is not a data dimension. Items after the top six become dust; dust point count represents item count, not tokens.
 - The scene includes labels, hover readouts, category legend, dust label, and flow caption. The shared period picker, totals, cost, devices, and ranked top-four list with Show all remain outside it, preserving the same statistics and controls as other themes.
-- The menu bar extra shows today's compact Cosmos scene when today has usage. The share card offers the same scope (overall, one source, one model), aspect (2:3, 1:1, 3:2), cost and composition options as the other themes. Wide cards put the scene left of the info panel; square and tall cards put it above. A scoped card renders the scope's breakdown along the other dimension (a source shows its models, a model its sources). The card shows period totals, estimated cost with the existing disclaimer when enabled, the top three items, and the five-category composition when enabled; an unavailable snapshot falls back to a plain dark panel.
-- Cosmos uses system sans type, monospaced tabular figures for numeric readouts, and opaque dark panels. It does not use Liquid Glass, serif type, or Field's custom period picker; its period picker, segmented controls, toggles and buttons are square, bordered Cosmos controls, and breakdown rows carry no per-item color dots.
+- The menu bar extra shows today's compact Cosmos scene when today has usage. On the shared share card, Cosmos renders its scene in the hero visual slot (falling back to a plain dark panel if a snapshot is unavailable), and a scoped card renders the scope's breakdown along the other dimension (a source shows its models, a model its sources).
+- Cosmos uses system sans type, monospaced tabular figures for numeric readouts, and opaque dark panels. It does not use Liquid Glass or serif type; the shared period picker, segmented controls, toggles, and buttons take Cosmos's square, bordered styling, and breakdown rows carry no per-item color dots.
 - Adaptive render scale limits GPU cost. Reduce Motion renders a still frame without removing data or interactions. Metal failure leaves the surrounding usage data and ranked list available.
 - Cosmos is dark only: it disables the Light/Dark/Follow System control, shows an explanation, and forces dark appearance without changing the saved preference. It swaps the Dock and Finder icon at runtime to the bundled `CosmosAppIcon.icns`, the same coin as a dark mass pressing a glowing spacetime grid into a gravity well.
 
