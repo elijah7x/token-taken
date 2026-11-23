@@ -147,6 +147,10 @@ extension ThemeChrome {
         case .cosmos, .liquidGlass: .bar
         }
     }
+
+    /// Whether the period picker sits in a bordered container with a filled selected segment.
+    /// Field answers no: bare serif titles with only the furrow under the selection.
+    static var framesPeriodPicker: Bool { ThemeKind.current != .field }
 }
 
 /// Shared period picker for non-Liquid Glass themes, driven by `ThemeFont.role(.control)`, `RadiusRole.control`,
@@ -154,6 +158,8 @@ extension ThemeChrome {
 struct ThemedPeriodPicker: View {
     @Environment(AppModel.self) private var model
     @FocusState private var focusedPeriod: Period?
+
+    private var framed: Bool { ThemeChrome.framesPeriodPicker }
 
     var body: some View {
         let shape = RadiusRole.control.shape
@@ -164,14 +170,16 @@ struct ThemedPeriodPicker: View {
                     model.period = period
                 } label: {
                     Text(period.title)
-                        .font(ThemeFont.role(.control))
+                        .font(framed ? ThemeFont.role(.control) : ThemeFont.make(15))
                         // English titles ("Month") must not wrap inside the narrow tray.
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                         .foregroundStyle(selected ? Palette.ink1 : Palette.ink3)
                         .padding(.horizontal, 2)
+                        .padding(.top, framed ? 0 : 4)
+                        .padding(.bottom, framed ? 0 : 9)
                         .frame(maxWidth: .infinity, minHeight: 28)
-                        .background(selected ? Palette.barTrack : .clear)
+                        .background(selected && framed ? Palette.barTrack : .clear)
                         .overlay(alignment: .bottom) {
                             selectionIndicator
                                 .opacity(selected ? 1 : 0)
@@ -199,9 +207,9 @@ struct ThemedPeriodPicker: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .background { shape.fill(Palette.traySurface) }
-        .clipShape(shape)
-        .overlay { shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
+        .background { if framed { shape.fill(Palette.traySurface) } }
+        .clipShape(framed ? AnyShape(shape) : AnyShape(Rectangle()))
+        .overlay { if framed { shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) } }
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text("Usage period"))

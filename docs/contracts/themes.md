@@ -77,7 +77,7 @@ Status: Draft v1 (2026-11-22)
 - Below the field, a paper composition strip shows the five token categories (plus uncategorized when present), and the plot list keeps the shared breakdown details: the model cache detail popover and "Mainly from" lines.
 - The menu bar extra shows today's field with crop flags instead of signs.
 - The Field share card can carry an inscription (up to 40 characters) and a signature (up to 24). Both are written on the card only and are never saved or synced.
-- Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), uses the shared themed period picker with Field's furrow indicator, and swaps the Dock and Finder icon at runtime to the bundled `FieldAppIcon.icns` (a hand-drawn coin whose T is a tree).
+- Field replaces every Liquid Glass surface with opaque paper surfaces, uses serif type (New York with Songti SC), uses the shared themed period picker unframed, with only Field's furrow under the selected period, and swaps the Dock and Finder icon at runtime to the bundled `FieldAppIcon.icns` (a hand-drawn coin whose T is a tree).
 
 ## Cosmos (`cosmos`)
 
