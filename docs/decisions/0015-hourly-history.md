@@ -15,6 +15,7 @@ Future weekly, monthly, and yearly recaps need hour-of-day usage facts—such as
 ## Decision
 
 - Add a new `hourly_history` table in `SQLiteUsageStore`, migrating schema version 6 to 7 in place with no data loss.
+- Create `hourly_history_epochs` in schema version 8, migrating in place from version 7 with no data loss, because an early schema-7 build stamped databases without it.
 - Columns match `hourly_usage`: `(device_id, source_id, hour_start)` primary key with `hour_start` in INTEGER Unix seconds, `input`, `cache_read`, `cache_write`, `output`, `reasoning`, `uncategorized`, `event_count`, and `reasoning_known`. No model column, no minute granularity, and no content.
 - Store sparsely: never persist empty hours (`total == 0` and `eventCount == 0`); a zero-token hour with events, such as a Cursor request billed at zero tokens, is kept. `hourly_usage` keeps its rolling 48-hour snapshot and explicit zero-coverage semantics completely unchanged.
 - `CollectionRunner` keeps building the 48-hour `hourly` window exactly as before and additionally extracts `hourlyHistory` from each collector batch: all rows of that source with `hourStart <= currentHour`, merged per `hourStart` (summing token counts and `eventCount`, ANDing `reasoningKnown`) and dropping empty hours.

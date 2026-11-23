@@ -157,6 +157,60 @@ final class HistoryRetentionTests: XCTestCase {
         }
     }
 
+    /// A store left by an early schema-7 build: all schema-7 tables exist except `hourly_history_epochs`.
+    private func seedVersion7WithoutHourlyHistoryEpochs(_ rows: [(day: String, model: String, input: Int64)]) {
+        withHandle { handle in
+            var sql = """
+                CREATE TABLE devices (
+                    id TEXT PRIMARY KEY, name TEXT NOT NULL, last_seen REAL NOT NULL,
+                    kind TEXT NOT NULL DEFAULT 'mac'
+                );
+                CREATE TABLE health (
+                    source_id TEXT PRIMARY KEY, last_attempt REAL, last_success REAL,
+                    record_count INTEGER NOT NULL, error TEXT,
+                    skipped_records INTEGER NOT NULL DEFAULT 0,
+                    state TEXT NOT NULL DEFAULT 'stale'
+                );
+                CREATE TABLE daily_usage (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, model_id TEXT NOT NULL,
+                    raw_model_id TEXT NOT NULL, day TEXT NOT NULL, time_zone TEXT NOT NULL,
+                    input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                    output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                    event_count INTEGER NOT NULL, cache_write_1h INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (device_id, source_id, model_id, day)
+                );
+                CREATE TABLE hourly_usage (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
+                    input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                    output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                    event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
+                    PRIMARY KEY (device_id, source_id, hour_start)
+                );
+                CREATE TABLE hourly_history (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
+                    input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+                    output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+                    event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
+                    PRIMARY KEY (device_id, source_id, hour_start)
+                );
+                CREATE TABLE history_epochs (
+                    device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+                    time_zone TEXT,
+                    PRIMARY KEY (device_id, source_id)
+                );
+                """
+            for row in rows {
+                sql += """
+                    INSERT INTO daily_usage VALUES ('device-a', 'claude', '\(row.model)', 'raw-\(row.model)',
+                        '\(row.day)', 'Asia/Shanghai', \(row.input), 0, 0, 0, 0, 0, 1, 0);
+
+                    """
+            }
+            sql += "PRAGMA user_version = 7;"
+            XCTAssertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK)
+        }
+    }
+
     func testPrunedDayKeepsStoredRows() throws {
         let store = try SQLiteUsageStore(url: databaseURL)
         try store.replace(batch: CollectionBatch(daily: [
@@ -361,6 +415,30 @@ final class HistoryRetentionTests: XCTestCase {
             counts: TokenCounts(input: 10, cacheWrite: 900, cacheWrite1h: 700), eventCount: 1)
         try store.replace(batch: CollectionBatch(daily: [split]), sourceID: "claude", deviceID: "device-a")
         XCTAssertEqual(try store.records(), [split])
+    }
+
+    func testMigrationFromVersion7WithoutHourlyHistoryEpochsCreatesTable() throws {
+        seedVersion7WithoutHourlyHistoryEpochs([(day: "2026-11-22", model: "model-a", input: 100)])
+        let store = try SQLiteUsageStore(url: databaseURL)
+        XCTAssertEqual(SQLiteUsageStore.schemaVersion, 8)
+        XCTAssertEqual(Int(schemaVersion()), SQLiteUsageStore.schemaVersion)
+        var hasEpochsTable = false
+        withHandle { handle in
+            var statement: OpaquePointer?
+            let sql = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'hourly_history_epochs';"
+            XCTAssertEqual(sqlite3_prepare_v2(handle, sql, -1, &statement, nil), SQLITE_OK)
+            defer { sqlite3_finalize(statement) }
+            hasEpochsTable = sqlite3_step(statement) == SQLITE_ROW
+        }
+        XCTAssertTrue(hasEpochsTable)
+        XCTAssertEqual(try store.records(), [record(day: "2026-11-22", model: "model-a", input: 100)])
+        let hour = historyHour(1, input: 100)
+        XCTAssertNoThrow(try store.replace(
+            batch: CollectionBatch(daily: [record(day: "2026-11-22", model: "model-a", input: 100)]),
+            sourceID: "claude", deviceID: "device-a",
+            hourlyHistory: [hour]
+        ))
+        XCTAssertEqual(try store.hourlyHistory(), [hour])
     }
 
     func testCacheWrite1hRoundTripsAndStaysOutOfTheTotal() throws {

@@ -7,7 +7,7 @@ public enum StoreError: Error, Sendable {
 }
 
 public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
-    public static let schemaVersion = 7
+    public static let schemaVersion = 8
     private let queue = DispatchQueue(label: "io.github.elijah7x.TokenTaken.store")
     private let db: OpaquePointer
 
@@ -145,8 +145,9 @@ public final class SQLiteUsageStore: UsageStore, @unchecked Sendable {
             if !(try columnNames(in: "history_epochs").contains("time_zone")) {
                 try execute("ALTER TABLE history_epochs ADD COLUMN time_zone TEXT;")
             }
-            // Schema 7 adds the sparse long-term `hourly_history` table and its own applied epoch in `hourly_history_epochs`
-            // above without modifying existing tables (ADR-0015).
+            // Schema 7 adds the sparse long-term `hourly_history` table above without modifying existing tables (ADR-0015).
+            // Schema 8 adds `hourly_history_epochs`, split out because an early schema-7 build stamped databases
+            // without it, and the version bump makes `migrate` create it in place.
             try execute("PRAGMA user_version = \(Self.schemaVersion); COMMIT;")
         } catch {
             try? execute("ROLLBACK;")

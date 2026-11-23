@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- A usage cache created by an early schema-7 build lacked the `hourly_history_epochs` table, so every collection on that Mac failed with "no such table" and its usage stopped syncing. The cache schema is now version 8, which creates the missing table in place and keeps existing usage.
+
 ## [0.3.1] - 2026-11-23
 
 ### Changed
