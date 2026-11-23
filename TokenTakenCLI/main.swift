@@ -3,7 +3,7 @@ import TokenTakenKit
 
 enum CLI {
     // Keep in step with MARKETING_VERSION in project.yml.
-    static let version = "0.3.0"
+    static let version = "0.3.1"
     static let schemaVersion = 1
 
     static let commonOptionsUsage = """

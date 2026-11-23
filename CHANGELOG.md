@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-23
+
+### Changed
+
+- Introduced a role-based theme system: feature views ask for text, radius and surface roles, and each theme answers them once, so new features adapt to Liquid Glass, Field and Cosmos without per-theme layouts (see `docs/contracts/themes.md`, "Theme system").
+- The sidebar summary has one hierarchy in every theme: period, total tokens as the dominant figure, the exact count below it, then the estimated cost and notices. Cosmos no longer shows the cost larger than the total.
+- Share cards use one shared layout in every theme with three levels: the total (and optional cost), one context line with optional rank, and one detail block chosen by a new Detail control (Top 3, Composition or None) that replaces "Show composition". No text on the card is smaller than 24pt at the 1080pt short side; long lines wrap instead of shrinking.
+- Field uses the shared breakdown list (with crop names and colors) and the shared period picker; Settings, the menu bar panel, tray footer and share button use the same type and controls in every theme.
+
+### Fixed
+
+- Share card hero visuals fill their area, the Field inscription field no longer opens with its text selected, the share preview uses the full preview column, and Lens cards show the selected peak's time again.
+
 ## [0.3.0] - 2026-11-22
 
 ### Added
