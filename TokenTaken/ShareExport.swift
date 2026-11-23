@@ -1956,6 +1956,7 @@ struct ShareCardView: View {
                 signature: signature,
                 dataUnavailable: dataUnavailable,
                 reduceTransparency: effectiveReduceTransparency,
+                swatchColors: FieldCrop.assign(fieldItems.filter { $0.counts.total > 0 }).mapValues(\.color),
                 skin: ShareCardSkin(
                     theme: .field,
                     pageColor: FieldPalette.paper,
@@ -1991,8 +1992,9 @@ struct ShareCardView: View {
                         GeometryReader { proxy in
                             let slotSize = proxy.size
                             let sceneAspect = FieldSceneModel.size.width / FieldSceneModel.size.height
-                            // Aspect-fill the slot and bleed past FieldLandscapeView's internal 1pt border and corners.
-                            let fillWidth = max(slotSize.width, slotSize.height * sceneAspect) + 4
+                            // Fill the slot's width so every plot stays in view; a slot wider than the scene trims only sky and
+                            // foreground, a narrower one centres the whole farm on paper. Bleed past the 1pt border.
+                            let fillWidth = slotSize.width + 4
                             let fillHeight = fillWidth / sceneAspect
 
                             FieldLandscapeView(

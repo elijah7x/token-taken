@@ -173,6 +173,8 @@ struct ShareCardLayout<Visual: View>: View {
     let signature: String
     let dataUnavailable: Bool
     let reduceTransparency: Bool
+    /// Item colors supplied by the theme's hero visual (Field crops), so a row swatch points at the same plot.
+    var swatchColors: [String: Color] = [:]
     let skin: ShareCardSkin<Visual>
     /// Lens only: the frozen peak bucket's time, so a peak between axis ticks can still be dated.
     var peakText: String? = nil
@@ -552,9 +554,9 @@ struct ShareCardLayout<Visual: View>: View {
 
             VStack(alignment: .leading, spacing: aspect == .square ? 12 : 16) {
                 ForEach(items) { item in
-                    let swatchColor: Color = detailDimension == .sources
+                    let swatchColor: Color = swatchColors[item.id] ?? (detailDimension == .sources
                         ? Palette.color(forSource: item.id)
-                        : (modelColorMap[item.id] ?? Palette.color(for: .output))
+                        : (modelColorMap[item.id] ?? Palette.color(for: .output)))
 
                     HStack(alignment: .firstTextBaseline, spacing: 14) {
                         if skin.showsSeriesSwatches {
