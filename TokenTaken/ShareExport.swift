@@ -11,29 +11,26 @@ enum ShareScope: Hashable {
 
 enum ShareAspect: String, CaseIterable, Identifiable {
     case portrait
-    case square
     case landscape
 
     var id: Self { self }
 
     var title: LocalizedStringKey {
         switch self {
-        case .portrait: "Portrait 2:3"
-        case .square: "Square 1:1"
-        case .landscape: "Landscape 3:2"
+        case .portrait: "Portrait 3:4"
+        case .landscape: "Landscape 4:3"
         }
     }
 
     var canvasSize: CGSize {
         switch self {
-        case .portrait: CGSize(width: 1080, height: 1620)
-        case .square: CGSize(width: 1080, height: 1080)
-        case .landscape: CGSize(width: 1620, height: 1080)
+        case .portrait: CGSize(width: 1080, height: 1440)
+        case .landscape: CGSize(width: 1440, height: 1080)
         }
     }
 }
 
-private struct CosmosShareSnapshotKey: Hashable {
+private struct CosmosShareSnapshotKey: Hashable, Sendable {
     let scope: ShareScope
     let period: Period
     let start: Date
@@ -85,7 +82,6 @@ struct ShareExportSheet: View {
     @State private var showSignature = true
     // Field share cards only; kept for this sheet, never saved or synced.
     @State private var inscription = ""
-    @State private var didSeedInscription = false
     @State private var signature = ""
     @State private var previewSummary: UsageSummary?
     @State private var scopedSummary: UsageSummary?
@@ -93,10 +89,17 @@ struct ShareExportSheet: View {
     @State private var loadedScopeKey: SnapshotQueryKey?
     @State private var rankTopPercent: Double?
     @State private var snapshotUnavailable = false
+    @State private var snapshotLoadTask: Task<ResolvedShareSnapshot?, Never>?
+    @State private var snapshotLoadKey: SnapshotQueryKey?
+    @State private var snapshotGeneration: UInt64 = 0
     @State private var cosmosSnapshot: NSImage?
     @State private var renderedCosmosSnapshotKey: CosmosShareSnapshotKey?
+    @State private var cosmosSnapshotTask: Task<NSImage?, Never>?
+    @State private var cosmosSnapshotTaskKey: CosmosShareSnapshotKey?
+    @State private var cosmosSnapshotGeneration: UInt64 = 0
     @State private var didCopy = false
     @State private var copyResetTask: Task<Void, Never>?
+    @State private var exportTask: Task<Void, Never>?
     @State private var shareAnchor = SharePickerAnchor()
     @State private var exportError: String?
 
@@ -113,7 +116,7 @@ struct ShareExportSheet: View {
         case signature
     }
 
-    private struct SnapshotQueryKey: Equatable {
+    private struct SnapshotQueryKey: Equatable, Sendable {
         let period: Period
         let scope: ShareScope
         let modelPeriod: Period
@@ -149,10 +152,10 @@ struct ShareExportSheet: View {
     }
 
     private var effectiveScope: ShareScope {
-        validatedScope(scope, against: summary)
+        Self.validatedScope(scope, against: summary)
     }
 
-    private func validatedScope(_ targetScope: ShareScope, against targetSummary: UsageSummary) -> ShareScope {
+    nonisolated private static func validatedScope(_ targetScope: ShareScope, against targetSummary: UsageSummary) -> ShareScope {
         switch targetScope {
         case .overall:
             return .overall
@@ -226,8 +229,13 @@ struct ShareExportSheet: View {
     }
 
     private var currentCosmosSnapshot: NSImage? {
-        guard renderedCosmosSnapshotKey == currentCosmosSnapshotKey else { return nil }
+        guard isCosmos, loadedScopeKey == snapshotQueryKey,
+              renderedCosmosSnapshotKey == currentCosmosSnapshotKey else { return nil }
         return cosmosSnapshot
+    }
+
+    private var currentSnapshotUnavailable: Bool {
+        loadedScopeKey == snapshotQueryKey && snapshotUnavailable
     }
 
     private var activeInscription: String {
@@ -235,7 +243,7 @@ struct ShareExportSheet: View {
     }
 
     private var activeSignature: String {
-        showSignature ? signature : ""
+        showInscription && showSignature ? signature : ""
     }
 
     private var displayedRank: Double? {
@@ -271,21 +279,18 @@ struct ShareExportSheet: View {
             if previewPeriod == nil {
                 previewPeriod = model.period
             }
-            seedFieldInscriptionIfNeeded()
             focusedTextField = nil
+            if loadedScopeKey != snapshotQueryKey {
+                startShareSnapshotLoad(for: snapshotQueryKey)
+            }
         }
         .onChange(of: settings.theme) { _, _ in
-            seedFieldInscriptionIfNeeded()
             focusedTextField = nil
+            startShareSnapshotLoad(for: snapshotQueryKey, restarting: true)
+            renderCosmosSnapshot(for: currentCosmosSnapshotKey)
         }
         .onChange(of: snapshotQueryKey, initial: true) { _, key in
-            let resolved = resolveShareSnapshot(for: key)
-            previewSummary = resolved.summary
-            scopedSummary = resolved.scopedSummary
-            previewLensBuckets = resolved.lensBuckets
-            rankTopPercent = resolved.rank
-            snapshotUnavailable = resolved.dataUnavailable
-            loadedScopeKey = key
+            startShareSnapshotLoad(for: key)
         }
         .onChange(of: currentCosmosSnapshotKey, initial: true) { _, key in
             renderCosmosSnapshot(for: key)
@@ -308,29 +313,64 @@ struct ShareExportSheet: View {
             dismiss()
         }
         .onDisappear {
+            snapshotGeneration &+= 1
+            cosmosSnapshotGeneration &+= 1
+            snapshotLoadTask?.cancel()
+            cosmosSnapshotTask?.cancel()
+            exportTask?.cancel()
             copyResetTask?.cancel()
+            snapshotLoadTask = nil
+            snapshotLoadKey = nil
+            cosmosSnapshotTask = nil
+            cosmosSnapshotTaskKey = nil
+            exportTask = nil
         }
-    }
-
-    private func seedFieldInscriptionIfNeeded() {
-        guard ThemeKind.current == .field, !didSeedInscription else { return }
-        didSeedInscription = true
-        inscription = ShareInscriptions.random(for: settings.theme, locale: locale) ?? ""
     }
 
     private func renderCosmosSnapshot(for key: CosmosShareSnapshotKey) {
-        guard isCosmos else {
-            cosmosSnapshot = nil
-            renderedCosmosSnapshotKey = nil
+        guard isCosmos, loadedScopeKey == snapshotQueryKey else {
+            cosmosSnapshotGeneration &+= 1
+            cosmosSnapshotTask?.cancel()
+            cosmosSnapshotTask = nil
+            cosmosSnapshotTaskKey = nil
+            if !isCosmos {
+                cosmosSnapshot = nil
+                renderedCosmosSnapshotKey = nil
+            }
             return
         }
-        cosmosSnapshot = CosmosSnapshot.image(
-            summary: cardData.cosmosSceneSummary,
-            dimension: key.dimension,
-            size: cosmosShareSceneSize(for: key.aspect),
-            scale: 2
-        )
-        renderedCosmosSnapshotKey = key
+        guard renderedCosmosSnapshotKey != key else { return }
+        if cosmosSnapshotTaskKey == key, cosmosSnapshotTask != nil { return }
+
+        cosmosSnapshotGeneration &+= 1
+        let generation = cosmosSnapshotGeneration
+        let queryKey = snapshotQueryKey
+        let dataGeneration = snapshotGeneration
+        let sceneSummary = cardData.cosmosSceneSummary
+        cosmosSnapshotTask?.cancel()
+        cosmosSnapshotTaskKey = key
+        cosmosSnapshotTask = Task { @MainActor in
+            let image = await CosmosSnapshot.image(
+                summary: sceneSummary,
+                dimension: key.dimension,
+                size: cosmosShareSceneSize(for: key.aspect),
+                scale: 2
+            )
+            defer {
+                if cosmosSnapshotGeneration == generation {
+                    cosmosSnapshotTask = nil
+                    cosmosSnapshotTaskKey = nil
+                }
+            }
+            guard !Task.isCancelled, isCosmos,
+                  cosmosSnapshotGeneration == generation,
+                  snapshotGeneration == dataGeneration,
+                  loadedScopeKey == queryKey, snapshotQueryKey == queryKey,
+                  currentCosmosSnapshotKey == key else { return nil }
+            cosmosSnapshot = image
+            renderedCosmosSnapshotKey = key
+            return image
+        }
     }
 
     // MARK: - Left preview pane
@@ -358,7 +398,7 @@ struct ShareExportSheet: View {
                 rank: displayedRank,
                 inscription: activeInscription,
                 signature: activeSignature,
-                dataUnavailable: snapshotUnavailable
+                dataUnavailable: currentSnapshotUnavailable
             )
             .frame(width: canvasSize.width, height: canvasSize.height)
             .scaleEffect(scale, anchor: .center)
@@ -479,7 +519,7 @@ struct ShareExportSheet: View {
             .frame(maxHeight: .infinity, alignment: .top)
 
             VStack(spacing: 10) {
-                if snapshotUnavailable {
+                if currentSnapshotUnavailable {
                     Text("Usage for this period could not be loaded, so it can't be shared yet.")
                         .font(ThemeFont.make(11))
                         .foregroundStyle(Palette.healthWarn)
@@ -501,10 +541,10 @@ struct ShareExportSheet: View {
                         action: saveCardAsPNG
                     )
                 }
-                .disabled(snapshotUnavailable)
+                .disabled(currentSnapshotUnavailable)
 
                 sharePickerButton
-                    .disabled(snapshotUnavailable)
+                    .disabled(currentSnapshotUnavailable)
             }
         }
     }
@@ -1041,13 +1081,23 @@ struct ShareExportSheet: View {
 
     // MARK: - Scoped summary & export
 
-    private struct ResolvedShareSnapshot {
+    private struct ResolvedShareSnapshot: Sendable {
         let summary: UsageSummary
         let scopedSummary: UsageSummary?
         let lensBuckets: [LensBucket]
         let rank: Double?
         /// True when the period's usage could not be loaded and `summary` is a placeholder, not real data.
         var dataUnavailable = false
+    }
+
+    private struct ShareSnapshotInput: Sendable {
+        let key: SnapshotQueryKey
+        let store: (any UsageStore)?
+        let now: Date
+        let priceTable: PriceTable
+        let modelSummary: UsageSummary
+        let todaySummary: UsageSummary
+        let cachedLensBuckets: [LensBucket]
     }
 
     private var themeFileTag: String {
@@ -1072,31 +1122,99 @@ struct ShareExportSheet: View {
         }
     }
 
-    private func fallbackSummary(for period: Period) -> (summary: UsageSummary, matchesCachedData: Bool) {
-        if period == model.summary.period {
-            return (model.summary, true)
+    private func makeShareSnapshotInput(for key: SnapshotQueryKey) -> ShareSnapshotInput {
+        let context = resolveBaseStore()
+        let isSynthetic = model.summary.cost.priceTableVersion == PriceTable.synthetic.version
+        return ShareSnapshotInput(
+            key: key,
+            store: context?.store,
+            now: context?.now ?? .now,
+            priceTable: context?.priceTable ?? (isSynthetic ? .synthetic : .bundled),
+            modelSummary: model.summary,
+            todaySummary: model.todaySummary,
+            cachedLensBuckets: key.isLiquidLens ? model.lensBuckets(for: key.period) : []
+        )
+    }
+
+    private func startShareSnapshotLoad(for key: SnapshotQueryKey, restarting: Bool = false) {
+        if !restarting, snapshotLoadKey == key, snapshotLoadTask != nil { return }
+        snapshotGeneration &+= 1
+        let generation = snapshotGeneration
+        snapshotLoadTask?.cancel()
+        let input = makeShareSnapshotInput(for: key)
+        let task = Task.detached(priority: .userInitiated) {
+            Self.resolveShareSnapshot(input)
         }
-        if period == model.todaySummary.period {
-            return (model.todaySummary, true)
+        snapshotLoadKey = key
+        snapshotLoadTask = task
+        Task { @MainActor in
+            guard let resolved = await task.value,
+                  snapshotGeneration == generation, snapshotQueryKey == key else { return }
+            applyShareSnapshot(resolved, for: key)
+        }
+    }
+
+    private func applyShareSnapshot(_ resolved: ResolvedShareSnapshot, for key: SnapshotQueryKey) {
+        previewSummary = resolved.summary
+        scopedSummary = resolved.scopedSummary
+        previewLensBuckets = resolved.lensBuckets
+        rankTopPercent = resolved.rank
+        snapshotUnavailable = resolved.dataUnavailable
+        loadedScopeKey = key
+        renderCosmosSnapshot(for: currentCosmosSnapshotKey)
+    }
+
+    private func resolvedShareSnapshot(for key: SnapshotQueryKey) async -> ResolvedShareSnapshot? {
+        if loadedScopeKey == key {
+            return ResolvedShareSnapshot(
+                summary: summary,
+                scopedSummary: scopedSummary,
+                lensBuckets: previewLensBuckets,
+                rank: rankTopPercent,
+                dataUnavailable: snapshotUnavailable
+            )
+        }
+        startShareSnapshotLoad(for: key)
+        guard let task = snapshotLoadTask else { return nil }
+        let generation = snapshotGeneration
+        guard let resolved = await task.value, !Task.isCancelled,
+              snapshotGeneration == generation, snapshotQueryKey == key else { return nil }
+        applyShareSnapshot(resolved, for: key)
+        return resolved
+    }
+
+    nonisolated private static func fallbackSummary(
+        for period: Period,
+        input: ShareSnapshotInput
+    ) -> (summary: UsageSummary, matchesCachedData: Bool) {
+        if period == input.modelSummary.period {
+            return (input.modelSummary, true)
+        }
+        if period == input.todaySummary.period {
+            return (input.todaySummary, true)
         }
         if let empty = try? UsageAggregator(
-            store: EmptyShareUsageStore(devices: model.summary.devices),
+            store: EmptyShareUsageStore(devices: input.modelSummary.devices),
             now: .now
         ).summary(for: period) {
             return (empty, false)
         }
-        return (model.summary, false)
+        return (input.modelSummary, false)
     }
 
     /// Queries summary, scoped summary, lens buckets, and 30-day rank from a single preload and query-time `now`.
-    private func resolveShareSnapshot(for key: SnapshotQueryKey) -> ResolvedShareSnapshot {
-        guard let context = resolveBaseStore(),
-              let rows = try? UsageAggregator.preload(context.store) else {
-            let fallback = fallbackSummary(for: key.period)
+    nonisolated private static func resolveShareSnapshot(_ input: ShareSnapshotInput) -> ResolvedShareSnapshot? {
+        guard !Task.isCancelled else { return nil }
+        let key = input.key
+        guard let store = input.store,
+              let rows = try? UsageAggregator.preload(store),
+              !Task.isCancelled else {
+            if Task.isCancelled { return nil }
+            let fallback = fallbackSummary(for: key.period, input: input)
             return ResolvedShareSnapshot(
                 summary: fallback.summary,
                 scopedSummary: nil,
-                lensBuckets: key.isLiquidLens && fallback.matchesCachedData ? model.lensBuckets(for: key.period) : [],
+                lensBuckets: key.isLiquidLens && fallback.matchesCachedData ? input.cachedLensBuckets : [],
                 rank: nil,
                 dataUnavailable: !fallback.matchesCachedData
             )
@@ -1106,11 +1224,12 @@ struct ShareExportSheet: View {
         let aggregator = UsageAggregator(
             store: cachedStore,
             rows: rows,
-            now: context.now,
-            priceTable: context.priceTable
+            now: input.now,
+            priceTable: input.priceTable
         )
         let queriedSummary = try? aggregator.summary(for: key.period)
-        let fallback = queriedSummary == nil ? fallbackSummary(for: key.period) : nil
+        guard !Task.isCancelled else { return nil }
+        let fallback = queriedSummary == nil ? fallbackSummary(for: key.period, input: input) : nil
         let resolvedSummary = queriedSummary ?? fallback!.summary
         let targetScope = validatedScope(key.scope, against: resolvedSummary)
 
@@ -1125,16 +1244,18 @@ struct ShareExportSheet: View {
             let filtered = FilteredUsageStore(store: cachedStore, filter: filter)
             resolvedScoped = try? UsageAggregator(
                 store: filtered,
-                now: context.now,
-                priceTable: context.priceTable
+                now: input.now,
+                priceTable: input.priceTable
             ).summary(for: key.period)
         } else {
             resolvedScoped = nil
         }
+        guard !Task.isCancelled else { return nil }
 
         let resolvedBuckets = key.isLiquidLens
             ? ((try? aggregator.lensBuckets(for: key.period)) ?? [])
             : []
+        guard !Task.isCancelled else { return nil }
         let resolvedRank: Double?
         if let points = try? aggregator.dailyTotals(lastDays: 30) {
             let total = points.reduce(Int64(0)) { $0 + $1.total }
@@ -1142,6 +1263,7 @@ struct ShareExportSheet: View {
         } else {
             resolvedRank = nil
         }
+        guard !Task.isCancelled else { return nil }
 
         return ResolvedShareSnapshot(
             summary: resolvedSummary,
@@ -1190,118 +1312,151 @@ struct ShareExportSheet: View {
         "\(sanitizedFileNameStem(for: cardData, scope: effectiveScope)).png"
     }
 
-    private func renderPNGData() -> Data? {
-        let queryKey = snapshotQueryKey
-        let resolved: ResolvedShareSnapshot
-        if loadedScopeKey == queryKey {
-            resolved = ResolvedShareSnapshot(
-                summary: summary,
-                scopedSummary: scopedSummary,
-                lensBuckets: previewLensBuckets,
-                rank: rankTopPercent,
-                dataUnavailable: snapshotUnavailable
-            )
-        } else {
-            resolved = resolveShareSnapshot(for: queryKey)
-        }
-        // Never export placeholder numbers as if they were this period's usage.
-        guard !resolved.dataUnavailable else { return nil }
-        let resolvedScope = validatedScope(scope, against: resolved.summary)
-        let resolvedRank = showRank ? resolved.rank : nil
-        let exportData = ShareCardData(
-            summary: resolved.summary,
-            scope: resolvedScope,
-            scopedSummary: resolved.scopedSummary
-        )
-        let resolvedAspect = effectiveAspect
-        let canvasSize = resolvedAspect.canvasSize
-        let exportSceneSummary = exportData.cosmosSceneSummary
-        let exportSnapshotKey = makeCosmosSnapshotKey(
-            scope: resolvedScope,
-            sceneSummary: exportSceneSummary,
-            aspect: resolvedAspect
-        )
-        let exportCosmosSnapshot: NSImage?
-        if isCosmos, renderedCosmosSnapshotKey == exportSnapshotKey {
-            exportCosmosSnapshot = cosmosSnapshot
-        } else if isCosmos {
-            exportCosmosSnapshot = CosmosSnapshot.image(
-                summary: exportSceneSummary,
-                dimension: exportSnapshotKey.dimension,
-                size: cosmosShareSceneSize(for: resolvedAspect),
-                scale: 2
-            )
-        } else {
-            exportCosmosSnapshot = nil
-        }
-        let exportLensBuckets = isLiquidLens ? resolved.lensBuckets : []
-        let view = ShareCardView(
-            data: exportData,
-            aspect: resolvedAspect,
-            showCost: showCost,
+    private struct ExportRequest: Equatable {
+        let queryKey: SnapshotQueryKey
+        let aspect: ShareAspect
+        let detail: ShareCardDetail
+        let showCost: Bool
+        let showRank: Bool
+        let theme: AppTheme
+        let dimension: BreakdownDimension
+        let liquidView: LiquidView
+        let inscription: String
+        let signature: String
+        let reduceTransparency: Bool
+        let colorSchemeContrast: ColorSchemeContrast
+        let scheme: ColorScheme
+        let locale: Locale
+    }
+
+    private var exportRequest: ExportRequest {
+        ExportRequest(
+            queryKey: snapshotQueryKey,
+            aspect: effectiveAspect,
             detail: detail,
+            showCost: showCost,
+            showRank: showRank,
             theme: settings.theme,
             dimension: dimension,
             liquidView: settings.liquidView,
-            lensBuckets: exportLensBuckets,
-            cosmosSnapshot: exportCosmosSnapshot,
-            rank: resolvedRank,
             inscription: activeInscription,
             signature: activeSignature,
-            dataUnavailable: false,
-            reduceTransparencyOverride: reduceTransparency,
-            colorSchemeContrastOverride: colorSchemeContrast
+            reduceTransparency: reduceTransparency,
+            colorSchemeContrast: colorSchemeContrast,
+            scheme: scheme,
+            locale: locale
         )
-        .frame(width: canvasSize.width, height: canvasSize.height)
-        .environment(\.colorScheme, settings.theme == .cosmos ? .dark : scheme)
-        .environment(\.locale, locale)
-        .fontDesign(settings.theme == .field ? .serif : nil)
+    }
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 2.0
-        renderer.proposedSize = ProposedViewSize(canvasSize)
+    private func renderPNGData() async -> Data? {
+        while !Task.isCancelled {
+            let request = exportRequest
+            guard let resolved = await resolvedShareSnapshot(for: request.queryKey) else { continue }
+            guard request == exportRequest else { continue }
+            // Never export placeholder numbers as if they were this period's usage.
+            guard !resolved.dataUnavailable else { return nil }
+            let resolvedScope = Self.validatedScope(request.queryKey.scope, against: resolved.summary)
+            let resolvedRank = request.showRank ? resolved.rank : nil
+            let exportData = ShareCardData(
+                summary: resolved.summary,
+                scope: resolvedScope,
+                scopedSummary: resolved.scopedSummary
+            )
+            let canvasSize = request.aspect.canvasSize
+            let exportSceneSummary = exportData.cosmosSceneSummary
+            let exportSnapshotKey = makeCosmosSnapshotKey(
+                scope: resolvedScope,
+                sceneSummary: exportSceneSummary,
+                aspect: request.aspect
+            )
+            var exportCosmosSnapshot: NSImage?
+            if request.theme == .cosmos {
+                if renderedCosmosSnapshotKey == exportSnapshotKey {
+                    exportCosmosSnapshot = cosmosSnapshot
+                } else {
+                    renderCosmosSnapshot(for: exportSnapshotKey)
+                    guard let task = cosmosSnapshotTask else { continue }
+                    exportCosmosSnapshot = await task.value
+                    guard !Task.isCancelled, request == exportRequest,
+                          renderedCosmosSnapshotKey == exportSnapshotKey else { continue }
+                }
+            }
+            guard request == exportRequest else { continue }
+            let exportLensBuckets = request.queryKey.isLiquidLens ? resolved.lensBuckets : []
+            let view = ShareCardView(
+                data: exportData,
+                aspect: request.aspect,
+                showCost: request.showCost,
+                detail: request.detail,
+                theme: request.theme,
+                dimension: request.dimension,
+                liquidView: request.liquidView,
+                lensBuckets: exportLensBuckets,
+                cosmosSnapshot: exportCosmosSnapshot,
+                rank: resolvedRank,
+                inscription: request.inscription,
+                signature: request.signature,
+                dataUnavailable: false,
+                reduceTransparencyOverride: request.reduceTransparency,
+                colorSchemeContrastOverride: request.colorSchemeContrast
+            )
+            .frame(width: canvasSize.width, height: canvasSize.height)
+            .environment(\.colorScheme, request.theme == .cosmos ? .dark : request.scheme)
+            .environment(\.locale, request.locale)
+            .fontDesign(request.theme == .field ? .serif : nil)
 
-        let isDarkExport = settings.theme == .cosmos || scheme == .dark
-        let appearanceName: NSAppearance.Name = if colorSchemeContrast == .increased {
-            isDarkExport ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua
-        } else {
-            isDarkExport ? .darkAqua : .aqua
-        }
-        let targetAppearance = NSAppearance(named: appearanceName)
-            ?? NSAppearance(named: isDarkExport ? .darkAqua : .aqua)
-        var cgImage: CGImage?
-        if let targetAppearance {
-            targetAppearance.performAsCurrentDrawingAppearance {
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 2.0
+            renderer.proposedSize = ProposedViewSize(canvasSize)
+
+            let isDarkExport = request.theme == .cosmos || request.scheme == .dark
+            let appearanceName: NSAppearance.Name = if request.colorSchemeContrast == .increased {
+                isDarkExport ? .accessibilityHighContrastDarkAqua : .accessibilityHighContrastAqua
+            } else {
+                isDarkExport ? .darkAqua : .aqua
+            }
+            let targetAppearance = NSAppearance(named: appearanceName)
+                ?? NSAppearance(named: isDarkExport ? .darkAqua : .aqua)
+            var cgImage: CGImage?
+            if let targetAppearance {
+                targetAppearance.performAsCurrentDrawingAppearance {
+                    cgImage = renderer.cgImage
+                }
+            } else {
                 cgImage = renderer.cgImage
             }
-        } else {
-            cgImage = renderer.cgImage
+            guard let cgImage else { return nil }
+            let rep = NSBitmapImageRep(cgImage: cgImage)
+            rep.size = canvasSize
+            return rep.representation(using: .png, properties: [:])
         }
-        guard let cgImage else { return nil }
-        let rep = NSBitmapImageRep(cgImage: cgImage)
-        rep.size = canvasSize
-        return rep.representation(using: .png, properties: [:])
+        return nil
     }
 
     private func copyCardToPasteboard() {
         exportError = nil
-        guard let pngData = renderPNGData() else {
-            exportError = String(localized: "Could not render the share card image.", locale: locale)
-            return
-        }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        guard pasteboard.setData(pngData, forType: .png) else {
-            exportError = String(localized: "Could not copy the image to the clipboard.", locale: locale)
-            return
-        }
-
-        didCopy = true
-        copyResetTask?.cancel()
-        copyResetTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(1.5))
+        exportTask?.cancel()
+        exportTask = Task { @MainActor in
+            let pngData = await renderPNGData()
             guard !Task.isCancelled else { return }
-            didCopy = false
+            guard let pngData else {
+                exportError = String(localized: "Could not render the share card image.", locale: locale)
+                return
+            }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            guard pasteboard.setData(pngData, forType: .png) else {
+                exportError = String(localized: "Could not copy the image to the clipboard.", locale: locale)
+                return
+            }
+
+            didCopy = true
+            copyResetTask?.cancel()
+            copyResetTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                guard !Task.isCancelled else { return }
+                didCopy = false
+            }
         }
     }
 
@@ -1315,14 +1470,19 @@ struct ShareExportSheet: View {
 
         let finishSave: (NSApplication.ModalResponse) -> Void = { response in
             guard response == .OK, let url = panel.url else { return }
-            guard let pngData = renderPNGData() else {
-                exportError = String(localized: "Could not render the share card image.", locale: locale)
-                return
-            }
-            do {
-                try pngData.write(to: url, options: .atomic)
-            } catch {
-                exportError = String(localized: "Could not save PNG: \(error.localizedDescription)", locale: locale)
+            exportTask?.cancel()
+            exportTask = Task { @MainActor in
+                let pngData = await renderPNGData()
+                guard !Task.isCancelled else { return }
+                guard let pngData else {
+                    exportError = String(localized: "Could not render the share card image.", locale: locale)
+                    return
+                }
+                do {
+                    try pngData.write(to: url, options: .atomic)
+                } catch {
+                    exportError = String(localized: "Could not save PNG: \(error.localizedDescription)", locale: locale)
+                }
             }
         }
 
@@ -1338,28 +1498,37 @@ struct ShareExportSheet: View {
 
     private func presentSharePicker() {
         exportError = nil
-        guard let anchorView = shareAnchor.view else {
+        guard shareAnchor.view != nil else {
             exportError = String(localized: "Could not open the share menu.", locale: locale)
             return
         }
-        guard let pngData = renderPNGData() else {
-            exportError = String(localized: "Could not render the share card image.", locale: locale)
-            return
-        }
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TokenTakenShare", isDirectory: true)
-        let shortUUID = String(UUID().uuidString.prefix(8)).lowercased()
-        let stem = sanitizedFileNameStem(for: cardData, scope: effectiveScope)
-        let fileName = "\(stem)-\(themeFileTag)-\(effectiveAspect.rawValue)-\(shortUUID).png"
-        let fileURL = tempDir.appendingPathComponent(fileName)
-        do {
-            try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-            pruneExpiredShareTempFiles(in: tempDir, before: Date.now.addingTimeInterval(-86_400))
-            try pngData.write(to: fileURL, options: .atomic)
-            let picker = NSSharingServicePicker(items: [fileURL])
-            picker.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
-        } catch {
-            exportError = String(localized: "Could not prepare the share image: \(error.localizedDescription)", locale: locale)
+        exportTask?.cancel()
+        exportTask = Task { @MainActor in
+            let pngData = await renderPNGData()
+            guard !Task.isCancelled else { return }
+            guard let pngData else {
+                exportError = String(localized: "Could not render the share card image.", locale: locale)
+                return
+            }
+            guard let anchorView = shareAnchor.view else {
+                exportError = String(localized: "Could not open the share menu.", locale: locale)
+                return
+            }
+            let tempDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("TokenTakenShare", isDirectory: true)
+            let shortUUID = String(UUID().uuidString.prefix(8)).lowercased()
+            let stem = sanitizedFileNameStem(for: cardData, scope: effectiveScope)
+            let fileName = "\(stem)-\(themeFileTag)-\(effectiveAspect.rawValue)-\(shortUUID).png"
+            let fileURL = tempDir.appendingPathComponent(fileName)
+            do {
+                try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+                pruneExpiredShareTempFiles(in: tempDir, before: Date.now.addingTimeInterval(-86_400))
+                try pngData.write(to: fileURL, options: .atomic)
+                let picker = NSSharingServicePicker(items: [fileURL])
+                picker.show(relativeTo: anchorView.bounds, of: anchorView, preferredEdge: .minY)
+            } catch {
+                exportError = String(localized: "Could not prepare the share image: \(error.localizedDescription)", locale: locale)
+            }
         }
     }
 
@@ -1984,18 +2153,37 @@ struct ShareCardView: View {
                             }
                             .overlay {
                                 Text("Breakdown unavailable")
-                                    .font(ThemeFont.make(aspect == .square ? 26 : 28, weight: .medium))
+                                    .font(ThemeFont.make(28, weight: .medium))
                                     .foregroundStyle(FieldPalette.muted)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         GeometryReader { proxy in
                             let slotSize = proxy.size
-                            let sceneAspect = FieldSceneModel.size.width / FieldSceneModel.size.height
-                            // Fill the slot's width so every plot stays in view; a slot wider than the scene trims only sky and
-                            // foreground, a narrower one centres the whole farm on paper. Bleed past the 1pt border.
+                            let sceneSize = FieldSceneModel.size
+                            // Fill the width so every plot stays in view, and bleed past the 1pt border.
                             let fillWidth = slotSize.width + 4
-                            let fillHeight = fillWidth / sceneAspect
+                            let scale = fillWidth / sceneSize.width
+                            let fillHeight = sceneSize.height * scale
+                            let focusY: CGFloat = {
+                                guard aspect == .landscape, fillHeight > slotSize.height else {
+                                    return sceneSize.height / 2
+                                }
+                                let fieldModel = FieldSceneModel(items: fieldItems)
+                                let fenceBaseY = FieldSceneModel.project(0, FieldSceneModel.plan.height + 50).y
+                                let plotMinY = fieldModel.plots.map(\.bounds.minY).min() ?? FieldSceneModel.yFar
+                                let plotMaxY = fieldModel.plots.map(\.bounds.maxY).max() ?? FieldSceneModel.yNear
+                                let safeMinY = min(FieldSceneModel.yFar, plotMinY)
+                                let safeMaxY = max(FieldSceneModel.yNear, max(fenceBaseY + 8, plotMaxY))
+                                let halfVisibleHeight = slotSize.height / scale / 2
+                                let lowerFocus = max(halfVisibleHeight, safeMaxY - halfVisibleHeight)
+                                let upperFocus = min(sceneSize.height - halfVisibleHeight, safeMinY + halfVisibleHeight)
+                                let preferredFocus: CGFloat = 430
+                                guard lowerFocus <= upperFocus else {
+                                    return min(max((safeMinY + safeMaxY) / 2, halfVisibleHeight), sceneSize.height - halfVisibleHeight)
+                                }
+                                return min(max(preferredFocus, lowerFocus), upperFocus)
+                            }()
 
                             FieldLandscapeView(
                                 items: fieldItems,
@@ -2004,7 +2192,10 @@ struct ShareCardView: View {
                                 compact: true
                             )
                             .frame(width: fillWidth, height: fillHeight)
-                            .position(x: slotSize.width / 2, y: slotSize.height / 2)
+                            .position(
+                                x: slotSize.width / 2,
+                                y: slotSize.height / 2 + (sceneSize.height / 2 - focusY) * scale
+                            )
                         }
                         .clipShape(RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous))
                         .overlay {

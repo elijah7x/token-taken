@@ -133,11 +133,10 @@ final class AppSettings {
         }
     }
 
-    /// Applies the effective appearance to every window, the menu bar panel and the Dock icon.
+    /// Applies the effective appearance to every window and the menu bar panel.
     /// Cosmos forces dark without changing the preference that other themes use.
     func applyAppearance() {
         NSApp?.appearance = theme == .cosmos ? NSAppearance(named: .darkAqua) : appearance.nsAppearance
-        ThemeAppIcon.apply(theme)
     }
 
     var language: AppLanguage {
@@ -145,9 +144,9 @@ final class AppSettings {
             guard language != oldValue else { return }
             defaults.set(language.rawValue, forKey: Keys.language)
             if let code = language.languageCode {
-                UserDefaults.standard.set([code], forKey: Keys.appleLanguages)
+                defaults.set([code], forKey: Keys.appleLanguages)
             } else {
-                UserDefaults.standard.removeObject(forKey: Keys.appleLanguages)
+                defaults.removeObject(forKey: Keys.appleLanguages)
             }
             languageChangedThisSession = true
             applyUnitStyle(bumpRevision: true)
@@ -295,8 +294,12 @@ final class AppSettings {
         launchAtLoginStatus = SMAppService.mainApp.status
         applyUnitStyle(bumpRevision: false)
         // NSApp is not up yet while the app's state is built; apply once launch finishes so a session
-        // that only opens the menu bar panel still gets the chosen appearance.
-        DispatchQueue.main.async { [weak self] in self?.applyAppearance() }
+        // that only opens the menu bar panel still gets the chosen appearance and legacy icon cleanup.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            applyAppearance()
+            ThemeAppIcon.apply(theme, defaults: defaults)
+        }
     }
 
     private func applyUnitStyle(bumpRevision: Bool) {

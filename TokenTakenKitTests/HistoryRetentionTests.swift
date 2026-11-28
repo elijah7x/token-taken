@@ -396,7 +396,7 @@ final class HistoryRetentionTests: XCTestCase {
 
     func testMigrationFromVersion3AddsTheOneHourSubsetColumn() throws {
         seedVersion3([(day: "2026-11-09", model: "claude-sonnet-4-5", input: 10, cacheWrite: 500)],
-                     epoch: "1+tokscale-4.21.0")
+                     epoch: "1+tokscale-4.23.1")
         let store = try SQLiteUsageStore(url: databaseURL)
         XCTAssertEqual(Int(schemaVersion()), SQLiteUsageStore.schemaVersion)
         let migrated = try XCTUnwrap(try store.records().first)
@@ -404,7 +404,7 @@ final class HistoryRetentionTests: XCTestCase {
         XCTAssertEqual(migrated.counts.cacheWrite, 500)
         XCTAssertEqual(migrated.counts.cacheWrite1h, 0)
         XCTAssertEqual(migrated.counts.total, 510)
-        XCTAssertEqual(storedEpoch(), "1+tokscale-4.21.0")
+        XCTAssertEqual(storedEpoch(), "1+tokscale-4.23.1")
         // The day total excludes the subset, so the floor rule still compares like with like.
         try store.replace(batch: CollectionBatch(daily: [record(day: "2026-11-09", input: 1)]),
             sourceID: "claude", deviceID: "device-a")
@@ -466,7 +466,7 @@ final class HistoryRetentionTests: XCTestCase {
             record(day: "2026-11-06", input: 50, zone: "America/New_York"),
         ]), sourceID: "claude", deviceID: "device-a")
         XCTAssertEqual(totals(try store.records()), ["2026-11-06": 100, "2026-11-07": 30])
-        XCTAssertEqual(storedEpoch(), "1+tokscale-4.21.0")
+        XCTAssertEqual(storedEpoch(), "1+tokscale-4.23.1")
     }
 
     func testHourlyIsStillReplaced() throws {

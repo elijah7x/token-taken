@@ -94,10 +94,15 @@ See [ADR-0002](decisions/0002-icloud-drive-sync.md), superseding granularity dec
 ### Presentation and themes
 
 - Provides main-window view models and SwiftUI views for day, week (Monday start), month, year, and all-time periods, with model, source, and enabled device breakdowns.
+- `MainWindowView` keeps the shared tray and one active hero visual above the shared breakdown. `SummaryRail` shows a short total and cost state, `TrayDevices` shows device notices, and `BreakdownCard` keeps one column with a hidden-row summary and Show all / Show less controls. Exact total and pricing details use `DataHoverPopover` instead of a persistent exact-count row.
+- `DataHoverCard.swift` owns the common detail surfaces. `DataHoverCard` supplies the padding, width, and Reduce Transparency-aware tooltip surface for Lens slices and Confluence streams. `DataHoverPopover` adds hover presentation, click or keyboard pinning, and Escape dismissal for the sidebar total/cost and Lens's complete-period composition details.
+- `LensView` renders a flat stacked time chart with axes and a bare whole-period composition strip. Its magnifier rests on the peak without creating a slice; hover creates a transient single-bucket overlay, while click, drag, or keyboard input pins a bucket or contiguous range. The overlay queries and displays only that slice's time, counts, period share or coverage state, cost availability, top three items, and composition. It does not filter the complete-period sidebar, strip, or breakdown.
+- Lens releases a pin when the period changes, resolves pins against available non-future buckets, and updates stored endpoints when the bucket count changes. Day + Models uses total-only hourly bars with explicit missing model-detail and pricing notices. Missing hourly coverage remains unknown rather than zero. Per-bucket VoiceOver actions, keyboard selection/release, Reduce Motion, Reduce Transparency, and Increase Contrast preserve equivalent state and detail.
 - Ships theme IDs `liquid-glass`, `sketchbook` (Field), and `cosmos` (Cosmos, 宇宙) in v1; `cosmos` replaces the reserved `geek` ID. `ThemeRuntime` mirrors the active theme for dynamic palette colors and glass helpers; changing theme rebuilds every scene. Field rendering lives in `FieldTheme.swift`, `FieldLandscapeView.swift`, and `FieldSurfaces.swift`.
 - Cosmos renders its ray-marched scene through Metal and `MTKView` in `CosmosRenderer.swift`, `CosmosScene.swift`, `CosmosSceneView.swift`, and `CosmosShaders.metal`. It uses adaptive render scale, a still frame under Reduce Motion, and a dark-only appearance exception that preserves the saved light/dark preference.
+- Share-sheet usage aggregation, Lens data, rank calculation, and Cosmos still rendering run off the main actor. Generation and identity checks prevent stale results from replacing the current preview, and copy, PNG export, and system sharing wait for the matching latest snapshot and image.
 - Preserves loading, empty, stale, and error states rather than displaying missing data as zero.
-- Follows `docs/contracts/themes.md` for theme boundaries.
+- Follows `docs/contracts/themes.md` and [ADR-0016](decisions/0016-liquid-information-hierarchy.md) for theme and information-hierarchy boundaries.
 
 ### Menu bar
 

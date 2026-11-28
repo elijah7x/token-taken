@@ -11,10 +11,8 @@ enum FieldFont {
         return Font(NSFont(descriptor: descriptor, size: size) ?? base)
     }
 
-    /// Board signs are rebuilt on every paint, so their fonts are resolved once.
+    /// Plot labels are rebuilt on every paint, so their fonts are resolved once.
     static let signName = serif(16)
-    static let signNumber = serif(13.5)
-    static let stake = serif(14.5)
     static let stakeSmall = serif(12)
 }
 
@@ -144,11 +142,6 @@ struct FieldLandscapeView: View {
                     Text("No usage in this period")
                         .font(FieldFont.serif(compact ? 11.5 : 15))
                         .foregroundStyle(FieldPalette.ink)
-                        .padding(.horizontal, compact ? 10 : 18)
-                        .padding(.vertical, compact ? 6 : 10)
-                        .background(FieldPalette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
-                        .shadow(color: Color.black.opacity(isDark ? 0.28 : 0.10), radius: 6, y: 2)
                         .position(x: proxy.size.width * 0.5, y: proxy.size.height * 0.58)
                         .allowsHitTesting(false)
                 }
@@ -204,7 +197,6 @@ struct FieldLandscapeView: View {
         }
         .aspectRatio(FieldSceneModel.size.width / FieldSceneModel.size.height, contentMode: .fit)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
         .accessibilityElement(children: .contain)
     }
 }
@@ -335,8 +327,7 @@ private struct FieldTooltip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .background(FieldPalette.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
-        .shadow(color: Color.black.opacity(scheme == .dark ? 0.30 : 0.12), radius: 6, y: 2)
+        .shadow(color: Color.black.opacity(scheme == .dark ? 0.24 : 0.10), radius: 8, y: 3)
     }
 }
 
@@ -397,7 +388,9 @@ private struct FieldPainter {
     }
 
     private var sun: CGFloat { isDark ? -1 : 1 }
-    private func tone(_ rgb: FieldRGB) -> FieldRGB { isDark ? rgb.mix(FieldRGB("#151A17"), 0.34) : rgb }
+    private func tone(_ rgb: FieldRGB) -> FieldRGB {
+        isDark ? rgb.mix(FieldRGB("#2B3027"), 0.48) : rgb.mix(FieldRGB("#F5F1E6"), 0.9)
+    }
     private func P(_ u: CGFloat, _ v: CGFloat) -> CGPoint { FieldSceneModel.project(u, v) }
     private func fill(_ p: Path, _ rgb: FieldRGB, in g: GraphicsContext? = nil) { (g ?? ctx).fill(p, with: .color(rgb.color)) }
     private func stroke(_ p: Path, _ rgb: FieldRGB, _ w: CGFloat, in g: GraphicsContext? = nil) {
@@ -499,7 +492,7 @@ private struct FieldPainter {
     }
 
     private func sky() {
-        fill(Path(CGRect(origin: .zero, size: FieldSceneModel.size)), isDark ? FieldRGB("#182026") : pal.sky)
+        fill(Path(CGRect(origin: .zero, size: FieldSceneModel.size)), isDark ? FieldRGB("#242B29") : tone(pal.sky))
         if !isDark {
             let s = CGPoint(x: 1010, y: 82)
             fill(Self.dot(s.x, s.y, 62), c.sun.opacity(0.08)); fill(Self.dot(s.x, s.y, 44), c.sun.opacity(0.14)); fill(Self.dot(s.x, s.y, 27), c.sun)
@@ -559,7 +552,7 @@ private struct FieldPainter {
         let (farPath, farAt) = ridge(196, 70, 150, "far"), (nearPath, nearAt) = ridge(226, 38, 120, "near")
         fill(farPath, tone(pal.far))
         var r = FieldRNG("ftrees"), trunks = Path(), crowns = Path()
-        for _ in 0..<26 {
+        for _ in 0..<16 {
             let x = 30 + CGFloat(r.next()) * (W - 60), y = farAt(x) + 6 + CGFloat(r.next()) * 8, h = 7 + CGFloat(r.next()) * 6
             trunks.addPath(Self.line(CGPoint(x: x, y: y), CGPoint(x: x, y: y - h * 0.6)))
             if pal.leaf != nil { crowns.addPath(Self.ellipse(x, y - h, h * 0.42, h * 0.55)) } else {
@@ -571,7 +564,7 @@ private struct FieldPainter {
         fill(crowns, tone(pal.leaf2 ?? FieldRGB("#999999")).opacity(0.55))
         fill(nearPath, tone(pal.near))
         var h = Path()
-        for _ in 0..<40 {
+        for _ in 0..<20 {
             let x = CGFloat(r.next()) * W, y = nearAt(x) + 4 + CGFloat(r.next()) * 18
             h.addPath(Self.line(CGPoint(x: x, y: y), CGPoint(x: x + 7 + CGFloat(r.next()) * 6, y: y - 3 - CGFloat(r.next()) * 2)))
         }
@@ -587,7 +580,7 @@ private struct FieldPainter {
         p.addLine(to: CGPoint(x: 1210, y: H)); p.closeSubpath()
         fill(p, tone(pal.meadow))
         var r = FieldRNG("meadow"), g = Path()
-        for _ in 0..<150 { let x = CGFloat(r.next()) * W, y = 250 + CGFloat(r.next()) * (H - 250); g.addPath(Self.tuft(x, y, 3 + CGFloat(r.next()) * 4 * (y / H + 0.4))) }
+        for _ in 0..<70 { let x = CGFloat(r.next()) * W, y = 250 + CGFloat(r.next()) * (H - 250); g.addPath(Self.tuft(x, y, 3 + CGFloat(r.next()) * 4 * (y / H + 0.4))) }
         stroke(g, tone(pal.meadow2), 1.1)
     }
 
@@ -711,14 +704,6 @@ private struct FieldPainter {
         var canal = Path()
         canal.move(to: CGPoint(x: riverAt(282) + 4, y: 282)); canal.addQuadCurve(to: c0, control: CGPoint(x: c0.x - 30, y: c0.y + 2)); canal.addLine(to: c1)
         stroke(canal, bank, 9); stroke(canal, water, 5)
-        var ditches = Path()
-        for plot in model.plots {
-            let p = plot.plan
-            if p.minX > gap + 1 { ditches.addPath(Self.line(P(p.minX - gap / 2, p.minY - gap / 2), P(p.minX - gap / 2, p.maxY + gap / 2))) }
-            if p.minY > gap + 1 { ditches.addPath(Self.line(P(p.minX - gap / 2, p.minY - gap / 2), P(p.maxX + gap / 2, p.minY - gap / 2))) }
-        }
-        ditches.addPath(Self.line(P(gap / 2, gap / 2), P(gap / 2, plan.height)))
-        stroke(ditches, water.opacity(0.9), 2.4)
         // Trodden ground under the farm.
         let plan2 = FieldSceneModel.plan
         fill(Self.blob([P(0, 0), P(plan2.width, 0), P(plan2.width, plan2.height), P(0, plan2.height)], seed: "farm", jitter: 2.5, step: 40, round: 12), tone(pal.meadow2).opacity(0.55))
@@ -791,7 +776,7 @@ private struct FieldPainter {
         // Plots first, so near crops can overlap far plots.
         for plot in ordered {
             var g = ctx
-            if let highlight, highlight != plot.id { g.opacity = 0.3 }
+            if let highlight, highlight != plot.id { g.opacity = 0.6 }
             let shape = Self.blob(plot.corners, seed: "b" + plot.id, jitter: 1.6, step: 26, round: 9)
             let col = c.crops[plot.crop.rawValue]
             fill(shape.offsetBy(dx: 0, dy: 3.5), isDark ? FieldRGB("#1E1F19") : c.soilR, in: g)
@@ -811,7 +796,6 @@ private struct FieldPainter {
                 }
                 stroke(sn, FieldRGB("#FAFAF6").opacity(0.75), 2.4, in: clipped)
             }
-            stroke(shape, isDark ? FieldRGB("#55604A") : c.hedge.mix(.white, 0.7), 1.1, in: g)
         }
         // Ridge grass.
         var r = FieldRNG("ridgegrass"), grass = Path(), flowers = Path()
@@ -830,7 +814,7 @@ private struct FieldPainter {
         let biggest = model.plots.max { $0.value < $1.value }
         for plot in ordered {
             var g = ctx
-            if let highlight, highlight != plot.id { g.opacity = 0.3 }
+            if let highlight, highlight != plot.id { g.opacity = 0.6 }
             let rows = plantings[plot.id] ?? []
             let cc = colors(plot.crop)
             var rng = FieldRNG(plot.id + "crop")
@@ -1090,7 +1074,7 @@ private struct FieldPainter {
 
     private func foreground() {
         var r = FieldRNG("front"), grass = Path(), stones = Path()
-        for _ in 0..<70 { grass.addPath(Self.tuft(160 + CGFloat(r.next()) * 900, 660 + CGFloat(r.next()) * 60, 6 + CGFloat(r.next()) * 6)) }
+        for _ in 0..<40 { grass.addPath(Self.tuft(160 + CGFloat(r.next()) * 900, 660 + CGFloat(r.next()) * 60, 6 + CGFloat(r.next()) * 6)) }
         for _ in 0..<6 { stones.addPath(Self.ellipse(200 + CGFloat(r.next()) * 840, 668 + CGFloat(r.next()) * 44, 5 + CGFloat(r.next()) * 6, 3 + CGFloat(r.next()) * 2)) }
         fill(stones, tone(FieldRGB("#B9B19C")))
         stroke(grass, tone(pal.leaf2 ?? FieldRGB("#A5A495")), 1.3)
@@ -1161,52 +1145,66 @@ private struct FieldPainter {
 
     // MARK: Signs
 
-    /// Big plots get a two-line board at the near-left corner; small plots a one-line stake.
+    /// A plot with enough clear room gets a level wooden name board; smaller plots keep a pennant.
     private func signs() {
+        var placedSigns: [CGRect] = []
         for plot in model.plots.sorted(by: { $0.plan.maxY < $1.plan.maxY }) {
             var g = ctx
-            if let highlight, highlight != plot.id { g.opacity = 0.3 }
+            if let highlight, highlight != plot.id { g.opacity = 0.6 }
             if compact { pennant(plot, g, scale: 2.2); continue }
-            let name = g.resolve(Text(verbatim: plot.name).font(FieldFont.signName).foregroundStyle(c.ink.color))
-            let num = g.resolve(Text(verbatim: "\(TokenFormat.short(plot.value)) · \(FieldFormat.percent(plot.value, of: model.total))").font(FieldFont.signNumber).foregroundStyle(c.ink2.color))
-            let screenW0 = plot.corners[2].x - plot.corners[3].x
-            var small = g.resolve(Text(verbatim: plot.name).font(FieldFont.stake).foregroundStyle(c.ink.color))
-            // Narrow plots get a smaller stake rather than none.
-            if small.measure(in: CGSize(width: 600, height: 60)).width + 26 > screenW0 {
-                small = g.resolve(Text(verbatim: plot.name).font(FieldFont.stakeSmall).foregroundStyle(c.ink.color))
-            }
-            let nameW = name.measure(in: CGSize(width: 600, height: 60)).width, numW = num.measure(in: CGSize(width: 600, height: 60)).width
             let screenW = plot.corners[2].x - plot.corners[3].x
-            let full = screenW >= max(nameW, numW) + 70 && plot.plan.height >= 120
-            let smallW = small.measure(in: CGSize(width: 600, height: 60)).width
-            let bw = full ? max(nameW, numW) + 24 : smallW + (smallW + 18 > screenW ? 10 : 18), bh: CGFloat = full ? 46 : 26
-            guard screenW >= bw + 4, plot.plan.height >= 34 else { pennant(plot, g); continue }
-            let ny = P(plot.plan.minX, plot.plan.maxY + FieldSceneModel.gap * 0.25).y, nx = plot.corners[3].x + bw / 2 + (full ? 16 : max(2, min(6, (screenW - bw) / 2)))
-            let top = ny - (full ? 12 : 6) - bh
-            g.fill(Self.ellipse(nx - sun * 7, ny + 1, bw * 0.32, 3), with: .color(c.groundShadow.color))
-            var posts = Path()
-            posts.addPath(Self.line(CGPoint(x: nx - bw * 0.28, y: ny), CGPoint(x: nx - bw * 0.28, y: top + bh - 4)))
-            posts.addPath(Self.line(CGPoint(x: nx + bw * 0.28, y: ny), CGPoint(x: nx + bw * 0.28, y: top + bh - 4)))
-            g.stroke(posts, with: .color(c.post.color), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-            var t = g
-            var tr = FieldRNG("t" + plot.id)
-            t.translateBy(x: nx, y: top + bh / 2)
-            t.rotate(by: .degrees((tr.next() - 0.5) * 3.2))
-            t.translateBy(x: -nx, y: -(top + bh / 2))
-            let board = Self.blob([CGPoint(x: nx - bw / 2, y: top), CGPoint(x: nx + bw / 2, y: top), CGPoint(x: nx + bw / 2, y: top + bh), CGPoint(x: nx - bw / 2, y: top + bh)], seed: "s" + plot.id, jitter: 0.9, step: 30, round: 4)
-            t.fill(board.offsetBy(dx: 2, dy: 3), with: .color(c.groundShadow.color))
-            t.fill(board, with: .color(c.sign.color))
-            t.stroke(board, with: .color(c.post.color), lineWidth: 1.3)
-            if full {
-                t.draw(name, at: CGPoint(x: nx, y: top + 14), anchor: .center)
-                t.draw(num, at: CGPoint(x: nx, y: top + 33), anchor: .center)
-            } else {
-                t.draw(small, at: CGPoint(x: nx, y: top + bh / 2), anchor: .center)
+            var name = g.resolve(Text(verbatim: plot.name).font(FieldFont.signName).foregroundStyle(c.signInk.color))
+            let useSmallName = name.measure(in: CGSize(width: 600, height: 60)).width + 24 > screenW
+            if useSmallName {
+                name = g.resolve(Text(verbatim: plot.name).font(FieldFont.stakeSmall).foregroundStyle(c.signInk.color))
             }
+            let nameW = name.measure(in: CGSize(width: 600, height: 60)).width
+            guard screenW >= nameW + 40, plot.plan.height >= 48 else { pennant(plot, g); continue }
+            let boardW = nameW + 28
+            let baseY = P(plot.plan.minX, plot.plan.maxY + FieldSceneModel.gap * 0.25).y
+            let center = (plot.corners[2].x + plot.corners[3].x) / 2
+            let left = plot.corners[3].x + boardW / 2 + 2
+            let right = plot.corners[2].x - boardW / 2 - 2
+            var placement: (x: CGFloat, frame: CGRect)?
+            for x in [center, left, right] {
+                let frame = CGRect(x: x - boardW / 2 - 2, y: baseY - 38, width: boardW + 4, height: 34)
+                if placedSigns.contains(where: { $0.insetBy(dx: -4, dy: -2).intersects(frame) }) { continue }
+                placement = (x, frame)
+                break
+            }
+            guard let placement else { pennant(plot, g); continue }
+            woodenSign(name: name, x: placement.x, baseY: baseY, width: boardW, in: g)
+            placedSigns.append(placement.frame)
         }
     }
 
-    /// Plots too small for a stake get a flag in the crop's colour, matching the swatch in the list below.
+    private func woodenSign(name: GraphicsContext.ResolvedText, x: CGFloat, baseY: CGFloat, width: CGFloat, in g: GraphicsContext) {
+        let rect = CGRect(x: x - width / 2, y: baseY - 35, width: width, height: 28)
+        fill(Self.ellipse(x - sun * 4, baseY + 2, 8, 2), c.groundShadow, in: g)
+        stroke(Self.line(CGPoint(x: x, y: baseY + 2), CGPoint(x: x, y: rect.maxY + 1)), c.post, 3.2, in: g)
+        var board = Path()
+        board.addRoundedRect(in: rect, cornerSize: CGSize(width: 3, height: 3))
+        fill(board.offsetBy(dx: -sun * 1.5, dy: 2.5), c.groundShadow, in: g)
+        fill(board, c.sign, in: g)
+        stroke(board, c.signEdge, 1.1, in: g)
+        stroke(
+            Self.line(CGPoint(x: rect.minX + 4, y: rect.minY + 3), CGPoint(x: rect.maxX - 4, y: rect.minY + 3)),
+            c.sign.mix(.white, 0.65).opacity(isDark ? 0.35 : 0.7),
+            0.8,
+            in: g
+        )
+        var grain = Path()
+        grain.move(to: CGPoint(x: rect.minX + 11, y: rect.minY + 7))
+        grain.addQuadCurve(to: CGPoint(x: rect.maxX - 11, y: rect.minY + 6), control: CGPoint(x: x, y: rect.minY + 8))
+        grain.move(to: CGPoint(x: rect.minX + 11, y: rect.maxY - 5))
+        grain.addQuadCurve(to: CGPoint(x: rect.maxX - 11, y: rect.maxY - 6), control: CGPoint(x: x, y: rect.maxY - 4))
+        stroke(grain, c.signEdge.opacity(0.2), 0.65, in: g)
+        fill(Self.dot(rect.minX + 7, rect.midY, 1.25), c.signEdge.opacity(0.75), in: g)
+        fill(Self.dot(rect.maxX - 7, rect.midY, 1.25), c.signEdge.opacity(0.75), in: g)
+        g.draw(name, at: CGPoint(x: x, y: rect.midY), anchor: .center)
+    }
+
+    /// Plots too small for a label get a flag in the crop's colour, matching the swatch in the list below.
     private func pennant(_ plot: FieldPlot, _ g: GraphicsContext, scale: CGFloat = 1) {
         var g = g
         let base = P(plot.plan.minX + min(10 * scale, plot.plan.width / 2), plot.plan.maxY)
@@ -1309,10 +1307,6 @@ struct FieldCompositionStrip: View {
                     }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(FieldPalette.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(FieldPalette.rule, lineWidth: 1))
             .accessibilityElement(children: .contain)
             .accessibilityLabel(Text("Composition"))
         }

@@ -15,7 +15,7 @@ import OSLog
 public struct GrokCollector: UsageCollector {
     public let sourceIDs = ["grok"]
 
-    private static let stateFormatVersion = 1
+    private static let stateFormatVersion = 2
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
     private let baseDirectory: URL
@@ -443,9 +443,18 @@ public struct GrokCollector: UsageCollector {
             reportedRaw = asInt(usage["total_tokens"])
         }
         let reported = reportedRaw.map { max($0, 0) }
-        let inclusive = reported == nil || reported == rawIn + rawOut
-        let input = inclusive ? max(rawIn - cr, 0) : rawIn
-        let output = inclusive ? max(rawOut - reasoning, 0) : rawOut
+        let completionCandidates = reasoning > 0 ? [rawOut, rawOut + reasoning] : [rawOut]
+        let inputExclusive = cr == 0 || (reported.map { total in
+            completionCandidates.contains { total == rawIn + cr + cw + $0 || total == rawIn + cr + $0 }
+        } ?? false)
+        let input = inputExclusive ? rawIn : max(rawIn - cr, 0)
+
+        let promptCandidates = [rawIn, rawIn + cw, rawIn + cr, rawIn + cr + cw]
+        let outputExclusive = reasoning > rawOut || (reasoning > 0 && (reported.map { total in
+            promptCandidates.contains { total == $0 + rawOut + reasoning }
+                && !promptCandidates.contains { total == $0 + rawOut }
+        } ?? false))
+        let output = outputExclusive ? rawOut : max(rawOut - reasoning, 0)
         let counts = TokenCounts(input: input, cacheRead: cr, cacheWrite: cw, output: output, reasoning: reasoning)
 
         var calls: Int64?

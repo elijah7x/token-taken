@@ -874,27 +874,53 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(remote.status.state, .ok)
     }
 
-    func testLocalDeviceReplacesInvalidDefaultsUUID() throws {
+    func testLocalDeviceIsolatesCustomSupportDirectoryFromDefaults() throws {
+        let manager = FileManager.default
+        let production = manager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Token Taken", isDirectory: true)
+        XCTAssertTrue(LocalDevice.isDefaultProductionSupportDirectory(production, environment: [:]))
+        XCTAssertTrue(LocalDevice.isDefaultProductionSupportDirectory(production, environment: ["TOKEN_TAKEN_SUPPORT_DIR": ""]))
+        let customOverride = directory.appendingPathComponent("custom", isDirectory: true)
+        XCTAssertFalse(LocalDevice.isDefaultProductionSupportDirectory(production, environment: ["TOKEN_TAKEN_SUPPORT_DIR": customOverride.path]))
+
         let supportDir = directory.appendingPathComponent("support", isDirectory: true)
-        try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        try manager.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        XCTAssertFalse(LocalDevice.isDefaultProductionSupportDirectory(supportDir, environment: [:]))
+
         let suiteName = "TokenTakenTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set("not-a-uuid", forKey: "deviceID")
 
+        let productionUUID = UUID().uuidString
+        defaults.set(productionUUID, forKey: "deviceID")
         let created = LocalDevice.current(defaults: defaults, supportDirectory: supportDir)
         XCTAssertNotNil(UUID(uuidString: created.id))
-        XCTAssertNotEqual(created.id, "not-a-uuid")
-        XCTAssertEqual(defaults.string(forKey: "deviceID"), created.id)
+        XCTAssertNotEqual(created.id, productionUUID)
+        XCTAssertEqual(defaults.string(forKey: "deviceID"), productionUUID)
         XCTAssertEqual(LocalDevice.storedID(supportDirectory: supportDir), created.id)
+        XCTAssertEqual(LocalDevice.current(defaults: defaults, supportDirectory: supportDir).id, created.id)
+
+        let secondSupportDir = directory.appendingPathComponent("support-invalid-defaults", isDirectory: true)
+        try manager.createDirectory(at: secondSupportDir, withIntermediateDirectories: true)
+        defaults.set("not-a-uuid", forKey: "deviceID")
+        let second = LocalDevice.current(defaults: defaults, supportDirectory: secondSupportDir)
+        XCTAssertNotNil(UUID(uuidString: second.id))
+        XCTAssertNotEqual(second.id, "not-a-uuid")
+        XCTAssertEqual(defaults.string(forKey: "deviceID"), "not-a-uuid")
+        XCTAssertEqual(LocalDevice.storedID(supportDirectory: secondSupportDir), second.id)
     }
 
     func testSyncRootEnvironmentOverride() throws {
         let manager = FileManager.default
         let key = "TOKEN_TAKEN_SYNC_ROOT"
+        let supportKey = "TOKEN_TAKEN_SUPPORT_DIR"
         let root = directory.appendingPathComponent("sync", isDirectory: true)
         try manager.createDirectory(at: root, withIntermediateDirectories: true)
         XCTAssertEqual(ICloudSync.root(environment: [key: root.path], fileManager: manager), root)
+
+        let support = directory.appendingPathComponent("support", isDirectory: true)
+        XCTAssertNil(ICloudSync.root(environment: [supportKey: support.path], fileManager: manager))
+        XCTAssertEqual(ICloudSync.root(environment: [supportKey: support.path, key: root.path], fileManager: manager), root)
 
         let missing = directory.appendingPathComponent("missing", isDirectory: true)
         XCTAssertNil(ICloudSync.root(environment: [key: missing.path], fileManager: manager))
@@ -908,6 +934,7 @@ final class SyncTests: XCTestCase {
             : nil
         XCTAssertEqual(ICloudSync.root(environment: [:], fileManager: manager), expected)
         XCTAssertEqual(ICloudSync.root(environment: [key: ""], fileManager: manager), expected)
+        XCTAssertEqual(ICloudSync.root(environment: [supportKey: ""], fileManager: manager), expected)
     }
 
     func testReaderAcceptsHourlyRowsWithinClockSkewTolerance() throws {

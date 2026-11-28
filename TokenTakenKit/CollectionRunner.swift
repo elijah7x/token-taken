@@ -177,6 +177,8 @@ public actor CollectionRunner {
         return results
     }
 
+    private static let dailyOnlySourceIDs: Set<String> = ["deepseek-cli"]
+
     private struct ScopedBatch {
         let batch: CollectionBatch
         let hourlyHistory: [HourlyUsage]
@@ -190,14 +192,15 @@ public actor CollectionRunner {
             $0.sourceID == sourceID && $0.hourStart <= currentHour
         })
         var hours = mergedAll.filter { $0.key >= cutoff }
-        // Persist coverage as zero rows only after a complete successful read, never after a failure.
-        if batch.skippedRecords == 0 {
+        // Persist coverage as zero rows only after a complete successful read for sources that emit hourly data,
+        // never after a failure or for daily-only sources.
+        if batch.skippedRecords == 0 && !Self.dailyOnlySourceIDs.contains(sourceID) {
             for offset in 0..<48 {
                 let start = currentHour.addingTimeInterval(Double(-offset) * 3_600)
                 if hours[start] == nil {
                     hours[start] = HourlyUsage(hourStart: start, deviceID: deviceID, sourceID: sourceID,
                         counts: .zero, eventCount: 0,
-                        reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode", "cursor", "grok"].contains(sourceID))
+                        reasoningKnown: ["zcode", "pi", "omp", "antigravity", "mcode", "cursor", "grok", "gemini"].contains(sourceID))
                 }
             }
         }

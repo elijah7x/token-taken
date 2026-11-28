@@ -17,7 +17,17 @@ public enum HistoryEpochs {
     /// because a store upgraded to schema 3 recorded revision 2 without rebaselining, so those corrections never
     /// replaced the older, larger days; revision 3 applies them once. Devin moves to 4 because build 28 re-stored its
     /// unchanged cached rows under revision 3 without rebaselining; collection stamps now carry the epoch.
-    private static let revisions: [String: Int] = ["devin": 4, "antigravity": 3, "cursor": 1]
+    /// Grok, pi, and omp move to 2 because cache-inclusive input normalization now subtracts cache tokens when
+    /// `cacheWrite` or exclusive reasoning is present (Grok) or when `totalTokens` proves `input` includes cache
+    /// tokens (pi/omp), which lowers previously overcounted days.
+    private static let revisions: [String: Int] = [
+        "devin": 4,
+        "antigravity": 3,
+        "cursor": 1,
+        "grok": 2,
+        "omp": 2,
+        "pi": 2,
+    ]
 
     public static func epoch(for sourceID: String) -> String {
         let revision = revisions[sourceID] ?? 1

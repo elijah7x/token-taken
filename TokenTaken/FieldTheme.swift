@@ -33,7 +33,7 @@ struct FieldRGB: Hashable {
 struct FieldColors {
     let isDark: Bool
     let desk, paper, panel, ink, ink2, muted, rule, accent, soil, path, hedge: FieldRGB
-    let sun, groundShadow, stem, sign, post, soilL, soilR: FieldRGB
+    let sun, groundShadow, stem, post, sign, signEdge, signInk, soilL, soilR: FieldRGB
     let crops: [FieldRGB]
 
     private static let light = FieldColors(isDark: false)
@@ -45,26 +45,28 @@ struct FieldColors {
     init(isDark: Bool) {
         self.isDark = isDark
         if isDark {
-            desk = FieldRGB("#161813"); paper = FieldRGB("#1E211C"); panel = FieldRGB("#262A23")
+            desk = FieldRGB("#242B29"); paper = FieldRGB("#22261F"); panel = FieldRGB("#2B3027")
             ink = FieldRGB("#ECE6D6"); ink2 = FieldRGB("#D2CBB8"); muted = FieldRGB("#A9A392"); rule = FieldRGB("#3E4337")
             accent = FieldRGB("#E28A62"); soil = FieldRGB("#33342A"); path = FieldRGB("#2A2D25"); hedge = FieldRGB("#9BAE78")
             sun = FieldRGB("#E9DDB4"); groundShadow = FieldRGB("#000000", alpha: 0.32); stem = FieldRGB("#8EA06C")
-            sign = FieldRGB("#3B3528"); post = FieldRGB("#A88A62"); soilL = FieldRGB("#2A2A21"); soilR = FieldRGB("#22221B")
+            post = FieldRGB("#A88A62"); sign = FieldRGB("#C7AD82"); signEdge = FieldRGB("#745B3E"); signInk = FieldRGB("#2C241B")
+            soilL = FieldRGB("#2A2A21"); soilR = FieldRGB("#22221B")
             crops = ["#D9B465", "#AA9BD1", "#DB8E62", "#7FB0B0", "#86AA6F", "#CFC261", "#9DBB78", "#DAA0A6", "#99B6D4", "#B8B66F"].map { FieldRGB($0) }
         } else {
             desk = FieldRGB("#E7E1D2"); paper = FieldRGB("#F5F1E6"); panel = FieldRGB("#FBF8F0")
             ink = FieldRGB("#2B2A24"); ink2 = FieldRGB("#4A473D"); muted = FieldRGB("#6B675B"); rule = FieldRGB("#D9D2C0")
             accent = FieldRGB("#A94E2A"); soil = FieldRGB("#E4D8BC"); path = FieldRGB("#EFE7D3"); hedge = FieldRGB("#6A7A4F")
             sun = FieldRGB("#D9893A"); groundShadow = FieldRGB("#503E1E", alpha: 0.16); stem = FieldRGB("#6D7B4C")
-            sign = FieldRGB("#F3E6C8"); post = FieldRGB("#8A6A44"); soilL = FieldRGB("#CDB98F"); soilR = FieldRGB("#B7A075")
+            post = FieldRGB("#8A6A44"); sign = FieldRGB("#E8D2AC"); signEdge = FieldRGB("#87633E"); signInk = FieldRGB("#382B1D")
+            soilL = FieldRGB("#CDB98F"); soilR = FieldRGB("#B7A075")
             crops = ["#B98E34", "#8270A8", "#B9673A", "#4F7F80", "#557A41", "#A99B2E", "#6F8F4C", "#BB7C82", "#6B8DAF", "#8E8C47"].map { FieldRGB($0) }
         }
     }
 }
 
 enum FieldPalette {
-    static let paper = Color(light: "#F5F1E6", dark: "#1E211C")
-    static let panel = Color(light: "#FBF8F0", dark: "#262A23")
+    static let paper = Color(light: "#F5F1E6", dark: "#22261F")
+    static let panel = Color(light: "#FBF8F0", dark: "#2B3027")
     static let ink = Color(light: "#2B2A24", dark: "#ECE6D6", contrastLight: "#161511", contrastDark: "#FBF7EC")
     static let muted = Color(light: "#6B675B", dark: "#A9A392", contrastLight: "#454239", contrastDark: "#CFC9B8")
     static let rule = Color(light: "#D9D2C0", dark: "#3E4337", contrastLight: "#9F9680", contrastDark: "#6A725E")
@@ -215,12 +217,14 @@ enum FieldTreemap {
 
 // MARK: - App icon
 
-/// Themes with their own artwork (Field and Cosmos) ship it as a bundled icns, so every size, including the
-/// simplified 16 and 32 pt cuts, reaches the Dock and Finder. Liquid Glass uses the bundle's AppIcon.
+/// Field and Cosmos keep their bundled artwork for card branding. The system application icon always uses the
+/// bundle's compiled AppIcon, regardless of theme.
 @MainActor
 enum ThemeAppIcon {
     private static let fieldImage = bundledIcon("FieldAppIcon")
     private static let cosmosImage = bundledIcon("CosmosAppIcon")
+    private static let legacyIconCleanupKey = "legacyThemeAppIconCleanupComplete"
+    private static var cleanupAttempted = false
 
     private static func bundledIcon(_ name: String) -> NSImage? {
         Bundle.main.url(forResource: name, withExtension: "icns").flatMap(NSImage.init(contentsOf:))
@@ -234,25 +238,57 @@ enum ThemeAppIcon {
         }
     }
 
-    /// Last icon written to the bundle: nil means not yet written this launch.
-    private static var bundleIconKey: String?
-
-    /// The Dock icon follows the theme. Stage Manager, Finder and Launchpad read the bundle's icon rather than
-    /// `applicationIconImage`, so the same image is also set as the bundle's custom icon and cleared for other themes.
-    static func apply(_ theme: AppTheme) {
-        guard let app = NSApp else { return }
-        let image = image(for: theme)
-        app.applicationIconImage = image
-        setBundleIcon(image, key: image == nil ? "default" : theme.rawValue)
+    /// Removes only a recognized legacy Field or Cosmos icon. Other custom icons belong to the user and stay intact.
+    static func apply(_: AppTheme, defaults: UserDefaults = .standard) {
+        guard !cleanupAttempted, !defaults.bool(forKey: legacyIconCleanupKey) else { return }
+        cleanupAttempted = true
+        let path = Bundle.main.bundlePath
+        guard let isLegacyThemeIcon = legacyThemeIconStatus(at: path) else { return }
+        if !isLegacyThemeIcon {
+            defaults.set(true, forKey: legacyIconCleanupKey)
+            return
+        }
+        let removed = NSWorkspace.shared.setIcon(nil, forFile: path, options: [])
+        if removed {
+            defaults.set(true, forKey: legacyIconCleanupKey)
+        }
     }
 
-    /// A custom icon is Finder metadata on the bundle; it fails `codesign --strict` but not Gatekeeper or launch checks.
-    /// Writing fails quietly when the bundle isn't writable, which leaves the shipped icon in place.
-    private static func setBundleIcon(_ image: NSImage?, key: String) {
-        guard key != bundleIconKey else { return }
-        bundleIconKey = key
-        let path = Bundle.main.bundlePath
-        if image == nil, !FileManager.default.fileExists(atPath: path + "/Icon\r") { return }
-        NSWorkspace.shared.setIcon(image, forFile: path, options: [])
+    private static func legacyThemeIconStatus(at path: String) -> Bool? {
+        let currentData = normalizedIconData(NSWorkspace.shared.icon(forFile: path))
+        guard let currentData else { return nil }
+        for image in [fieldImage, cosmosImage] {
+            guard let legacyData = normalizedIconData(image) else { return nil }
+            if legacyData == currentData { return true }
+        }
+        return false
+    }
+
+    private static func normalizedIconData(_ image: NSImage?) -> Data? {
+        guard let image, let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 128,
+            pixelsHigh: 128,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else { return nil }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        guard let context = NSGraphicsContext(bitmapImageRep: representation) else { return nil }
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        image.draw(
+            in: NSRect(x: 0, y: 0, width: 128, height: 128),
+            from: .zero,
+            operation: .sourceOver,
+            fraction: 1
+        )
+        return representation.representation(using: .png, properties: [:])
     }
 }

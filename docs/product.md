@@ -27,8 +27,11 @@ Developers and other tools can use the `token-taken` CLI for the same totals and
 ### P2: The app is beautiful and lightweight
 
 - Under `liquid-glass`, the main window and menu bar extra use native Liquid Glass through SwiftUI or AppKit APIs. Web or CSS imitations do not satisfy this criterion.
-- The v1 `liquid-glass` theme passes the owner's design review at supported window sizes. Primary actions are keyboard accessible and meaningful controls have accessibility labels.
+- The v1 `liquid-glass` theme passes the owner's design review at supported window sizes. The review uses real screenshots of the built app and follows `docs/contracts/themes.md`, including both languages, supported appearances, representative data states, and accessibility variants. Primary actions are keyboard accessible and meaningful controls have accessibility labels.
 - The main window supports day, week (Monday start), month, year, and all-time views, per-model and per-source breakdowns, and per-device breakdowns when sync is on. The menu bar extra shows today's token total and a quick glance.
+- The shared tray keeps the period control, short total, cost or unpriced notice, and Devices in a compact hierarchy. Exact totals and pricing caveats appear on demand through `DataHoverPopover`. The shared single-column breakdown summarizes hidden rows and provides **Show all** / **Show less** controls.
+- `DataHoverCard` and `DataHoverPopover` provide the common detail surfaces. The default dashboard presents one complete-period summary and one active hero visual. Lens uses a flat stacked time chart, a bare complete-period composition strip, and hover or pinned slice details; Confluence presents stream details on hover or keyboard focus. Neither inspection surface filters the complete-period sidebar, composition, or breakdown ([ADR-0016](decisions/0016-liquid-information-hierarchy.md)).
+- Lens acceptance covers a resting peak without a slice overlay, transient hover and pinned ranges, keyboard and VoiceOver operation, release on period change, clamping to non-future buckets, Day + Models without hourly model detail or pricing, and missing hourly coverage distinct from measured zero. Reduce Motion and Reduce Transparency preserve these states and controls.
 - English and Simplified Chinese interfaces ship through a String Catalog.
 - Idle CPU stays near 0% when collection and sync are inactive (target, to confirm by measurement).
 - Memory use after launch with cached data stays at or below 150 MB (target, to confirm by measurement).
@@ -63,7 +66,7 @@ token-taken models --period month --json
 
 ### Collection and statistics
 
-- Reuse the pinned `tokscale` 4.21.0 usage engine through a thin adapter, combined with native Swift collectors where required by [ADR-0003](decisions/0003-usage-engine.md) and [ADR-0005](decisions/0005-collection-granularity.md).
+- Reuse the pinned `tokscale` 4.23.1 usage engine through a thin adapter, combined with native Swift collectors where required by [ADR-0003](decisions/0003-usage-engine.md) and [ADR-0005](decisions/0005-collection-granularity.md).
 - Target agents: Claude Code, Codex, Zcode, OpenCode, Kimi Code, Gemini CLI, pi, oh-my-pi, Factory Droid, Grok CLI, Devin (CLI and desktop), Antigravity (CLI and IDE extension), DeepSeek Harness, and fx; Cursor (account credentials, network access, and cross-device deduplication) and Qoder (credits only, no token counts) are deferred ([ADR-0003](decisions/0003-usage-engine.md), [ADR-0005](decisions/0005-collection-granularity.md)).
 - All v1 sources are device-local and parsed from logs or databases on the current Mac. Account-scoped sources fetched from a provider account and deduplicated across Macs are deferred.
 - Report uncached input as `input`, plus `cacheRead`, `cacheWrite`, `output`, and `reasoning` categories, with `uncategorized` for known totals whose category split is unavailable ([ADR-0005](decisions/0005-collection-granularity.md)).
@@ -97,7 +100,6 @@ token-taken models --period month --json
 
 These items follow v1 and are not release commitments:
 
-- A Cosmos Dock icon variant.
 - Styled and customizable export cards in v1.x.
 - Local folder, S3, and WebDAV sync behind the sync backend interface.
 

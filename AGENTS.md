@@ -33,5 +33,5 @@
 - `TokenTaken` contains the main window and menu bar extra. `TokenTakenCLI` builds the `token-taken` tool. Both depend on `TokenTakenKit`; the CLI never depends on app UI.
 - `ios/` holds the TokenTakenMobile iOS app, generated from `ios/project.yml`. It is display-only, reads the mobile report, and shares only `Shared/` with `TokenTakenKit`.
 - Use native SwiftUI Liquid Glass APIs on macOS 26 and later. Do not substitute web or CSS imitations.
-- Pin the `tokscale` 4.21.0 usage engine in `engine/engine.lock.json`, keep its adapter thin, and use native Swift collectors where required by `docs/decisions/0003-usage-engine.md` and `docs/decisions/0005-collection-granularity.md`; do not claim accuracy or coverage beyond what reconciliation has verified.
+- Pin the `tokscale` 4.23.1 usage engine in `engine/engine.lock.json`, keep its adapter thin, and use native Swift collectors where required by `docs/decisions/0003-usage-engine.md` and `docs/decisions/0005-collection-granularity.md`; do not claim accuracy or coverage beyond what reconciliation has verified.
 - Read agent logs read-only. Sync is opt-in, aggregate-only, and contains no prompts, responses, paths, project names, credentials, or cost. Costs are estimates from a versioned price table.

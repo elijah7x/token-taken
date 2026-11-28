@@ -469,6 +469,65 @@ final class PiCollectorTests: XCTestCase {
         XCTAssertEqual(batch.hourly[0].counts, TokenCounts(input: 12, output: 3))
         XCTAssertEqual(batch.hourly[0].eventCount, 1)
     }
+
+    func testCacheInclusiveInputExclusiveReasoningAndLargeLineTotalTokens() async throws {
+        let root = directory.appendingPathComponent("pi-inclusive-normalization", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // > 64 KB line proving LargeLineProjector preserves totalTokens for cache-inclusive input
+        // and exclusive reasoning (> rawOutput).
+        let largeEntry: [String: Any] = [
+            "type": "message",
+            "id": "pi-large-excl-r",
+            "timestamp": "2026-11-10T10:00:00Z",
+            "message": [
+                "role": "assistant",
+                "model": "kimi-k2",
+                "content": String(repeating: "z", count: 80 * 1_024),
+                "usage": [
+                    "input": 500,
+                    "cacheRead": 200,
+                    "cacheWrite": 50,
+                    "output": 40,
+                    "reasoning": 120,
+                    "totalTokens": 710,
+                ],
+            ],
+        ]
+        let largeLine = try JSONSerialization.data(withJSONObject: largeEntry)
+        XCTAssertGreaterThan(largeLine.count, 64 << 10)
+
+        let smallLines = [
+            // input includes cacheRead only (totalTokens == input + cacheWrite + output).
+            #"{"type":"message","id":"pi-cr","timestamp":"2026-11-10T08:00:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":500,"cacheRead":200,"cacheWrite":50,"output":40,"reasoning":10,"totalTokens":590}}}"#,
+            // input includes both cacheRead and cacheWrite (total_tokens == input + output).
+            #"{"type":"message","id":"pi-crcw","timestamp":"2026-11-10T09:00:00Z","message":{"role":"assistant","model":"gpt-5-mini","usage":{"input":500,"cacheRead":200,"cacheWrite":50,"output":40,"reasoning":10,"total_tokens":540}}}"#,
+            // Negative totalTokens is malformed and skipped.
+            #"{"type":"message","id":"pi-neg-total","timestamp":"2026-11-10T10:05:00Z","message":{"role":"assistant","model":"claude-sonnet-4-5","usage":{"input":10,"output":5,"totalTokens":-1}}}"#,
+        ].joined(separator: "\n") + "\n"
+
+        var payload = Data(smallLines.utf8)
+        payload.append(largeLine)
+        payload.append(0x0A)
+        try payload.write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 1)
+        XCTAssertEqual(
+            try record(batch, day: "2026-11-10", modelID: "claude-sonnet-4-5").counts,
+            TokenCounts(input: 300, cacheRead: 200, cacheWrite: 50, output: 30, reasoning: 10)
+        )
+        XCTAssertEqual(
+            try record(batch, day: "2026-11-10", modelID: "gpt-5-mini").counts,
+            TokenCounts(input: 250, cacheRead: 200, cacheWrite: 50, output: 30, reasoning: 10)
+        )
+        XCTAssertEqual(
+            try record(batch, day: "2026-11-10", modelID: "kimi-k2").counts,
+            TokenCounts(input: 300, cacheRead: 200, cacheWrite: 50, output: 40, reasoning: 120)
+        )
+        XCTAssertEqual(batch.hourly.count, 3)
+        XCTAssertTrue(batch.hourly.allSatisfy(\.reasoningKnown))
+    }
 }
 
 // MARK: - Incremental collection

@@ -7,9 +7,9 @@ Token Taken bundles the pinned `tokscale` CLI binary and a versioned price snaps
 ### tokscale
 
 - **Name:** tokscale (`@tokscale/cli-darwin-arm64`)
-- **Version:** `4.21.0` (pinned with SHA-256 checksums in `engine/engine.lock.json`)
+- **Version:** `4.23.1` (pinned with SHA-256 checksums in `engine/engine.lock.json`)
 - **Upstream URL:** <https://github.com/junhoyeo/tokscale>
-- **Bundled component:** The unmodified `bin/tokscale` from `@tokscale/cli-darwin-arm64` `4.21.0`, packaged at `Contents/Helpers/tokscale`
+- **Bundled component:** The unmodified `bin/tokscale` from `@tokscale/cli-darwin-arm64` `4.23.1`, packaged at `Contents/Helpers/tokscale`
 - **Local modifications:** None to the binary
 - **License:** MIT
 
@@ -44,11 +44,90 @@ SOFTWARE.
 - **Upstream source:** Model token rates reported by [tokscale](https://github.com/junhoyeo/tokscale) `4.21.0` on 2026-11-10 (MIT), which resolves per-model pricing from [LiteLLM](https://github.com/BerriAI/litellm), [models.dev](https://models.dev), [OpenRouter](https://openrouter.ai), and Cursor pricing tables
 - **First-party rates:** Claude Sonnet 4.5 (`claude-sonnet-4-5`, aliased from `claude-4-5-sonnet`) uses Anthropic's published tariff of $3.00 input, $0.30 cache read, $3.75 cache write, and $15.00 output per 1M tokens instead of the reseller row tokscale matched
 
+### Tivano family tool icons
+
+The asset sets below are copied byte-for-byte and without local modification from `Tivano/Resources/Assets.xcassets` in [Tivano](https://github.com/elijah7x/tivano) at commit [`a88da20c11e51129435aec2a5591a71bc67c816c`](https://github.com/elijah7x/tivano/commit/a88da20c11e51129435aec2a5591a71bc67c816c). Their asset-specific licenses and trademark boundaries come from Tivano's `THIRD_PARTY_NOTICES.md` at that commit and the upstream sources below. The files are unchanged after copying from Tivano; earlier view-box or canvas adjustments in Tivano's history are not represented as byte-identical upstream originals.
+
+| Token Taken asset set | Copied files | Known upstream and rights notes |
+| --- | --- | --- |
+| `TokenTaken/Assets.xcassets/provider-claude.imageset` | `Contents.json`, `claude.svg` | CC0 1.0 Universal; Claude path data from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/claude.svg), serialized by Tivano with its own view box |
+| `TokenTaken/Assets.xcassets/provider-codex.imageset` | `Contents.json`, `codex.svg` | CC0 1.0 Universal; OpenAI path data from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/openai.svg), used for Codex and serialized by Tivano with its own view box |
+| `TokenTaken/Assets.xcassets/provider-zcode.imageset` | `Contents.json`, `zcode.svg` | Z.ai / ZCode product mark, serialized by Tivano; no earlier upstream or separate asset license is documented |
+| `TokenTaken/Assets.xcassets/provider-pi.imageset` | `Contents.json`, `pi.svg` | Inline logo from the official Pi repository's [OAuth page](https://github.com/badlogic/pi-mono/blob/main/packages/ai/src/utils/oauth-page.ts), serialized by Tivano with its own view box |
+| `TokenTaken/Assets.xcassets/provider-kimi.imageset` | `Contents.json`, `kimi-light.svg`, `kimi-dark.svg` | Official “K Only” [light](https://moonshotai.github.io/Branding-Guide/scenarios/04-k-only/k-only-light.svg) and [dark](https://moonshotai.github.io/Branding-Guide/scenarios/04-k-only/k-only-dark.svg) SVGs from the [KIMI Brand Guidelines](https://moonshotai.github.io/Branding-Guide/), retaining the transparent background and blue accent |
+| `TokenTaken/Assets.xcassets/provider-devin.imageset` | `Contents.json`, `devin.svg` | CC0 1.0 Universal; Devin path data from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/devin.svg), serialized by Tivano with its own view box |
+| `TokenTaken/Assets.xcassets/provider-antigravity.imageset` | `Contents.json`, `antigravity.png` | Google Antigravity raster product mark copied from Tivano; its earlier upstream is not documented. The brand owner's [press assets](https://antigravity.google/press/) are a reference, not a claimed reuse license for this file |
+| `TokenTaken/Assets.xcassets/provider-cursor.imageset` | `Contents.json`, `cursor.svg` | CC0 1.0 Universal; Cursor path data from [Simple Icons](https://github.com/simple-icons/simple-icons/blob/develop/icons/cursor.svg), serialized by Tivano with its own view box |
+| `TokenTaken/Assets.xcassets/provider-minimaxCode.imageset` | `Contents.json`, `mcode.png` | Official MiniMax Code website assets: the inline mascot SVG and [colour raster](https://agent.minimax.io/assets/logo/apple-touch_v2.png), clipped and combined by Tivano as recorded in its [logo provenance note](https://github.com/elijah7x/tivano/blob/a88da20c11e51129435aec2a5591a71bc67c816c/docs/providers/minimax-code-logo.md). **Website-asset reuse permission is unconfirmed; no license or authorization is claimed.** |
+| `TokenTaken/Assets.xcassets/provider-omp.imageset` | `Contents.json`, `omp.svg` | MIT; Tivano's standalone SVG serialization of the official oh-my-pi [`OmpMark.tsx`](https://github.com/can1357/oh-my-pi/blob/6a5198ce8c3f960b450fa16c58abc7b19adddf6e/packages/collab-web/src/components/shell/OmpMark.tsx), retaining its glyph and gradient |
+| `TokenTaken/Assets.xcassets/provider-deepseek.imageset` | `Contents.json`, `deepseek.svg` | CC0 1.0 Universal; DeepSeek path data from [Simple Icons](https://github.com/simple-icons/simple-icons) |
+| `TokenTaken/Assets.xcassets/provider-grok.imageset` | `Contents.json`, `grok.svg` | MIT; Grok vector from [SVGL `grok-dark.svg`](https://github.com/pheralb/svgl/blob/013418ba5e81212f21eab3c7055fb24938fe56b4/static/library/grok-dark.svg) at revision `013418ba5e81212f21eab3c7055fb24938fe56b4` |
+| `TokenTaken/Assets.xcassets/provider-opencode.imageset` | `Contents.json`, `opencode.svg` | MIT; official [OpenCode `opencode-logo-light.svg`](https://github.com/anomalyco/opencode/blob/fe114c41b52229ecc14e851469f192383a83e49f/packages/console/app/src/asset/lander/opencode-logo-light.svg) at revision `fe114c41b52229ecc14e851469f192383a83e49f` |
+
+The omp upstream revision is `6a5198ce8c3f960b450fa16c58abc7b19adddf6e`; its [MIT license](https://github.com/can1357/oh-my-pi/blob/6a5198ce8c3f960b450fa16c58abc7b19adddf6e/LICENSE) is reproduced below. Token Taken does not modify Tivano's serialization.
+
+```text
+MIT License
+
+Copyright (c) 2025 Mario Zechner
+Copyright (c) 2025-2026 Can Bölük
+Copyright (c) 2026 Stencil Labs, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The SVGL and OpenCode assets use the following MIT license. The respective copyright holders are Pablo Hdez and opencode; the full license text is preserved here for both assets.
+
+```text
+MIT License
+
+Copyright (c) 2022 Pablo Hdez
+Copyright (c) 2025 opencode
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The Simple Icons path data used by Claude, Codex (OpenAI), Devin, Cursor and DeepSeek is available under [CC0 1.0 Universal](https://creativecommons.org/publicdomain/zero/1.0/). The oh-my-pi, omp, DeepSeek, Grok, xAI, OpenCode, Claude, Anthropic, OpenAI, Codex, Z.ai, ZCode, Pi, Kimi, Moonshot AI, Devin, Cognition, Google Antigravity, Cursor, MiniMax and MiniMax Code names and marks remain the property of their respective owners and are used only to identify the agents Token Taken supports. These copyright licenses and brand-guideline references do not grant trademark rights, and Token Taken is not affiliated with or endorsed by any of those owners.
+
+This notice covers only the thirteen asset sets above. No Gemini, Factory, FX or Creation icon is included; those sources retain monogram fallbacks. MiniMax website-asset reuse permission remains unconfirmed, and no authorization is asserted. Where an earlier upstream is not documented, copying from Tivano is not represented as a separate grant of copyright, trademark rights or endorsement by the brand owner.
+
 ## Reference projects and ported rules
 
 | Project | Role in Token Taken | Repository license |
 | --- | --- | --- |
-| [tokscale](https://github.com/junhoyeo/tokscale) | Bundled `4.21.0` collection engine, pricing snapshot source, and JSON CLI reference | MIT |
+| [tokscale](https://github.com/junhoyeo/tokscale) | Bundled `4.23.1` collection engine, pricing snapshot source, and JSON CLI reference | MIT |
 | [TokenTracker](https://github.com/xiufengsun/TokenTracker) | Reference for Zcode, `pi`, and `oh-my-pi` deduplication and category-splitting rules reimplemented in Swift ([ADR-0003](docs/decisions/0003-usage-engine.md)) | MIT, except separately licensed assets noted below |
 | [Token Monitor](https://github.com/Javis603/token-monitor) | Reference for desktop integration, history, and atomic file-write patterns | MIT |
 | [Javis603/tokscale](https://github.com/Javis603/tokscale) | Tokscale fork studied during the ADR-0003 engine evaluation (not bundled) | MIT |
@@ -67,7 +146,7 @@ Before adding an engine or any other third-party component:
 
 React Bits assets from TokenTracker must not be copied. Other separately licensed material requires an explicit license review before use.
 
-## Rust crates compiled into tokscale 4.21.0
+## Rust crates compiled into tokscale 4.23.1
 
 > **Copyleft:** this tree includes `MPL-2.0` code: `option-ext` 0.2.0 (reached through `dirs` > `dirs-sys`), `colored` 2.2.0, `resvg` 0.43.0 and `usvg` 0.43.0. MPL-2.0 is file-level copyleft: the MPL-2.0 source files stay MPL-2.0, and the licence text is reproduced below. Token Taken does not modify any of them. Their exact Source Code Form at the pinned versions:
 >
@@ -78,7 +157,7 @@ React Bits assets from TokenTracker must not be copied. Other separately license
 >
 > On request, the maintainers of Token Taken will also provide a copy of each. No GPL, LGPL, EPL or CDDL crate is in the tree.
 
-The dependency set below is the macOS `aarch64-apple-darwin` build of the `tokscale` binary defined by `crates/tokscale-cli` in the `v4.21.0` tag (commit `b26c433d`), which is the release the bundled binaries in `engine/engine.lock.json` come from. `Cargo.lock` at `v4.21.0` is byte-identical to the lockfile at current upstream `HEAD` (`82613d2f`), so either revision identifies the same graph. Crates reachable only through `[dev-dependencies]`, or only for Windows, WebAssembly, Android, Linux, Redox or EFI targets, are excluded. Build-time dependencies (proc macros and build scripts) that Cargo.lock does not distinguish from ordinary ones are included rather than dropped, so this table over-includes rather than under-includes.
+The dependency set below covers the macOS `aarch64-apple-darwin` build of the `tokscale` binary defined by `crates/tokscale-cli` (pinned at `v4.23.1`, commit `b265e836c58f085f50a836525aa60b8d45bd8d57`, in `engine/engine.lock.json`). Crates reachable only through `[dev-dependencies]`, or only for Windows, WebAssembly, Android, Linux, Redox or EFI targets, are excluded. Build-time dependencies (proc macros and build scripts) that Cargo.lock does not distinguish from ordinary ones are included rather than dropped, so this table over-includes rather than under-includes.
 
 Crates are grouped by identical or equivalent licence expressions; a crate appearing under a disjunction is redistributed under whichever branch Token Taken relies on, and every branch's text is reproduced below. Feature-gated optional dependencies cannot be resolved without the enabled feature set, so a crate present in `Cargo.lock` but only reachable through an optional dependency that tokscale does not enable can appear here unnecessarily.
 

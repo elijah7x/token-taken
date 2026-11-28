@@ -124,6 +124,9 @@ public enum ICloudSync {
             guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
             return url
         }
+        if let supportOverride = environment["TOKEN_TAKEN_SUPPORT_DIR"], !supportOverride.isEmpty {
+            return nil
+        }
         let drive = fileManager.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
         var isDirectory: ObjCBool = false

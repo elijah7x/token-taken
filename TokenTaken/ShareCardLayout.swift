@@ -23,25 +23,46 @@ enum ShareCardMetrics {
     static let minimumScaledPointSize: CGFloat = 24
 
     static func visualSize(for aspect: ShareAspect) -> CGSize {
-        let canvas = aspect.canvasSize
+        let contentWidth = aspect.canvasSize.width - padding(for: aspect) * 2
         switch aspect {
-        case .square:
-            return CGSize(width: canvas.width, height: (canvas.height * 0.52).rounded())
         case .portrait:
-            return CGSize(width: canvas.width, height: (canvas.height * 0.64).rounded())
+            return CGSize(width: contentWidth, height: 571)
         case .landscape:
-            return CGSize(width: (canvas.width * 0.55).rounded(), height: canvas.height)
+            return CGSize(width: contentWidth, height: 480)
         }
-    }
-
-    static func landscapeVisualWidth(for canvasWidth: CGFloat) -> CGFloat {
-        (canvasWidth * 0.55).rounded()
     }
 
     static func padding(for aspect: ShareAspect) -> CGFloat {
         switch aspect {
-        case .square: 52
         case .portrait, .landscape: 64
+        }
+    }
+
+    static func visualTopPadding(for aspect: ShareAspect) -> CGFloat {
+        switch aspect {
+        case .portrait: 32
+        case .landscape: 24
+        }
+    }
+
+    static func footnoteTopPadding(for aspect: ShareAspect) -> CGFloat {
+        switch aspect {
+        case .portrait: 24
+        case .landscape: 16
+        }
+    }
+
+    static func evidenceTopPadding(for aspect: ShareAspect) -> CGFloat {
+        switch aspect {
+        case .portrait: 28
+        case .landscape: 18
+        }
+    }
+
+    static func footerMinimumPadding(for aspect: ShareAspect) -> CGFloat {
+        switch aspect {
+        case .portrait: 32
+        case .landscape: 20
         }
     }
 
@@ -57,48 +78,49 @@ struct ShareCardTypography {
     let headerPeriod: CGFloat
     let heroNumber: CGFloat
     let heroUnit: CGFloat
+    let rank: CGFloat
+    let rankCaption: CGFloat
     let cost: CGFloat
     let l2: CGFloat
     let l3Row: CGFloat
+    let top3Name: CGFloat
+    let top3Value: CGFloat
     let legend: CGFloat
     let inscription: CGFloat
     let logoSize: CGFloat
 
     init(aspect: ShareAspect) {
         switch aspect {
-        case .square:
-            headerBrand = 28
-            headerPeriod = 24
-            heroNumber = 104
-            heroUnit = 30
-            cost = 28
-            l2 = 26
-            l3Row = 26
-            legend = 24
-            inscription = 26
-            logoSize = 40
         case .landscape:
-            headerBrand = 32
+            headerBrand = 24
             headerPeriod = 26
-            heroNumber = 132
+            heroNumber = 128
             heroUnit = 34
-            cost = 32
-            l2 = 28
+            rank = 56
+            rankCaption = 24
+            cost = 24
+            l2 = 24
             l3Row = 28
+            top3Name = 24
+            top3Value = 34
             legend = 24
             inscription = 30
-            logoSize = 44
+            logoSize = 32
         case .portrait:
-            headerBrand = 32
+            headerBrand = 24
             headerPeriod = 28
             heroNumber = 144
             heroUnit = 36
-            cost = 34
-            l2 = 28
+            rank = 64
+            rankCaption = 24
+            cost = 24
+            l2 = 26
             l3Row = 28
+            top3Name = 26
+            top3Value = 36
             legend = 24
             inscription = 32
-            logoSize = 44
+            logoSize = 32
         }
     }
 }
@@ -186,8 +208,6 @@ struct ShareCardLayout<Visual: View>: View {
     private var canvasSize: CGSize { aspect.canvasSize }
     private var estimatedVisualSize: CGSize { ShareCardMetrics.visualSize(for: aspect) }
     private var pad: CGFloat { ShareCardMetrics.padding(for: aspect) }
-    private var headerToHeroGap: CGFloat { (type.l2 * 0.6).rounded() }
-    private var levelGap: CGFloat { (type.l2 * 0.9).rounded() }
 
     private var detailDimension: BreakdownDimension {
         data.detailDimension(for: dimension)
@@ -198,7 +218,7 @@ struct ShareCardLayout<Visual: View>: View {
     }
 
     private var formattedFieldQuote: String? {
-        guard ThemeKind.current == .field else { return nil }
+        guard skin.theme == .field else { return nil }
         let quote = inscription.trimmingCharacters(in: .whitespacesAndNewlines)
         let signer = signature.trimmingCharacters(in: .whitespacesAndNewlines)
         switch (quote.isEmpty, signer.isEmpty) {
@@ -209,25 +229,59 @@ struct ShareCardLayout<Visual: View>: View {
         }
     }
 
+    private var resolvedFootnote: String? {
+        if let custom = formattedFieldQuote {
+            return custom
+        }
+        guard !dataUnavailable else { return nil }
+        return ShareInscriptions.automaticFootnote(
+            period: data.summary.period,
+            start: data.summary.start,
+            rankedItems: data.cosmosSceneSummary.bySource,
+            locale: locale
+        )
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             cardBackdrop
 
-            if aspect == .landscape {
-                let visualWidth = ShareCardMetrics.landscapeVisualWidth(for: canvasSize.width)
-                let infoWidth = canvasSize.width - visualWidth
-                HStack(spacing: 0) {
-                    visualSlot
-                        .frame(width: visualWidth, height: canvasSize.height)
-                    landscapeInfoPanel(width: infoWidth)
+            VStack(alignment: .leading, spacing: 0) {
+                primarySection
+
+                if aspect == .portrait {
+                    Spacer(minLength: ShareCardMetrics.visualTopPadding(for: aspect))
                 }
-            } else {
-                VStack(spacing: 0) {
-                    visualSlot
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    stackedInfoPanel
+
+                visualSlot
+                    .padding(.top, aspect == .landscape ? ShareCardMetrics.visualTopPadding(for: aspect) : 0)
+
+                if let footnote = resolvedFootnote {
+                    quoteLine(footnote)
+                        .padding(.top, ShareCardMetrics.footnoteTopPadding(for: aspect))
+                }
+
+                if aspect == .landscape {
+                    Spacer(minLength: ShareCardMetrics.footerMinimumPadding(for: aspect))
+                    HStack(alignment: .bottom, spacing: 24) {
+                        if detail != .none {
+                            detailSection
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        Spacer(minLength: 24)
+                        brandMark
+                    }
+                    .padding(.top, detail == .none ? 0 : ShareCardMetrics.evidenceTopPadding(for: aspect))
+                } else {
+                    if detail != .none {
+                        Spacer(minLength: ShareCardMetrics.evidenceTopPadding(for: aspect))
+                        detailSection
+                    }
+                    Spacer(minLength: ShareCardMetrics.footerMinimumPadding(for: aspect))
+                    brandMark
                 }
             }
+            .padding(pad)
         }
         .frame(width: canvasSize.width, height: canvasSize.height)
     }
@@ -247,121 +301,48 @@ struct ShareCardLayout<Visual: View>: View {
         }
     }
 
-    @ViewBuilder
     private var visualSlot: some View {
-        if skin.fullBleedVisual {
-            skin.visual()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .clipped()
-        } else {
-            skin.visual()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.leading, pad)
-                .padding(.trailing, aspect == .landscape ? 0 : pad)
-                .padding(.top, pad)
-                .padding(.bottom, aspect == .landscape ? pad : 0)
-        }
+        skin.visual()
+            .frame(width: estimatedVisualSize.width, height: estimatedVisualSize.height)
+            .clipped()
     }
 
-    private var infoContent: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
+    // MARK: - Primary narrative
 
-            heroSection
-                .padding(.top, headerToHeroGap)
+    private var primarySection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            periodLabel
+
+            HStack(alignment: .center, spacing: 32) {
+                heroTotal
+
+                if rank != nil {
+                    Spacer(minLength: 32)
+                    rankSection
+                }
+            }
+            .padding(.top, 8)
 
             contextSection
-                .padding(.top, levelGap)
+                .padding(.top, 10)
 
-            if let quote = formattedFieldQuote {
-                quoteLine(quote)
-                    .padding(.top, levelGap)
-            }
-
-            if detail != .none {
-                Rectangle()
-                    .fill(skin.rule)
-                    .frame(height: 1)
-                    .padding(.top, levelGap)
-
-                detailSection
-                    .padding(.top, levelGap)
+            if showCost {
+                costLine
+                    .padding(.top, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var stackedInfoPanel: some View {
-        let topPad: CGFloat = if skin.fullBleedVisual {
-            pad
-        } else {
-            aspect == .square ? 36 : 44
-        }
-
-        return infoContent
-            .padding(.top, topPad)
-            .padding(.bottom, pad)
-            .padding(.horizontal, pad)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(skin.fullBleedVisual ? skin.panelColor : Color.clear)
-            .overlay(alignment: .top) {
-                if skin.fullBleedVisual {
-                    Rectangle()
-                        .fill(skin.rule)
-                        .frame(height: 1)
-                }
-            }
-    }
-
-    private func landscapeInfoPanel(width: CGFloat) -> some View {
-        let leadingPad: CGFloat = skin.fullBleedVisual ? pad : 52
-
-        return VStack(alignment: .leading, spacing: 0) {
-            Spacer(minLength: 0)
-            infoContent
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, pad)
-        .padding(.leading, leadingPad)
-        .padding(.trailing, pad)
-        .frame(width: width, height: canvasSize.height, alignment: .leading)
-        .background(skin.fullBleedVisual ? skin.panelColor : Color.clear)
-        .overlay(alignment: .leading) {
-            if skin.fullBleedVisual {
-                Rectangle()
-                    .fill(skin.rule)
-                    .frame(width: 1)
-            }
-        }
-    }
-
-    // MARK: - Header
-
-    @ViewBuilder
-    private var header: some View {
-        if aspect == .landscape {
-            VStack(alignment: .leading, spacing: 8) {
-                brandMark
-                periodLabel
-            }
-        } else {
-            HStack(alignment: .center, spacing: 16) {
-                brandMark
-                Spacer(minLength: 16)
-                periodLabel
-            }
-        }
-    }
-
     private var brandMark: some View {
-        HStack(alignment: .center, spacing: aspect == .square ? 10 : 12) {
+        HStack(alignment: .center, spacing: 12) {
             ShareBrandLogo(theme: skin.theme, size: type.logoSize)
                 .accessibilityHidden(true)
 
             Text(verbatim: "Token Taken")
-                .font(ThemeFont.make(type.headerBrand, weight: .semibold))
+                .font(ThemeFont.make(type.headerBrand, weight: .medium))
                 .tracking(skin.theme == .cosmos ? 0 : -0.3)
-                .foregroundStyle(skin.ink1)
+                .foregroundStyle(skin.ink3)
                 .lineLimit(1)
                 .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.headerBrand, preferred: 0.80))
         }
@@ -376,37 +357,57 @@ struct ShareCardLayout<Visual: View>: View {
             .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.headerPeriod, preferred: 0.85))
     }
 
-    // MARK: - L1 Hero
+    private var heroTotal: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(verbatim: TokenFormat.short(data.counts.total))
+                .font(ThemeFont.make(type.heroNumber, weight: .bold, numeric: true))
+                .tracking(skin.theme == .cosmos ? 0 : -3.5)
+                .foregroundStyle(skin.ink1)
+                .lineLimit(1)
+                .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.heroNumber, preferred: 0.60))
 
-    private var heroSection: some View {
-        VStack(alignment: .leading, spacing: aspect == .square ? 6 : 10) {
-            HStack(alignment: .firstTextBaseline, spacing: aspect == .square ? 12 : 16) {
-                Text(verbatim: TokenFormat.short(data.counts.total))
-                    .font(ThemeFont.make(type.heroNumber, weight: .bold, numeric: true))
-                    .tracking(skin.theme == .cosmos ? 0 : (aspect == .square ? -2.5 : -3.5))
-                    .foregroundStyle(skin.ink1)
+            Text("Token")
+                .font(ThemeFont.make(type.heroUnit, weight: .medium))
+                .foregroundStyle(skin.ink2)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var rankSection: some View {
+        if let rank {
+            VStack(alignment: .trailing, spacing: 6) {
+                Text("Public usage reference")
+                    .font(ThemeFont.make(type.rankCaption, weight: .regular))
+                    .foregroundStyle(skin.ink3)
                     .lineLimit(1)
-                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.heroNumber, preferred: 0.60))
+                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.rankCaption, preferred: 0.85))
 
-                Text("Token")
-                    .font(ThemeFont.make(type.heroUnit, weight: .medium))
-                    .foregroundStyle(skin.ink2)
+                Text("About top \(UsageRank.formatted(rank))")
+                    .font(ThemeFont.make(type.rank, weight: .semibold, numeric: true))
+                    .monospacedDigit()
+                    .foregroundStyle(skin.accent)
                     .lineLimit(1)
-                    .fixedSize()
-            }
+                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.rank, preferred: 0.75))
 
-            if showCost {
-                costLine
+                Text("Last 30 days of tokens · estimate")
+                    .font(ThemeFont.make(type.rankCaption, weight: .regular))
+                    .foregroundStyle(skin.ink3)
+                    .lineLimit(1)
+                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.rankCaption, preferred: 0.85))
             }
         }
     }
+
+    // MARK: - Secondary metadata
 
     @ViewBuilder
     private var costLine: some View {
         if data.unpricedTokens > 0, data.unpricedTokens >= data.counts.total {
             Text("No prices for these models")
-                .font(ThemeFont.make(type.cost, weight: .medium))
-                .foregroundStyle(skin.ink2)
+                .font(ThemeFont.make(type.cost, weight: .regular))
+                .foregroundStyle(skin.ink3)
                 .lineLimit(1)
                 .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.cost, preferred: 0.80))
         } else {
@@ -418,12 +419,12 @@ struct ShareCardLayout<Visual: View>: View {
 
     private var costSummaryText: Text {
         let amount = Text(verbatim: TokenFormat.usd(data.estimatedUSD))
-            .font(ThemeFont.make(type.cost, weight: .semibold, numeric: true))
-            .foregroundStyle(skin.accent)
+            .font(ThemeFont.make(type.cost, weight: .medium, numeric: true))
+            .foregroundStyle(skin.ink2)
         let space = Text(verbatim: " ")
         let disclaimer = Text("estimate, not a bill")
             .font(ThemeFont.make(type.cost, weight: .regular))
-            .foregroundStyle(skin.ink2)
+            .foregroundStyle(skin.ink3)
         if data.unpricedTokens > 0 {
             let dot = Text(verbatim: " · ")
                 .font(ThemeFont.make(type.cost, weight: .regular))
@@ -436,10 +437,8 @@ struct ShareCardLayout<Visual: View>: View {
         return amount + space + disclaimer
     }
 
-    // MARK: - L2 Context
-
     private var contextSection: some View {
-        VStack(alignment: .leading, spacing: aspect == .square ? 6 : 8) {
+        VStack(alignment: .leading, spacing: 6) {
             contextLine
 
             if let peakText {
@@ -450,16 +449,6 @@ struct ShareCardLayout<Visual: View>: View {
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
-            if let rank {
-                Text("Last 30 days · about top \(UsageRank.formatted(rank)) (estimate)")
-                    .font(ThemeFont.make(type.l2, weight: .regular))
-                    .monospacedDigit()
-                    .foregroundStyle(skin.ink3)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l2, preferred: 0.80))
-            }
         }
     }
 
@@ -467,13 +456,14 @@ struct ShareCardLayout<Visual: View>: View {
     private var contextLine: some View {
         switch data.kind {
         case .overall:
-            Text(verbatim: data.overallContextText(locale: locale))
-                .font(ThemeFont.make(type.l2, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(skin.ink2)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l2, preferred: 0.80))
+            if dataUnavailable || data.counts.total <= 0 {
+                Text(dataUnavailable ? "Breakdown unavailable" : "No usage in this period")
+                    .font(ThemeFont.make(type.l2, weight: .medium))
+                    .foregroundStyle(skin.ink2)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l2, preferred: 0.80))
+            }
 
         case .source(_, let name):
             scopedContextLine(name: name, isModel: false)
@@ -502,7 +492,7 @@ struct ShareCardLayout<Visual: View>: View {
         }
     }
 
-    // MARK: - Field Quote Line
+    // MARK: - Visual footnote
 
     private func quoteLine(_ text: String) -> some View {
         HStack(alignment: .top, spacing: 14) {
@@ -515,13 +505,15 @@ struct ShareCardLayout<Visual: View>: View {
             Text(verbatim: text)
                 .font(ThemeFont.make(type.inscription, weight: .regular))
                 .foregroundStyle(skin.ink1)
-                .lineLimit(3)
+                .lineLimit(aspect == .landscape ? 2 : 3)
+                .truncationMode(.tail)
+                .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.inscription, preferred: 0.80))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    // MARK: - L3 Detail
+    // MARK: - Supporting evidence
 
     @ViewBuilder
     private var detailSection: some View {
@@ -552,39 +544,54 @@ struct ShareCardLayout<Visual: View>: View {
                 ? Palette.modelColors(for: data.summary.byModel.map(\.id) + items.map(\.id))
                 : [:]
 
-            VStack(alignment: .leading, spacing: aspect == .square ? 12 : 16) {
+            HStack(alignment: .top, spacing: aspect == .landscape ? 32 : 28) {
                 ForEach(items) { item in
-                    let swatchColor: Color = swatchColors[item.id] ?? (detailDimension == .sources
-                        ? Palette.color(forSource: item.id)
-                        : (modelColorMap[item.id] ?? Palette.color(for: .output)))
-
-                    HStack(alignment: .firstTextBaseline, spacing: 14) {
-                        if skin.showsSeriesSwatches {
-                            Circle()
-                                .fill(swatchColor)
-                                .frame(width: 12, height: 12)
-                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + type.l3Row * 0.24 }
-                                .accessibilityHidden(true)
-                        }
-
-                        Text(verbatim: item.name)
-                            .font(ThemeFont.make(type.l3Row, weight: .medium, numeric: detailDimension == .models && skin.theme == .cosmos))
-                            .foregroundStyle(skin.ink1)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l3Row, preferred: 0.85))
-
-                        Spacer(minLength: 16)
-
-                        Text(verbatim: "\(Share.percent(item.counts.total, of: denominator, locale: locale)) · \(TokenFormat.short(item.counts.total))")
-                            .font(ThemeFont.make(type.l3Row, weight: .regular, numeric: true))
-                            .foregroundStyle(skin.ink2)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                    }
+                    top3Row(
+                        item: item,
+                        denominator: denominator,
+                        color: evidenceColor(for: item, modelColorMap: modelColorMap)
+                    )
                 }
             }
         }
+    }
+
+    private func evidenceColor(for item: Breakdown, modelColorMap: [String: Color]) -> Color {
+        if let color = swatchColors[item.id] {
+            return color
+        }
+        if detailDimension == .sources {
+            return Palette.color(forSource: item.id)
+        }
+        return modelColorMap[item.id] ?? Palette.color(for: .output)
+    }
+
+    private func top3Row(item: Breakdown, denominator: Int64, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 12, height: 12)
+                    .accessibilityHidden(true)
+
+                Text(verbatim: item.name)
+                    .font(ThemeFont.make(type.top3Name, weight: .medium, numeric: detailDimension == .models && skin.theme == .cosmos))
+                    .foregroundStyle(skin.ink2)
+                    .lineLimit(1)
+                    .truncationMode(detailDimension == .models ? .middle : .tail)
+                    .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.top3Name, preferred: 0.85))
+                    .accessibilityLabel(Text(verbatim: item.name))
+            }
+
+            Text(verbatim: Share.percent(item.counts.total, of: denominator, locale: locale))
+                .font(ThemeFont.make(type.top3Value, weight: .semibold, numeric: true))
+                .monospacedDigit()
+                .foregroundStyle(skin.ink1)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.leading, 24)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private struct CompositionPart: Identifiable {
@@ -630,10 +637,10 @@ struct ShareCardLayout<Visual: View>: View {
         } else {
             let total = data.counts.total
             let divisor = max(Int64(1), total)
-            let barHeight: CGFloat = aspect == .square ? 14 : 16
+            let barHeight: CGFloat = 16
             let barRadius: CGFloat = skin.cornerRadius == 0 ? 0 : barHeight * 0.5
             let segmentRadius: CGFloat = skin.cornerRadius == 0 ? 0 : 3
-            let maxPerRow = aspect == .landscape ? 2 : 3
+            let maxPerRow = aspect == .landscape ? 6 : 3
             let rowCount = max(1, Int(ceil(Double(parts.count) / Double(maxPerRow))))
             let perRow = Int(ceil(Double(parts.count) / Double(rowCount)))
             let rows = stride(from: 0, to: parts.count, by: perRow).map { start in
@@ -641,7 +648,7 @@ struct ShareCardLayout<Visual: View>: View {
             }
 
             let barTrackColor = skin.barTrack
-            VStack(alignment: .leading, spacing: aspect == .square ? 16 : 18) {
+            VStack(alignment: .leading, spacing: 18) {
                 Canvas { context, size in
                     let fullRect = CGRect(origin: .zero, size: size)
                     let trackPath = Path(roundedRect: fullRect, cornerRadius: barRadius, style: .continuous)
@@ -671,7 +678,7 @@ struct ShareCardLayout<Visual: View>: View {
                 .frame(height: barHeight)
                 .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: aspect == .square ? 12 : 14) {
+                VStack(alignment: .leading, spacing: 14) {
                     ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                         HStack(spacing: aspect == .landscape ? 20 : 24) {
                             ForEach(row) { part in
@@ -717,17 +724,13 @@ struct ShareCardLayout<Visual: View>: View {
     }
 
     private var unavailablePanel: some View {
-        let shape = RoundedRectangle(cornerRadius: skin.cornerRadius, style: .continuous)
-        return Text("Breakdown unavailable")
-            .font(ThemeFont.make(type.l3Row, weight: .medium))
+        Text("Breakdown unavailable")
+            .font(ThemeFont.make(type.l3Row, weight: .regular))
             .foregroundStyle(skin.ink3)
-            .lineLimit(1)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
             .minimumScaleFactor(ShareCardMetrics.safeScaleFactor(for: type.l3Row, preferred: 0.85))
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, aspect == .square ? 22 : 28)
-            .padding(.horizontal, 20)
-            .background(shape.fill(skin.panelColor))
-            .overlay(shape.strokeBorder(skin.rule, lineWidth: 1))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

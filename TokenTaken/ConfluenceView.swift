@@ -148,10 +148,10 @@ struct ConfluenceView: View {
             : CGPoint(x: frame.minX - Self.tooltipWidth - 28, y: frame.minY)
     }
 
-    private static let tooltipWidth: CGFloat = 210
+    private static let tooltipWidth: CGFloat = 220
 
     private func tooltipOffset(for point: CGPoint, in size: CGSize) -> CGSize {
-        let width = Self.tooltipWidth, height: CGFloat = 66
+        let width = Self.tooltipWidth, height: CGFloat = 88
         let pad: CGFloat = 12
         let x = min(point.x + 14, size.width - width - pad)
         let y = point.y + 16 + height > size.height - pad ? point.y - height - 10 : point.y + 16
@@ -550,6 +550,8 @@ private struct ConfluenceStreamLabel: View {
     let increasedContrast: Bool
     var focused: FocusState<ConfluenceTarget?>.Binding
 
+    @Environment(\.locale) private var locale
+
     private var highlighted: Bool { activeTarget == stream.target }
     private var dimmed: Bool { activeTarget != nil && !highlighted }
 
@@ -570,7 +572,7 @@ private struct ConfluenceStreamLabel: View {
         .focused(focused, equals: stream.target)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(confluenceName(stream))
-        .accessibilityValue(Text("\(TokenFormat.spoken(stream.tokens)) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
+        .accessibilityValue(Text("\(stream.tokens.formatted(.number.locale(locale))) tokens, \(Share.percent(stream.tokens, of: total)) of total"))
     }
 
     private var nameFont: Font {
@@ -599,34 +601,11 @@ private struct ConfluenceStreamLabel: View {
                     .opacity(dimmed ? dimmedBadgeOpacity : 1)
             }
 
-            if stream.isCollapsedLabel {
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    confluenceName(stream)
-                        .font(nameFont)
-                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(verbatim: " · \(TokenFormat.short(stream.tokens))")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink2)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 1) {
-                    confluenceName(stream)
-                        .font(nameFont)
-                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Text(verbatim: "\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink2)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-            }
+            confluenceName(stream)
+                .font(nameFont)
+                .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
@@ -638,7 +617,7 @@ private struct ConfluenceStreamLabel: View {
                 .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink1)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Text(verbatim: "\(TokenFormat.short(stream.tokens)) · \(Share.percent(stream.tokens, of: total))")
+            Text(Share.percent(stream.tokens, of: total))
                 .font(.system(size: 11.5))
                 .foregroundStyle(dimmed ? Palette.ink3 : Palette.ink2)
                 .monospacedDigit()
@@ -668,28 +647,29 @@ private struct ConfluenceTooltip: View {
     let stream: ConfluenceLayout.Stream
     let total: Int64
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.locale) private var locale
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Circle().fill(stream.color).frame(width: 6, height: 6)
-                confluenceName(stream)
-                    .font(.system(size: 11, weight: .semibold))
+        DataHoverCard(width: 220) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Circle().fill(stream.color).frame(width: 6, height: 6)
+                    confluenceName(stream)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.ink1)
+                }
+                Text("\(TokenFormat.short(stream.tokens)) tokens")
+                    .fontWeight(.medium)
                     .foregroundStyle(Palette.ink1)
+                Text("\(Share.percent(stream.tokens, of: total)) of total")
+                    .foregroundStyle(Palette.ink2)
+                Text("\(stream.tokens.formatted(.number.grouping(.automatic).locale(locale))) tokens")
+                    .foregroundStyle(Palette.ink2)
             }
-            Text("\(TokenFormat.short(stream.tokens)) tokens")
-                .fontWeight(.medium)
-                .foregroundStyle(Palette.ink1)
-            Text("\(Share.percent(stream.tokens, of: total)) of total")
-                .foregroundStyle(Palette.ink2)
+            .font(.system(size: 11))
+            .monospacedDigit()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .font(.system(size: 11))
-        .monospacedDigit()
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .frame(maxWidth: 210, alignment: .leading)
-        .tooltipSurface(reduceTransparency: reduceTransparency, cornerRadius: Radius.inner)
     }
 }
 

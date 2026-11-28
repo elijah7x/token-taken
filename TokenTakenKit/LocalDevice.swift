@@ -11,8 +11,23 @@ public enum LocalDevice {
         Device(id: id, name: currentDisplayName)
     }
 
+    /// Returns `true` only when `TOKEN_TAKEN_SUPPORT_DIR` is unset/empty and `url` points to the default
+    /// production Application Support directory.
+    public static func isDefaultProductionSupportDirectory(
+        _ url: URL,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        guard (environment["TOKEN_TAKEN_SUPPORT_DIR"] ?? "").isEmpty else { return false }
+        let production = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Token Taken", isDirectory: true)
+            .standardizedFileURL
+        return url.standardizedFileURL == production
+    }
+
     /// The id lives in the shared support folder so the app and the CLI (separate defaults domains) agree on it.
-    /// Earlier builds kept it in the app's defaults; that value is adopted once.
+    /// Earlier builds kept it in the app's defaults; that value is adopted once for the default production folder.
+    /// Custom/isolated support directories use `<supportDirectory>/device-id` exclusively so they never adopt or
+    /// overwrite production `UserDefaults.standard`.
     public static func current(defaults: UserDefaults = .standard, supportDirectory: URL = AppPaths.supportDirectory) -> Device {
         let name = currentDisplayName
         let file = supportDirectory.appendingPathComponent("device-id")
@@ -20,13 +35,16 @@ public enum LocalDevice {
            UUID(uuidString: stored) != nil {
             return Device(id: stored, name: name)
         }
-        let id = if let stored = defaults.string(forKey: "deviceID"), UUID(uuidString: stored) != nil {
+        let useDefaults = isDefaultProductionSupportDirectory(supportDirectory)
+        let id = if useDefaults, let stored = defaults.string(forKey: "deviceID"), UUID(uuidString: stored) != nil {
             stored
         } else {
             UUID().uuidString
         }
         try? id.write(to: file, atomically: true, encoding: .utf8)
-        defaults.set(id, forKey: "deviceID")
+        if useDefaults {
+            defaults.set(id, forKey: "deviceID")
+        }
         return Device(id: id, name: name)
     }
 

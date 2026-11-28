@@ -437,4 +437,108 @@ final class GrokCollectorTests: XCTestCase {
         XCTAssertEqual(batch.hourly.first?.counts.input, 500)
         XCTAssertEqual(batch.hourly.first?.reasoningKnown, false)
     }
+
+    func testIndependentInputAndOutputInclusivityChecks() async throws {
+        // 1. Cache-inclusive input with cacheWrite > 0 and inclusive reasoning:
+        //    totalTokens == rawIn + cw + rawOut must still subtract cacheRead from input.
+        let cwInclusive = try turnCompletedLine(
+            promptID: "p-cw-inc",
+            modelID: "grok-cw",
+            timestampMs: ms("2026-11-19T10:00:00Z"),
+            usage: [
+                "inputTokens": 1_000,
+                "cachedReadTokens": 400,
+                "cachedWriteTokens": 50,
+                "outputTokens": 300,
+                "reasoningTokens": 80,
+                "totalTokens": 1_350,
+            ]
+        )
+        // 2. Cache-inclusive input with cacheWrite > 0 and exclusive reasoning:
+        //    totalTokens == rawIn + cw + rawOut + reasoning.
+        let cwAndExclusiveReasoning = try turnCompletedLine(
+            promptID: "p-cw-excl-r",
+            modelID: "grok-cw-reasoning",
+            timestampMs: ms("2026-11-19T10:05:00Z"),
+            usage: [
+                "inputTokens": 1_000,
+                "cachedReadTokens": 400,
+                "cachedWriteTokens": 50,
+                "outputTokens": 300,
+                "reasoningTokens": 80,
+                "totalTokens": 1_430,
+            ]
+        )
+        // 3. Cache-inclusive input with cw == 0 and exclusive reasoning:
+        //    totalTokens == rawIn + rawOut + reasoning.
+        let noCwExclusiveReasoning = try turnCompletedLine(
+            promptID: "p-excl-r",
+            modelID: "grok-reasoning-only",
+            timestampMs: ms("2026-11-19T10:10:00Z"),
+            usage: [
+                "inputTokens": 800,
+                "cachedReadTokens": 300,
+                "outputTokens": 120,
+                "reasoningTokens": 40,
+                "totalTokens": 960,
+            ]
+        )
+        // 4. Reasoning exceeding rawOut without totalTokens must keep rawOut intact while
+        //    still subtracting cacheRead from input.
+        let reasoningExceedsOutput = try turnCompletedLine(
+            promptID: "p-big-r",
+            modelID: "grok-big-reasoning",
+            timestampMs: ms("2026-11-19T10:15:00Z"),
+            usage: [
+                "inputTokens": 500,
+                "cachedReadTokens": 100,
+                "outputTokens": 40,
+                "reasoningTokens": 120,
+            ]
+        )
+        // 5. Cache-exclusive input with inclusive reasoning: totalTokens == rawIn + cr + rawOut.
+        let exclusiveInputInclusiveReasoning = try turnCompletedLine(
+            promptID: "p-excl-in",
+            modelID: "grok-excl-in",
+            timestampMs: ms("2026-11-19T10:20:00Z"),
+            usage: [
+                "inputTokens": 500,
+                "cachedReadTokens": 200,
+                "outputTokens": 120,
+                "reasoningTokens": 30,
+                "totalTokens": 820,
+            ]
+        )
+        _ = try writeSession("session-inclusivity", updates: [
+            cwInclusive,
+            cwAndExclusiveReasoning,
+            noCwExclusiveReasoning,
+            reasoningExceedsOutput,
+            exclusiveInputInclusiveReasoning,
+        ])
+
+        let batch = try await collector().collect()
+        let byModel = Dictionary(uniqueKeysWithValues: batch.daily.map { ($0.modelID, $0.counts) })
+
+        XCTAssertEqual(
+            byModel["grok-cw"],
+            TokenCounts(input: 600, cacheRead: 400, cacheWrite: 50, output: 220, reasoning: 80)
+        )
+        XCTAssertEqual(
+            byModel["grok-cw-reasoning"],
+            TokenCounts(input: 600, cacheRead: 400, cacheWrite: 50, output: 300, reasoning: 80)
+        )
+        XCTAssertEqual(
+            byModel["grok-reasoning-only"],
+            TokenCounts(input: 500, cacheRead: 300, output: 120, reasoning: 40)
+        )
+        XCTAssertEqual(
+            byModel["grok-big-reasoning"],
+            TokenCounts(input: 400, cacheRead: 100, output: 40, reasoning: 120)
+        )
+        XCTAssertEqual(
+            byModel["grok-excl-in"],
+            TokenCounts(input: 500, cacheRead: 200, output: 90, reasoning: 30)
+        )
+    }
 }

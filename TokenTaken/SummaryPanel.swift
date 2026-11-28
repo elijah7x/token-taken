@@ -5,26 +5,16 @@ import TokenTakenKit
 
 // MARK: - Left sidebar summary rail
 
-/// Period range, total, cost estimate and partial-device notice for the selected period.
+/// Total and cost estimate for the selected period.
 struct SummaryRail: View {
     let summary: UsageSummary
     var isCollecting = false
 
-    @Environment(AppModel.self) private var model
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(periodDescription)
-                .font(ThemeFont.role(.title))
-                .foregroundStyle(Palette.ink2)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .contentTransition(reduceMotion ? .identity : .numericText())
-
             if isCollecting {
                 Text(verbatim: "—")
                     .font(ThemeFont.role(.heroNumber))
@@ -37,31 +27,27 @@ struct SummaryRail: View {
                     .foregroundStyle(Palette.ink3)
                     .padding(.top, 4)
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(TokenFormat.short(summary.total.total))
-                        .font(ThemeFont.role(.heroNumber))
-                        .tracking(-1.0)
-                        .foregroundStyle(Palette.ink1)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                        .contentTransition(reduceMotion ? .identity : .numericText())
-                    Text("tokens")
-                        .font(ThemeFont.role(.heroUnit))
-                        .foregroundStyle(Palette.ink2)
-                        .fixedSize()
+                DataHoverPopover(width: 280) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(TokenFormat.short(summary.total.total))
+                            .font(ThemeFont.role(.heroNumber))
+                            .tracking(-1.0)
+                            .foregroundStyle(Palette.ink1)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .contentTransition(reduceMotion ? .identity : .numericText())
+                        Text("tokens")
+                            .font(ThemeFont.role(.heroUnit))
+                            .foregroundStyle(Palette.ink2)
+                            .fixedSize()
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Text("Total"))
+                    .accessibilityValue(Text("\(summary.total.total.formatted(.number.locale(locale))) tokens"))
+                } content: {
+                    Text("\(summary.total.total.formatted(.number.locale(locale))) tokens")
                 }
-                .help(Text("\(summary.total.total.formatted(.number.locale(locale))) tokens"))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text("Total"))
-                .accessibilityValue(Text("\(TokenFormat.spoken(summary.total.total)) tokens"))
                 .padding(.top, 6)
-
-                Text("\(summary.total.total.formatted(.number.locale(locale))) tokens")
-                    .font(ThemeFont.role(.numericCaption))
-                    .foregroundStyle(Palette.ink3)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .padding(.top, 2)
 
                 if ThemeChrome.separatesSectionsWithRules {
                     Rectangle()
@@ -71,69 +57,55 @@ struct SummaryRail: View {
                         .accessibilityHidden(true)
                 }
 
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(TokenFormat.usd(summary.cost.estimatedUSD))
+                DataHoverPopover(width: 280) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Group {
+                            if isFullyUnpriced {
+                                Text("Unpriced")
+                            } else {
+                                Text("≈ \(TokenFormat.usd(summary.cost.estimatedUSD)) · estimate")
+                            }
+                        }
                         .font(ThemeFont.role(.secondaryNumber))
                         .foregroundStyle(Palette.ink1)
                         .contentTransition(reduceMotion ? .identity : .numericText())
-                    Text("estimate, not a bill")
-                        .font(ThemeFont.role(.caption))
-                        .foregroundStyle(Palette.ink3)
+
+                        if summary.cost.unpricedTokens > 0 {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Palette.ink3)
+                                .accessibilityLabel(Text("Unpriced tokens"))
+                        }
+                    }
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .accessibilityElement(children: .combine)
+                } content: {
+                    costHelp
                 }
-                .lineLimit(1)
-                .minimumScaleFactor(0.85)
-                .accessibilityElement(children: .combine)
-                .help(costHelp)
                 .padding(.top, ThemeChrome.separatesSectionsWithRules ? 0 : 10)
-
-                if summary.cost.unpricedTokens > 0 {
-                    Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
-                        .font(ThemeFont.role(.caption))
-                        .foregroundStyle(Palette.ink3)
-                        .monospacedDigit()
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityLabel(Text("\(TokenFormat.spoken(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate"))
-                        .padding(.top, 4)
-                }
-
-                if model.dataIssues.devices > 0 {
-                    PartialDeviceBanner(
-                        summary: summary,
-                        remoteDevices: model.remoteDevices,
-                        dataIssues: model.dataIssues,
-                        reduceTransparency: reduceTransparency
-                    )
-                    .padding(.top, 10)
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var periodDescription: LocalizedStringKey {
-        let start = summary.start
-        switch model.period {
-        case .day:
-            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .week:
-            let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
-            if Calendar.current.isDate(start, inSameDayAs: today) || today <= start {
-                return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-            }
-            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .month:
-            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
-        case .year:
-            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
-        case .all:
-            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
-        }
+    private var isFullyUnpriced: Bool {
+        summary.cost.unpricedTokens > 0 && summary.cost.unpricedTokens >= summary.total.total
     }
 
-    private var costHelp: Text {
-        let table = Text("Price table \(summary.cost.priceTableVersion)")
-        guard summary.cost.unpricedTokens > 0 else { return table }
-        return Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate") + Text(verbatim: "\n") + table
+    private var costHelp: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if summary.cost.unpricedTokens > 0 {
+                Text("\(TokenFormat.short(summary.cost.unpricedTokens)) tokens unpriced, not included in the estimate")
+            }
+            Text("estimate, not a bill")
+            Text("Price table \(summary.cost.priceTableVersion)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(Palette.ink3)
+        }
+        .font(ThemeFont.role(.caption))
+        .foregroundStyle(Palette.ink2)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -418,74 +390,11 @@ struct TrayDevices: View {
     }
 }
 
-private struct PartialDeviceBanner: View {
-    let summary: UsageSummary
-    let remoteDevices: [RemoteDeviceStatus]
-    let dataIssues: AppModel.DataIssues
-    let reduceTransparency: Bool
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Palette.healthWarn)
-                .accessibilityHidden(true)
-            message
-                .font(ThemeFont.role(.caption))
-                .foregroundStyle(Palette.healthWarn)
-                .monospacedDigit()
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background {
-            RadiusRole.inner.shape
-                .fill(Palette.healthWarn.opacity(reduceTransparency ? 0.18 : 0.12))
-        }
-        .overlay {
-            RadiusRole.inner.shape
-                .strokeBorder(Palette.healthWarn.opacity(0.30), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    private var message: Text {
-        let issueDevices = remoteDevices.filter { $0.isStaleOrIncomplete() }
-        if issueDevices.count == 1, let remote = issueDevices.first {
-            let name = remote.displayName == remote.deviceID ? String(localized: "Unknown Mac") : remote.displayName
-            if !summary.byDevice.contains(where: { $0.id == remote.deviceID }) {
-                return Text("Does not include \(name)")
-            }
-            let state: String = switch remote.effectiveState() {
-            case .stale: String(localized: "Stale")
-            case .partial: String(localized: "Partial")
-            case .unavailable, .ok: String(localized: "Unavailable")
-            }
-            return Text("\(name): \(state)")
-        }
-        if let note = dataIssues.remoteIssueNote {
-            return Text(note)
-        }
-        return Text("data may be incomplete")
-    }
-}
-
 private struct ThisMacBadge: View {
     var body: some View {
         Text("This Mac")
-            .font(ThemeFont.role(.label))
-            .foregroundStyle(Palette.ink2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background {
-                RadiusRole.badge.shape
-                    .fill(Palette.barTrack)
-            }
-            .overlay {
-                RadiusRole.badge.shape
-                    .strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
-            }
+            .font(ThemeFont.role(.caption))
+            .foregroundStyle(Palette.ink3)
             .fixedSize()
     }
 }
@@ -493,18 +402,8 @@ private struct ThisMacBadge: View {
 private struct AccountBadge: View {
     var body: some View {
         Text("Account")
-            .font(ThemeFont.role(.label))
-            .foregroundStyle(Palette.ink2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background {
-                RadiusRole.badge.shape
-                    .fill(Palette.barTrack)
-            }
-            .overlay {
-                RadiusRole.badge.shape
-                    .strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
-            }
+            .font(ThemeFont.role(.caption))
+            .foregroundStyle(Palette.ink3)
             .fixedSize()
     }
 }
@@ -761,13 +660,8 @@ struct BreakdownCard: View {
         soleSource: String?
     ) -> some View {
         VStack(spacing: 0) {
-            ForEach(Array(visible.enumerated()), id: \.element.id) { entry in
-                if entry.offset > 0 {
-                    Rectangle()
-                        .fill(Palette.hairline)
-                        .frame(height: ThemeChrome.ruleWidth)
-                }
-                row(entry.element, modelColors: modelColors, soleSource: soleSource)
+            ForEach(visible) { item in
+                row(item, modelColors: modelColors, soleSource: soleSource)
             }
         }
     }
@@ -792,15 +686,21 @@ struct BreakdownCard: View {
                 VStack(spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if ThemeChrome.showsSeriesSwatches {
-                            Circle()
-                                .fill(color)
-                                .frame(width: 8, height: 8)
-                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
-                                .accessibilityHidden(true)
+                            if isModel || ThemeKind.current == .field {
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 8, height: 8)
+                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                                    .accessibilityHidden(true)
+                            } else {
+                                SourceIcon(sourceID: item.id, name: item.name, size: 16)
+                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                                    .accessibilityHidden(true)
+                            }
                         }
 
                         Text(verbatim: item.name)
-                            .font(isModel
+                            .font(isModel && ThemeKind.current != .field
                                 ? .system(size: 13, weight: .semibold, design: .monospaced)
                                 : ThemeFont.role(.bodyStrong))
                             .foregroundStyle(nameColor)
@@ -809,7 +709,7 @@ struct BreakdownCard: View {
 
                         Spacer(minLength: 12)
 
-                        Text("\(TokenFormat.short(item.counts.total)) tokens")
+                        Text(TokenFormat.short(item.counts.total))
                             .font(ThemeFont.make(13, weight: .semibold, numeric: true))
                             .foregroundStyle(Palette.ink1)
                             .fixedSize()
@@ -824,41 +724,35 @@ struct BreakdownCard: View {
 
                         Spacer(minLength: 8)
 
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            if ThemeChrome.showsSeriesSwatches {
-                                ProportionBar(
-                                    ratio: Share.ratio(item.counts.total, of: summary.total.total),
-                                    color: color,
-                                    width: 120,
-                                    height: 4
-                                )
-                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.0 }
-                            }
-
-                            Text(Share.percent(item.counts.total, of: summary.total.total))
-                                .font(ThemeFont.role(.numericCaption))
-                                .foregroundStyle(Palette.ink2)
-                                .fixedSize()
-                                .frame(minWidth: 46, alignment: .trailing)
-                        }
+                        Text(Share.percent(item.counts.total, of: summary.total.total))
+                            .font(ThemeFont.role(.numericCaption))
+                            .foregroundStyle(Palette.ink2)
+                            .fixedSize()
+                            .frame(minWidth: 46, alignment: .trailing)
                     }
-                    .padding(.leading, ThemeChrome.showsSeriesSwatches ? 16 : 0)
+                    .padding(.leading, ThemeChrome.showsSeriesSwatches ? (isModel || ThemeKind.current == .field ? 16 : 24) : 0)
                 }
                 .padding(.vertical, 6)
-                .frame(minHeight: 48)
+                .frame(minHeight: 44)
             } else {
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         if ThemeChrome.showsSeriesSwatches {
-                            Circle()
-                                .fill(color)
-                                .frame(width: 8, height: 8)
-                                .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
-                                .accessibilityHidden(true)
+                            if isModel || ThemeKind.current == .field {
+                                Circle()
+                                    .fill(color)
+                                    .frame(width: 8, height: 8)
+                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                                    .accessibilityHidden(true)
+                            } else {
+                                SourceIcon(sourceID: item.id, name: item.name, size: 16)
+                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
+                                    .accessibilityHidden(true)
+                            }
                         }
 
                         Text(verbatim: item.name)
-                            .font(isModel
+                            .font(isModel && ThemeKind.current != .field
                                 ? .system(size: 13, weight: .semibold, design: .monospaced)
                                 : ThemeFont.role(.bodyStrong))
                             .foregroundStyle(nameColor)
@@ -869,20 +763,10 @@ struct BreakdownCard: View {
                     Spacer(minLength: 0)
 
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Text("\(TokenFormat.short(item.counts.total)) tokens")
+                        Text(TokenFormat.short(item.counts.total))
                             .font(ThemeFont.make(13, weight: .semibold, numeric: true))
                             .foregroundStyle(Palette.ink1)
                             .fixedSize()
-
-                        if ThemeChrome.showsSeriesSwatches {
-                            ProportionBar(
-                                ratio: Share.ratio(item.counts.total, of: summary.total.total),
-                                color: color,
-                                width: 120,
-                                height: 4
-                            )
-                            .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4.5 }
-                        }
 
                         Text(Share.percent(item.counts.total, of: summary.total.total))
                             .font(ThemeFont.role(.numericCaption))
@@ -893,7 +777,7 @@ struct BreakdownCard: View {
                     .fixedSize(horizontal: true, vertical: false)
                 }
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(minHeight: 48)
+                .frame(minHeight: 44)
             }
         }
         .background {
@@ -982,7 +866,7 @@ struct BreakdownCard: View {
     }
 
     private func rowAccessibilityValue(_ item: Breakdown, secondary: String?) -> Text {
-        let base = Text("\(TokenFormat.spoken(item.counts.total)) tokens, \(Share.percent(item.counts.total, of: summary.total.total)) of total")
+        let base = Text("\(item.counts.total.formatted(.number.locale(locale))) tokens, \(Share.percent(item.counts.total, of: summary.total.total)) of total")
         if let secondary {
             return base + Text(verbatim: ", ") + Text("Mainly from \(secondary)")
         }
@@ -992,10 +876,6 @@ struct BreakdownCard: View {
     private var footer: some View {
         let remaining = Array(items.dropFirst(limit))
         return VStack(spacing: 0) {
-            Rectangle()
-                .fill(Palette.hairline)
-                .frame(height: ThemeChrome.ruleWidth)
-
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 if isExpanded {
                     Text("Showing all \(items.count)")
@@ -1018,9 +898,9 @@ struct BreakdownCard: View {
                 } label: {
                     Group {
                         if isExpanded {
-                            Text("Show top 4")
+                            Text("Show less")
                         } else {
-                            Text("Show all \(items.count) ›")
+                            Text("Show all")
                         }
                     }
                     .font(ThemeFont.role(.control))
@@ -1047,25 +927,27 @@ struct BreakdownCard: View {
         }
     }
 
-    private func otherSummaryText(for remaining: [Breakdown]) -> String {
+    private func otherSummaryText(for remaining: [Breakdown]) -> LocalizedStringKey {
+        let isChinese = locale.language.languageCode == .chinese
+        let separator = isChinese ? "、" : ", "
         let preview: String = switch remaining.count {
         case 0:
             ""
         case 1:
             remaining[0].name
         case 2:
-            String(localized: "\(remaining[0].name), \(remaining[1].name)", locale: locale)
+            remaining.map(\.name).joined(separator: separator)
         default:
-            String(localized: "\(remaining[0].name), \(remaining[1].name), …", locale: locale)
+            remaining.prefix(2).map(\.name).joined(separator: separator) + (isChinese ? " 等" : ", …")
         }
         let remainingTokens = remaining.reduce(Int64(0)) { $0 + $1.counts.total }
         let totalShort = TokenFormat.short(remainingTokens)
         let shareText = Share.percent(remainingTokens, of: summary.total.total)
         return switch dimension {
         case .models:
-            String(localized: "Other \(remaining.count) models (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
+            "Other \(remaining.count) models (\(preview)) total \(totalShort) (\(shareText))"
         case .sources:
-            String(localized: "Other \(remaining.count) harnesses (\(preview)) total \(totalShort) (\(shareText))", locale: locale)
+            "Other \(remaining.count) harnesses (\(preview)) total \(totalShort) (\(shareText))"
         }
     }
 }

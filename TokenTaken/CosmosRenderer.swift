@@ -3,6 +3,7 @@ import Metal
 import MetalKit
 import QuartzCore
 import simd
+import TokenTakenKit
 
 private struct CosmosFloat6 {
     var v0: Float = 0, v1: Float = 0, v2: Float = 0, v3: Float = 0, v4: Float = 0, v5: Float = 0
@@ -453,6 +454,84 @@ final class CosmosRenderer {
         uniforms.focal = Float(frame.focal)
         uniforms.bandCount = Int32(max(1, min(6, frame.scene.categories.count)))
         return uniforms
+    }
+}
+
+private final class CosmosSnapshotCancellation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+}
+
+/// Renderer state and GPU waits are confined to a serial background queue.
+private final class CosmosSnapshotRenderer: @unchecked Sendable {
+    static let shared = CosmosSnapshotRenderer()
+
+    private let queue = DispatchQueue(label: "io.github.elijah7x.TokenTaken.cosmos-snapshot")
+    private var renderer: CosmosRenderer?
+    private var attemptedInit = false
+
+    func image(summary: UsageSummary, dimension: BreakdownDimension, size: CGSize, scale: CGFloat) async -> CGImage? {
+        let cancellation = CosmosSnapshotCancellation()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                queue.async {
+                    guard size.width > 1, size.height > 1, scale > 0, !cancellation.isCancelled else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    if !self.attemptedInit {
+                        self.attemptedInit = true
+                        self.renderer = MTLCreateSystemDefaultDevice().flatMap { CosmosRenderer(device: $0) }
+                    }
+                    guard let renderer = self.renderer, !cancellation.isCancelled else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    let scene = CosmosScene(summary: summary, dimension: dimension)
+                    let frame = scene.stillFrame(size: size)
+                    guard !cancellation.isCancelled else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    let image = renderer.snapshot(
+                        frame,
+                        pixelSize: CGSize(width: size.width * scale, height: size.height * scale)
+                    )
+                    continuation.resume(returning: cancellation.isCancelled ? nil : image)
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+}
+
+extension CosmosSnapshot {
+    @MainActor static func image(
+        summary: UsageSummary,
+        dimension: BreakdownDimension,
+        size: CGSize,
+        scale: CGFloat
+    ) async -> NSImage? {
+        guard let image = await CosmosSnapshotRenderer.shared.image(
+            summary: summary,
+            dimension: dimension,
+            size: size,
+            scale: scale
+        ) else { return nil }
+        return NSImage(cgImage: image, size: size)
     }
 }
 

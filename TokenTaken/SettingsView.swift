@@ -348,22 +348,15 @@ private extension SettingsGroupCaption where Trailing == EmptyView {
 }
 
 private struct SettingsRowsGroup<Content: View>: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ViewBuilder let content: Content
 
     var body: some View {
-        let shape = RadiusRole.inner.shape
         VStack(alignment: .leading, spacing: 0) {
             content
         }
-        .padding(.horizontal, 14)
+        .padding(.leading, 16)
+        .padding(.trailing, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            shape.fill(Palette.cardSurface)
-        }
-        .overlay {
-            shape.strokeBorder(Palette.hairline, lineWidth: reduceTransparency ? 1 : ThemeChrome.ruleWidth)
-        }
     }
 }
 
@@ -442,14 +435,17 @@ private struct SettingsActionPillSurface: ViewModifier {
 private struct SettingsControlRow<Accessory: View>: View {
     let title: LocalizedStringKey
     var help: LocalizedStringKey?
+    var showsTitle = true
     @ViewBuilder let accessory: Accessory
 
     var body: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(ThemeFont.role(.body))
-                    .foregroundStyle(Palette.ink1)
+                if showsTitle {
+                    Text(title)
+                        .font(ThemeFont.role(.body))
+                        .foregroundStyle(Palette.ink1)
+                }
                 if let help {
                     Text(help)
                         .font(ThemeFont.role(.caption))
@@ -468,17 +464,8 @@ private struct SettingsControlRow<Accessory: View>: View {
                     .accessibilityLabel(Text(title))
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(minHeight: 48)
-    }
-}
-
-private struct SettingsHairline: View {
-    var body: some View {
-        Rectangle()
-            .fill(Palette.hairline)
-            .frame(height: ThemeChrome.ruleWidth)
-            .accessibilityHidden(true)
     }
 }
 
@@ -503,6 +490,7 @@ private struct SettingsSecondaryButton: View {
     let action: () -> Void
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.isEnabled) private var isEnabled
 
     init(_ title: LocalizedStringKey, action: @escaping () -> Void) {
         self.title = title
@@ -510,17 +498,18 @@ private struct SettingsSecondaryButton: View {
     }
 
     var body: some View {
-        if reduceTransparency && ThemeKind.current == .liquidGlass {
-            Button(title, action: action)
+        Button(action: action) {
+            Text(title)
                 .font(ThemeFont.role(.control))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-        } else {
-            Button(title, action: action)
-                .font(ThemeFont.role(.control))
-                .themedGlassButton()
-                .controlSize(.small)
+                .foregroundStyle(Palette.ink1)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .modifier(SettingsActionPillSurface(reduceTransparency: reduceTransparency))
         }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: true, vertical: false)
+        .opacity(isEnabled ? 1 : 0.45)
     }
 }
 
@@ -535,7 +524,7 @@ private struct GeneralSettingsTab: View {
     var body: some View {
         @Bindable var settings = settings
         VStack(alignment: .leading, spacing: 36) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 SettingsGroupCaption(
                     title: "Appearance",
                     description: settings.theme == .liquidGlass ? LocalizedStringKey("Theme, transparency, language, and number units.") : LocalizedStringKey("Theme, language, and number units.")
@@ -559,7 +548,6 @@ private struct GeneralSettingsTab: View {
                         }
                     }
 
-                    SettingsHairline()
                     SettingsControlRow(
                         title: "Light or dark",
                         help: settings.theme == .cosmos ? LocalizedStringKey("Cosmos is dark only.") : nil
@@ -575,18 +563,15 @@ private struct GeneralSettingsTab: View {
                     }
 
                     if settings.theme == .liquidGlass {
-                        SettingsHairline()
                         SettingsControlRow(title: "View") {
                             LiquidViewPicker(selection: $settings.liquidView)
                         }
 
-                        SettingsHairline()
                         SettingsControlRow(title: "Interface transparency", help: "How much shows through the window") {
                             InterfaceTransparencySlider(value: $settings.interfaceTransparency)
                         }
                     }
 
-                    SettingsHairline()
                     SettingsControlRow(title: "Language") {
                         GlassMenuPicker("Language", selection: $settings.language) {
                             Text(settings.language.title)
@@ -598,7 +583,6 @@ private struct GeneralSettingsTab: View {
                     }
 
                     if settings.languageChangedThisSession {
-                        SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Some text changes language after relaunch.")
                                 .font(ThemeFont.role(.caption))
@@ -607,11 +591,10 @@ private struct GeneralSettingsTab: View {
                             Spacer(minLength: 12)
                             SettingsSecondaryButton("Relaunch") { settings.relaunch() }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(minHeight: 48)
                     }
 
-                    SettingsHairline()
                     SettingsControlRow(title: "Number units") {
                         GlassMenuPicker("Number units", selection: $settings.numberUnits) {
                             settings.numberUnits.title
@@ -624,7 +607,7 @@ private struct GeneralSettingsTab: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 SettingsGroupCaption(
                     title: "Data collection",
                     description: "Launch and background collection."
@@ -639,16 +622,14 @@ private struct GeneralSettingsTab: View {
                     }
 
                     if let error = settings.launchAtLoginError {
-                        SettingsHairline()
                         Text(error)
                             .font(ThemeFont.role(.caption))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
 
                     if settings.launchAtLoginNeedsApproval {
-                        SettingsHairline()
                         HStack(spacing: 16) {
                             Text("Allow Token Taken in System Settings › Login Items to finish.")
                                 .font(ThemeFont.role(.caption))
@@ -656,11 +637,10 @@ private struct GeneralSettingsTab: View {
                             Spacer(minLength: 12)
                             SettingsSecondaryButton("Open Login Items") { SMAppService.openSystemSettingsLoginItems() }
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(minHeight: 48)
                     }
 
-                    SettingsHairline()
 
                     TimelineView(.everyMinute) { context in
                         HStack(spacing: 16) {
@@ -673,17 +653,16 @@ private struct GeneralSettingsTab: View {
                                 .foregroundStyle(Palette.ink2)
                                 .monospacedDigit()
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(minHeight: 48)
                         .accessibilityElement(children: .combine)
                     }
 
                     if let error = model.storageError {
-                        SettingsHairline()
                         Text(error)
                             .font(ThemeFont.role(.caption))
                             .foregroundStyle(SourceHealth.State.failed.dotColor)
-                            .padding(.vertical, 8)
+                            .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
                 }
@@ -802,7 +781,7 @@ private struct SourcesSettingsTab: View {
         TimelineView(.everyMinute) { context in
             let ledger = makeLedger(now: context.date)
             VStack(alignment: .leading, spacing: 36) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     SettingsGroupCaption(
                         title: "Installed harnesses",
                         description: "Agents on this Mac whose logs are read."
@@ -815,23 +794,21 @@ private struct SourcesSettingsTab: View {
                             Text("No installed harnesses found")
                                 .font(ThemeFont.role(.body))
                                 .foregroundStyle(Palette.ink3)
+                                .padding(.vertical, 10)
                                 .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                         } else {
-                            ForEach(Array(ledger.installed.enumerated()), id: \.element.id) { item in
-                                if item.offset > 0 {
-                                    SettingsHairline()
-                                }
-                                sourceRow(item.element, now: context.date)
+                            ForEach(ledger.installed) { item in
+                                sourceRow(item, now: context.date)
                             }
+                        }
+
+                        if !ledger.notInstalled.isEmpty {
+                            notInstalledRow(ledger.notInstalled)
                         }
                     }
                 }
 
-                if !ledger.notInstalled.isEmpty {
-                    notInstalledGroup(ledger.notInstalled)
-                }
-
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     SettingsGroupCaption(
                         title: "Account harnesses",
                         description: "Usage that belongs to an account rather than to this Mac."
@@ -843,7 +820,7 @@ private struct SourcesSettingsTab: View {
                 }
 
                 if let override = settings.tokscalePathOverride, !override.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 12) {
                         SettingsGroupCaption(
                             title: "Advanced",
                             description: "Overrides for the local collection engine."
@@ -996,7 +973,7 @@ private struct SourcesSettingsTab: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
-                    SourceMonogramBadge(sourceID: entry.source.id, name: entry.source.name)
+                    SourceIcon(sourceID: entry.source.id, name: entry.source.name, size: 22)
                     Text(verbatim: entry.source.name)
                         .font(ThemeFont.role(.body))
                         .foregroundStyle(Palette.ink1)
@@ -1035,7 +1012,7 @@ private struct SourcesSettingsTab: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.vertical, errorMessage == nil ? 0 : 8)
+        .padding(.vertical, 10)
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
         .help(errorMessage ?? "")
@@ -1049,7 +1026,7 @@ private struct SourcesSettingsTab: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
                 HStack(spacing: 9) {
-                    SourceMonogramBadge(sourceID: source.id, name: source.name)
+                    SourceIcon(sourceID: source.id, name: source.name, size: 22)
                     Text(verbatim: source.name)
                         .font(ThemeFont.role(.body))
                         .foregroundStyle(Palette.ink1)
@@ -1104,76 +1081,72 @@ private struct SourcesSettingsTab: View {
         .help(errorMessage ?? "")
     }
 
-    private func notInstalledGroup(_ sources: [SourceInfo]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SettingsGroupCaption(title: "Not installed")
+    private func notInstalledRow(_ sources: [SourceInfo]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                showsNotInstalled.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.ink3)
+                        .rotationEffect(.degrees(showsNotInstalled ? 90 : 0))
+                        .frame(width: 12)
+                        .accessibilityHidden(true)
 
-            SettingsRowsGroup {
-                Button {
-                    showsNotInstalled.toggle()
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
+                    Text("Not installed (\(sources.count))")
+                        .font(ThemeFont.role(.body))
+                        .foregroundStyle(Palette.ink1)
+                        .monospacedDigit()
+
+                    Spacer(minLength: 12)
+
+                    if !showsNotInstalled {
+                        Text(verbatim: sources.map(\.name).joined(separator: " · "))
+                            .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink3)
-                            .rotationEffect(.degrees(showsNotInstalled ? 90 : 0))
-                            .frame(width: 12)
-                            .accessibilityHidden(true)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .padding(.vertical, 10)
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onKeyPress(.leftArrow) {
+                guard showsNotInstalled else { return .ignored }
+                showsNotInstalled = false
+                return .handled
+            }
+            .onKeyPress(.rightArrow) {
+                guard !showsNotInstalled else { return .ignored }
+                showsNotInstalled = true
+                return .handled
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text("Not installed (\(sources.count))"))
+            .accessibilityValue(showsNotInstalled ? Text("Expanded") : Text("Collapsed"))
 
-                        Text("Not installed (\(sources.count))")
-                            .font(ThemeFont.role(.body))
-                            .foregroundStyle(Palette.ink1)
-                            .monospacedDigit()
-
-                        Spacer(minLength: 12)
-
-                        if !showsNotInstalled {
-                            Text(verbatim: sources.map(\.name).joined(separator: " · "))
-                                .font(ThemeFont.role(.caption))
-                                .foregroundStyle(Palette.ink3)
+            if showsNotInstalled {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading), count: 3),
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(sources) { source in
+                        HStack(spacing: 8) {
+                            SourceIcon(sourceID: source.id, name: source.name, size: 20)
+                                .opacity(0.65)
+                            Text(verbatim: source.name)
+                                .font(ThemeFont.role(.body))
+                                .foregroundStyle(Palette.ink2)
                                 .lineLimit(1)
-                                .truncationMode(.tail)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(minHeight: 48)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .onKeyPress(.leftArrow) {
-                    guard showsNotInstalled else { return .ignored }
-                    showsNotInstalled = false
-                    return .handled
-                }
-                .onKeyPress(.rightArrow) {
-                    guard !showsNotInstalled else { return .ignored }
-                    showsNotInstalled = true
-                    return .handled
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(Text("Not installed (\(sources.count))"))
-                .accessibilityValue(showsNotInstalled ? Text("Expanded") : Text("Collapsed"))
-
-                if showsNotInstalled {
-                    SettingsHairline()
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: 10, alignment: .leading), count: 3),
-                        alignment: .leading,
-                        spacing: 10
-                    ) {
-                        ForEach(sources) { source in
-                            HStack(spacing: 8) {
-                                SourceMonogramBadge(sourceID: source.id, name: source.name, size: 20)
-                                    .opacity(0.65)
-                                Text(verbatim: source.name)
-                                    .font(ThemeFont.role(.body))
-                                    .foregroundStyle(Palette.ink2)
-                                    .lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .padding(.vertical, 12)
-                }
+                .padding(.bottom, 10)
             }
         }
     }
@@ -1269,7 +1242,7 @@ private struct SyncSettingsTab: View {
     var body: some View {
         @Bindable var settings = settings
         VStack(alignment: .leading, spacing: 36) {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 SettingsGroupCaption(
                     title: "iCloud sync",
                     description: "Share totals between your Macs through iCloud Drive. Every Mac must use the same Apple ID."
@@ -1278,7 +1251,8 @@ private struct SyncSettingsTab: View {
                 SettingsRowsGroup {
                     SettingsControlRow(
                         title: "iCloud sync",
-                        help: "Only aggregate token counts and a random device ID are stored in iCloud Drive."
+                        help: "Only aggregate token counts and a random device ID are stored in iCloud Drive.",
+                        showsTitle: false
                     ) {
                         Toggle("iCloud sync", isOn: $settings.syncEnabled)
                             .labelsHidden()
@@ -1287,7 +1261,6 @@ private struct SyncSettingsTab: View {
                     }
 
                     if refreshCoordinator?.iCloudAvailable == false || !iCloudRootAvailable {
-                        SettingsHairline()
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 11, weight: .semibold))
@@ -1297,10 +1270,9 @@ private struct SyncSettingsTab: View {
                                 .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.healthWarn)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if settings.syncEnabled && refreshCoordinator?.syncFailed == true {
-                        SettingsHairline()
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: 11, weight: .semibold))
@@ -1310,13 +1282,13 @@ private struct SyncSettingsTab: View {
                                 .font(ThemeFont.role(.caption))
                                 .foregroundStyle(Palette.healthWarn)
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     }
                 }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 SettingsGroupCaption(
                     title: "Sync to iPhone",
                     description: "Publishes the usage this Mac sees, including synced Macs, to iCloud for the iPhone app. Your iPhone must use the same Apple ID."
@@ -1325,7 +1297,8 @@ private struct SyncSettingsTab: View {
                 SettingsRowsGroup {
                     SettingsControlRow(
                         title: "Sync to iPhone",
-                        help: "Only the aggregate report is written. The iPhone app reads it and never collects on its own."
+                        help: "Only the aggregate report is written. The iPhone app reads it and never collects on its own.",
+                        showsTitle: false
                     ) {
                         Toggle("Sync to iPhone", isOn: $settings.mobileReportEnabled)
                             .labelsHidden()
@@ -1334,7 +1307,6 @@ private struct SyncSettingsTab: View {
                     }
 
                     if settings.mobileReportEnabled {
-                        SettingsHairline()
                         TimelineView(.everyMinute) { _ in
                             mobileReportStatusRow(refreshCoordinator?.mobileReportStatus ?? .disabled)
                         }
@@ -1342,7 +1314,7 @@ private struct SyncSettingsTab: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 SettingsGroupCaption(title: "Devices")
 
                 SettingsRowsGroup {
@@ -1350,6 +1322,7 @@ private struct SyncSettingsTab: View {
                         Text("Turn on sync to see your other Macs here.")
                             .font(ThemeFont.role(.caption))
                             .foregroundStyle(Palette.ink3)
+                            .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else if model.remoteDevices.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
@@ -1365,12 +1338,9 @@ private struct SyncSettingsTab: View {
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                     } else {
                         TimelineView(.everyMinute) { context in
-                            VStack(spacing: 0) {
-                                ForEach(Array(model.remoteDevices.enumerated()), id: \.element.deviceID) { entry in
-                                    if entry.offset > 0 {
-                                        SettingsHairline()
-                                    }
-                                    remoteRow(entry.element, now: context.date)
+                            VStack(spacing: 20) {
+                                ForEach(model.remoteDevices, id: \.deviceID) { device in
+                                    remoteRow(device, now: context.date)
                                 }
                             }
                         }
@@ -1427,7 +1397,7 @@ private struct SyncSettingsTab: View {
             Spacer(minLength: 12)
             RemoteStatusLabel(state: device.effectiveState(now: now))
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
     }
@@ -1469,7 +1439,7 @@ private struct SyncSettingsTab: View {
                 .foregroundStyle(isWarning ? Palette.healthWarn : Palette.ink3)
                 .monospacedDigit()
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
@@ -1539,7 +1509,6 @@ private struct RemoteStatusLabel: View {
 
 private struct AboutSettingsTab: View {
     @Environment(AppSettings.self) private var settings
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.locale) private var locale
     @State private var cliStatus: CLIInstaller.Status = .notInstalled
     @State private var thirdPartyNoticesURL: URL?
@@ -1617,7 +1586,6 @@ private struct AboutSettingsTab: View {
 
             SettingsRowsGroup {
                 updateRow
-                SettingsHairline()
                 SettingsControlRow(
                     title: "Keep Token Taken up to date automatically",
                     help: "Checks for new versions every few hours and installs them quietly when you are not using the app. Turn off to check only when you click Check for Updates."
@@ -1627,11 +1595,8 @@ private struct AboutSettingsTab: View {
                         .toggleStyle(GlassToggleStyle())
                         .accessibilityLabel(Text("Keep Token Taken up to date automatically"))
                 }
-                SettingsHairline()
                 AboutValueRow(label: "License", value: Text(verbatim: "MIT"))
-                SettingsHairline()
                 AboutValueRow(label: "Acknowledgements", value: Text(verbatim: "tokscale, TokenTracker, Token Monitor"))
-                SettingsHairline()
                 SettingsControlRow(title: "Open-source licenses") {
                     HStack(spacing: 0) {
                         secondaryActionButton("Third-party notices") {
@@ -1643,7 +1608,6 @@ private struct AboutSettingsTab: View {
                     }
                     .accessibilityElement(children: .contain)
                 }
-                SettingsHairline()
                 AboutValueRow(label: "Privacy", value: Text("Read-only local Agent logs, no content uploads, no telemetry"))
             }
 
@@ -1662,17 +1626,16 @@ private struct AboutSettingsTab: View {
                             .disabled(cliStatus == .notInstalled)
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, 10)
                 .frame(minHeight: 48)
 
                 if let installationMessage {
-                    SettingsHairline()
                     Text(installationMessage)
                         .font(.system(size: 11.5, design: .monospaced))
                         .foregroundStyle(installationFailed ? SourceHealth.State.failed.dotColor : Palette.ink2)
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
                 }
             }
@@ -1711,17 +1674,12 @@ private struct AboutSettingsTab: View {
     }
 
     private var updateRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 16) {
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("Version")
-                            .font(ThemeFont.role(.body))
-                            .foregroundStyle(Palette.ink1)
-                        Text(verbatim: versionText)
-                            .font(ThemeFont.role(.numericCaption, size: 13))
-                            .foregroundStyle(Palette.ink2)
-                    }
+                    Text("Version")
+                        .font(ThemeFont.role(.body))
+                        .foregroundStyle(Palette.ink1)
                     updateStateLabel
                 }
 
@@ -1749,15 +1707,11 @@ private struct AboutSettingsTab: View {
 
             if let update = activeAvailableUpdate,
                !update.feed.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                releaseNotesBox(update.feed.notes)
+                releaseNotes(update.feed.notes)
             } else if let notice = appUpdater.justUpdated,
                       !notice.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Text("What's New in \(notice.version)")
-                            .font(ThemeFont.role(.sectionHeader))
-                            .foregroundStyle(Palette.ink2)
-                            .monospacedDigit()
                         Spacer(minLength: 8)
                         Button {
                             appUpdater.dismissJustUpdated()
@@ -1771,11 +1725,11 @@ private struct AboutSettingsTab: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel(Text("Dismiss"))
                     }
-                    releaseNotesBox(notice.notes)
+                    releaseNotes(notice.notes)
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(minHeight: 48)
     }
 
@@ -1881,66 +1835,71 @@ private struct AboutSettingsTab: View {
         }
     }
 
-    private func releaseNotesBox(_ notes: String) -> some View {
-        let shape = RadiusRole.badge.shape
-        return ViewThatFits(in: .vertical) {
+    private func releaseNotes(_ notes: String) -> some View {
+        ViewThatFits(in: .vertical) {
             releaseNotesContent(notes)
             ScrollView {
                 releaseNotesContent(notes)
             }
             .frame(height: 160)
         }
-        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            shape.fill(Palette.barTrack.opacity(0.5))
-        }
-        .overlay {
-            shape.strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth)
-        }
     }
 
     private func releaseNotesContent(_ notes: String) -> some View {
+        var lines = notes.split(separator: "\n", omittingEmptySubsequences: false)
+        if let heading = lines.firstIndex(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+           lines[heading].trimmingCharacters(in: .whitespaces).hasPrefix("## Token Taken ") {
+            lines.remove(at: heading)
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                let text = line.trimmingCharacters(in: .whitespaces)
+                if text.hasPrefix("### ") {
+                    inlineReleaseText(String(text.dropFirst(4)))
+                        .font(ThemeFont.role(.sectionHeader))
+                        .padding(.top, 6)
+                } else if text.hasPrefix("## ") {
+                    inlineReleaseText(String(text.dropFirst(3)))
+                        .font(ThemeFont.role(.title))
+                        .padding(.top, 6)
+                } else if text.hasPrefix("- ") {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("•").foregroundStyle(Palette.ink3)
+                        inlineReleaseText(String(text.dropFirst(2)))
+                    }
+                } else if text.isEmpty {
+                    Color.clear.frame(height: 4)
+                } else {
+                    inlineReleaseText(text)
+                }
+            }
+        }
+        .font(ThemeFont.role(.caption, size: 12))
+        .foregroundStyle(Palette.ink2)
+        .textSelection(.enabled)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func inlineReleaseText(_ source: String) -> Text {
         let attributed = (try? AttributedString(
-            markdown: notes,
+            markdown: source,
             options: AttributedString.MarkdownParsingOptions(
                 interpretedSyntax: .inlineOnlyPreservingWhitespace
             )
-        )) ?? AttributedString(notes)
-
+        )) ?? AttributedString(source)
         return Text(attributed)
-            .font(ThemeFont.role(.caption, size: 12))
-            .foregroundStyle(Palette.ink2)
-            .textSelection(.enabled)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func secondaryActionButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
         SettingsSecondaryButton(title, action: action)
     }
 
-    @ViewBuilder
     private func prominentActionButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        if ThemeKind.current == .liquidGlass {
-            if reduceTransparency {
-                Button(title, action: action)
-                    .font(ThemeFont.role(.control))
-                    .buttonStyle(.borderedProminent)
-                    .tint(Palette.roleAccent)
-                    .controlSize(.small)
-            } else {
-                Button(title, action: action)
-                    .font(ThemeFont.role(.control))
-                    .buttonStyle(.glassProminent)
-                    .tint(Palette.roleAccent)
-                    .controlSize(.small)
-            }
-        } else {
-            Button(title, action: action)
-                .buttonStyle(SettingsProminentButtonStyle())
-                .controlSize(.small)
-        }
+        Button(title, action: action)
+            .buttonStyle(SettingsProminentButtonStyle())
     }
 
     private func refreshCLIStatus() {
@@ -1994,7 +1953,7 @@ private struct SettingsProminentButtonStyle: ButtonStyle {
             .font(ThemeFont.role(.control))
             .foregroundStyle(Palette.onAccent)
             .padding(.horizontal, 12)
-            .padding(.vertical, 5)
+            .frame(height: 28)
             .background(
                 shape.fill(Palette.roleAccent.opacity(configuration.isPressed ? 0.85 : 1))
             )
@@ -2018,7 +1977,7 @@ private struct AboutValueRow: View {
                 .monospacedDigit()
                 .multilineTextAlignment(.trailing)
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .frame(minHeight: 48)
         .accessibilityElement(children: .combine)
     }

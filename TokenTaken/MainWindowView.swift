@@ -109,6 +109,7 @@ struct MainWindowView: View {
 
     private var dimensionSwitchRow: some View {
         DimensionSwitchRow(
+            period: model.period,
             summary: model.summary,
             dimension: $dimension,
             isPresentingShare: $isPresentingShare
@@ -156,10 +157,12 @@ struct MainWindowView: View {
                     // On macOS 26 the scroll view's AppKit frame reaches up under the title bar area and swallows
                     // clicks on anything laid out above it, so the switch row is a safe-area inset of the scroll view.
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 18) {
+                        VStack(alignment: .leading, spacing: 0) {
                             FieldLandscapeView(items: fieldItems, highlight: $highlight)
                             FieldCompositionStrip(counts: model.summary.total)
+                                .padding(.top, 14)
                             breakdownCard
+                                .padding(.top, 20)
                         }
                         .padding(.horizontal, 28)
                         .padding(.top, 8)
@@ -189,12 +192,9 @@ struct MainWindowView: View {
                             .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity)
                     }
 
-                    Rectangle().fill(Palette.hairline).frame(height: ThemeChrome.ruleWidth)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 20)
-
                     breakdownCard
                         .padding(.horizontal, 28)
+                        .padding(.top, 24)
                         .padding(.bottom, 24)
                 }
             }
@@ -203,6 +203,7 @@ struct MainWindowView: View {
 }
 
 private struct DimensionSwitchRow: View {
+    let period: Period
     let summary: UsageSummary
     @Binding var dimension: BreakdownDimension
     @Binding var isPresentingShare: Bool
@@ -211,6 +212,7 @@ private struct DimensionSwitchRow: View {
     @FocusState private var focusedDimension: BreakdownDimension?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.locale) private var locale
 
     var body: some View {
         HStack(spacing: 12) {
@@ -219,24 +221,21 @@ private struct DimensionSwitchRow: View {
                 case .cosmos:
                     let shape = RadiusRole.control.shape
                     HStack(spacing: 0) {
-                        segment(.sources, label: "Harnesses · \(summary.bySource.count)")
-                        segment(.models, label: "Models · \(summary.byModel.count)")
+                        segment(.sources, label: "Harnesses")
+                        segment(.models, label: "Models")
                     }
                     .background { shape.fill(CosmosPalette.background) }
                     .overlay { shape.strokeBorder(CosmosPalette.controlRule, lineWidth: ThemeChrome.ruleWidth) }
                 case .field:
-                    HStack(spacing: 2) {
-                        segment(.sources, label: "Harnesses · \(summary.bySource.count)")
-                        segment(.models, label: "Models · \(summary.byModel.count)")
+                    HStack(spacing: 12) {
+                        segment(.sources, label: "Harnesses")
+                        segment(.models, label: "Models")
                     }
-                    .padding(2)
-                    .background { Capsule().fill(Palette.cardSurface) }
-                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
                 case .liquidGlass:
                     GlassEffectContainer(spacing: 0) {
                         HStack(spacing: 2) {
-                            segment(.sources, label: "Harnesses · \(summary.bySource.count)")
-                            segment(.models, label: "Models · \(summary.byModel.count)")
+                            segment(.sources, label: "Harnesses")
+                            segment(.models, label: "Models")
                         }
                         .padding(2)
                     }
@@ -250,19 +249,51 @@ private struct DimensionSwitchRow: View {
 
             Spacer(minLength: 12)
 
+            periodLabel
+                .font(ThemeFont.role(.title))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
+
+            Spacer(minLength: 12)
+
             Button {
                 isPresentingShare = true
             } label: {
                 Image(systemName: "square.and.arrow.up")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Palette.ink2)
                     .frame(width: 28, height: 28)
                     .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(FieldPlainButtonStyle())
             .keyboardShortcut("s", modifiers: [.command, .shift])
             .help(Text("Share"))
             .accessibilityLabel(Text("Share"))
+        }
+    }
+
+    @ViewBuilder
+    private var periodLabel: some View {
+        let start = summary.start
+        switch period {
+        case .day:
+            Text("Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))")
+        case .week:
+            let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
+            if Calendar.current.isDate(start, inSameDayAs: today) || today <= start {
+                Text("This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))")
+            } else {
+                Text("This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))")
+            }
+        case .month:
+            Text(verbatim: start.formatted(.dateTime.locale(locale).year().month(.wide)))
+        case .year:
+            Text(verbatim: start.formatted(.dateTime.locale(locale).year()))
+        case .all:
+            Text("All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))")
         }
     }
 
@@ -280,11 +311,12 @@ private struct DimensionSwitchRow: View {
                 .padding(.horizontal, 12)
                 .modifier(DimensionSegmentSurface(
                     isSelected: isSelected,
+                    isFocused: focusedDimension == target,
                     reduceTransparency: reduceTransparency,
                     namespace: switchNamespace
                 ))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FieldPlainButtonStyle())
         .focused($focusedDimension, equals: target)
         .onKeyPress(.leftArrow) {
             select(.sources)
@@ -308,8 +340,12 @@ private struct DimensionSwitchRow: View {
 
 private struct DimensionSegmentSurface: ViewModifier {
     let isSelected: Bool
+    let isFocused: Bool
     let reduceTransparency: Bool
     let namespace: Namespace.ID
+
+    @State private var isHovered = false
+    @Environment(\.fieldControlPressed) private var isPressed
 
     func body(content: Content) -> some View {
         switch ThemeKind.current {
@@ -320,15 +356,22 @@ private struct DimensionSegmentSurface: ViewModifier {
                 .background { shape.fill(isSelected ? CosmosPalette.selection : .clear) }
                 .contentShape(shape)
         case .field:
-            if isSelected {
-                content
-                    .background { Capsule().fill(FieldPalette.hedge.opacity(0.16)) }
-                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
-                    .contentShape(Capsule())
-            } else {
-                content
-                    .contentShape(Capsule())
-            }
+            content
+                .background { Capsule().fill(FieldPalette.panel.opacity(isHovered || isPressed ? (isPressed ? 0.95 : 0.7) : 0)) }
+                .overlay(alignment: .bottom) {
+                    FieldFurrow()
+                        .stroke(Palette.roleAccent, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                        .frame(height: 5)
+                        .padding(.horizontal, 8)
+                        .opacity(isSelected ? 1 : 0)
+                }
+                .overlay {
+                    if isFocused {
+                        Capsule().strokeBorder(Palette.roleAccent, lineWidth: 1.5)
+                    }
+                }
+                .contentShape(Capsule())
+                .onHover { isHovered = $0 }
         case .liquidGlass:
             if !isSelected {
                 content
@@ -350,7 +393,7 @@ private struct DimensionSegmentSurface: ViewModifier {
 
 // MARK: - Tray
 
-/// The themed tray: window controls, period, the period's total and cost, then devices and sync.
+/// The themed tray: window controls, period selection, total and cost, then devices and sync.
 /// In Settings it carries the section list instead.
 private struct Tray: View {
     let isFirstLaunchCollecting: Bool
@@ -378,7 +421,7 @@ private struct Tray: View {
                 .padding(.top, 20)
 
                 SummaryRail(summary: model.summary, isCollecting: isFirstLaunchCollecting)
-                    .padding(.top, 24)
+                    .padding(.top, 32)
                     .padding(.horizontal, 4)
 
                 Spacer(minLength: 20)
@@ -386,10 +429,13 @@ private struct Tray: View {
                 TrayDevices(summary: model.summary, isCollecting: isFirstLaunchCollecting)
                     .padding(.horizontal, 4)
 
-                Rectangle().fill(Palette.hairline).frame(height: ThemeChrome.ruleWidth)
-                    .padding(.vertical, 12)
+                if ThemeKind.current != .field {
+                    Rectangle().fill(Palette.hairline).frame(height: ThemeChrome.ruleWidth)
+                        .padding(.vertical, 12)
+                }
 
                 TrayFooter(isFirstLaunchCollecting: isFirstLaunchCollecting)
+                    .padding(.top, ThemeKind.current == .field ? 20 : 0)
             case .settings:
                 SettingsSidebar()
                     .padding(.top, 10)
@@ -399,10 +445,14 @@ private struct Tray: View {
         .padding(.top, 8)
         .padding(.bottom, 14)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background { shape.fill(Palette.traySurface) }
-        .overlay { shape.strokeBorder(Palette.trayRim, lineWidth: ThemeChrome.ruleWidth) }
+        .background { shape.fill(ThemeKind.current == .field ? FieldPalette.panel : Palette.traySurface) }
+        .overlay {
+            if ThemeKind.current != .field {
+                shape.strokeBorder(Palette.trayRim, lineWidth: ThemeChrome.ruleWidth)
+            }
+        }
         .shadow(
-            color: .black.opacity(ThemeChrome.trayInset == 0 || reduceTransparency ? 0 : (scheme == .dark ? 0.30 : 0.07)),
+            color: .black.opacity(ThemeKind.current == .field || ThemeChrome.trayInset == 0 || reduceTransparency ? 0 : (scheme == .dark ? 0.30 : 0.07)),
             radius: 14,
             x: 0,
             y: 4
@@ -534,12 +584,12 @@ private struct TraySettingsButton: View {
             router.openSettings()
         } label: {
             Image(systemName: "gearshape")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(Palette.ink2)
                 .frame(width: 28, height: 28)
                 .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FieldPlainButtonStyle())
         .help(Text("Settings (⌘,)"))
         .accessibilityLabel(Text("Settings"))
     }
@@ -565,6 +615,7 @@ struct RefreshNowButton: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 13, weight: .medium))
                     .rotationEffect(.degrees(isSpinning ? 360 : 0))
                     .animation(
                         isSpinning ? .linear(duration: 0.9).repeatForever(autoreverses: false) : .default,
@@ -583,7 +634,7 @@ struct RefreshNowButton: View {
             .frame(width: showsUpdatingText ? nil : 28, height: 28)
             .modifier(RoundGlassControlSurface(reduceTransparency: reduceTransparency, isCapsule: showsUpdatingText))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FieldPlainButtonStyle())
         .disabled(refreshCoordinator == nil || isRefreshing)
         .opacity(refreshCoordinator == nil ? 0.45 : 1)
         .help(Text(isRefreshing ? "Updating…" : "Refresh now"))
@@ -601,6 +652,9 @@ private struct RoundGlassControlSurface: ViewModifier {
     let reduceTransparency: Bool
     var isCapsule = false
 
+    @State private var isHovered = false
+    @Environment(\.fieldControlPressed) private var isPressed
+
     func body(content: Content) -> some View {
         switch ThemeKind.current {
         case .cosmos:
@@ -610,16 +664,17 @@ private struct RoundGlassControlSurface: ViewModifier {
                 .overlay { shape.strokeBorder(CosmosPalette.controlRule, lineWidth: ThemeChrome.ruleWidth) }
                 .contentShape(shape)
         case .field:
+            let opacity = isHovered || isPressed ? (isPressed ? 0.95 : 0.7) : 0
             if isCapsule {
                 content
-                    .background { Capsule().fill(Palette.cardSurface) }
-                    .overlay { Capsule().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
+                    .background { Capsule().fill(FieldPalette.panel.opacity(opacity)) }
                     .contentShape(Capsule())
+                    .onHover { isHovered = $0 }
             } else {
                 content
-                    .background { Circle().fill(Palette.cardSurface) }
-                    .overlay { Circle().strokeBorder(Palette.hairline, lineWidth: ThemeChrome.ruleWidth) }
+                    .background { Circle().fill(FieldPalette.panel.opacity(opacity)) }
                     .contentShape(Circle())
+                    .onHover { isHovered = $0 }
             }
         case .liquidGlass:
             if reduceTransparency {
@@ -636,12 +691,14 @@ private struct RoundGlassControlSurface: ViewModifier {
                 }
             } else if isCapsule {
                 content
-                    .themedGlass(.regular.interactive(), in: .capsule)
+                    .background { Capsule().fill(isHovered ? Palette.barTrack : .clear) }
                     .contentShape(Capsule())
+                    .onHover { isHovered = $0 }
             } else {
                 content
-                    .themedGlass(.regular.interactive(), in: .circle)
+                    .background { Circle().fill(isHovered ? Palette.barTrack : .clear) }
                     .contentShape(Circle())
+                    .onHover { isHovered = $0 }
             }
         }
     }
@@ -661,8 +718,9 @@ private struct FirstLaunchCollectingCard: View {
         return "Reading supported agent logs in read-only mode. Your usage overview will appear automatically when finished."
     }
 
+    @ViewBuilder
     var body: some View {
-        VStack(spacing: 16) {
+        let content = VStack(spacing: 16) {
             CollectingVesselGlyph()
                 .frame(width: 56, height: 72)
                 .accessibilityHidden(true)
@@ -694,7 +752,11 @@ private struct FirstLaunchCollectingCard: View {
         }
         .padding(28)
         .frame(maxWidth: 480)
-        .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
+        if settings.theme == .field {
+            content
+        } else {
+            content.atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
+        }
     }
 }
 
@@ -724,13 +786,11 @@ private struct CollectingVesselGlyph: View {
     }
 
     private var fieldBody: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
         let colors = FieldColors.cached(isDark: scheme == .dark)
         return Canvas { context, size in
             let rect = CGRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
             let clip = Path(roundedRect: rect, cornerRadius: 12, style: .continuous)
             context.clip(to: clip)
-            context.fill(Path(rect), with: .color(colors.panel.color))
 
             var mound = Path()
             let groundY = rect.maxY - 14
@@ -784,11 +844,6 @@ private struct CollectingVesselGlyph: View {
             )
             rightLeaf.closeSubpath()
             context.fill(rightLeaf, with: .color(colors.hedge.mix(colors.crops[FieldCrop.tea.rawValue], 0.5).color))
-        }
-        .overlay {
-            shape
-                .strokeBorder(FieldPalette.rule, lineWidth: 1)
-                .padding(4)
         }
     }
 
@@ -901,16 +956,19 @@ private struct DashboardEmptyStateCard: View {
         )
     }
 
+    @ViewBuilder
     var body: some View {
         let content = emptyContent
-        VStack(spacing: 16) {
+        let stateContent = VStack(spacing: 16) {
             Image(systemName: content.symbol)
                 .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(content.color)
                 .frame(width: 48, height: 48)
                 .background {
-                    RadiusRole.inner.shape
-                        .fill(Palette.barTrack)
+                    if ThemeKind.current != .field {
+                        RadiusRole.inner.shape
+                            .fill(Palette.barTrack)
+                    }
                 }
                 .accessibilityHidden(true)
 
@@ -939,7 +997,11 @@ private struct DashboardEmptyStateCard: View {
         }
         .padding(28)
         .frame(maxWidth: 460)
-        .atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
+        if ThemeKind.current == .field {
+            stateContent
+        } else {
+            stateContent.atmosphereCard(reduceTransparency: reduceTransparency, isDark: scheme == .dark)
+        }
     }
 }
 

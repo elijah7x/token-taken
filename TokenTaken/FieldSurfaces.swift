@@ -9,7 +9,7 @@ enum ThemeRuntime {
     nonisolated(unsafe) static var isCosmos = false
 }
 
-/// Solid paper button with a ruled edge, replacing `.glass` under the Field theme.
+/// Bare text control with a paper wash only while hovered or pressed.
 struct FieldButtonStyle: ButtonStyle {
     var horizontalPadding: CGFloat = 12
     var verticalPadding: CGFloat = 5
@@ -27,19 +27,39 @@ struct FieldButtonStyle: ButtonStyle {
         let horizontalPadding: CGFloat
         let verticalPadding: CGFloat
         @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovered = false
 
         var body: some View {
             let shape = RadiusRole.control.shape
+            let showsWash = isEnabled && (isHovered || configuration.isPressed)
             configuration.label
                 .padding(.horizontal, horizontalPadding)
                 .padding(.vertical, verticalPadding)
                 .background {
-                    shape.fill(configuration.isPressed && isEnabled ? FieldPalette.rule : FieldPalette.panel)
+                    shape.fill(FieldPalette.panel.opacity(showsWash ? (configuration.isPressed ? 0.95 : 0.7) : 0))
                 }
-                .overlay { shape.stroke(FieldPalette.rule, lineWidth: ThemeChrome.ruleWidth) }
                 .contentShape(shape)
+                .onHover { isHovered = $0 }
                 .opacity(isEnabled ? (configuration.isPressed ? 0.92 : 1) : 0.45)
         }
+    }
+}
+
+private struct FieldControlPressedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var fieldControlPressed: Bool {
+        get { self[FieldControlPressedKey.self] }
+        set { self[FieldControlPressedKey.self] = newValue }
+    }
+}
+
+struct FieldPlainButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .environment(\.fieldControlPressed, configuration.isPressed)
     }
 }
 

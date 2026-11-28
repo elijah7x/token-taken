@@ -1,6 +1,72 @@
 import AppKit
+import Darwin
 import SwiftUI
 import TokenTakenKit
+
+#if DEBUG
+struct SyntheticLaunchOptions {
+    static let current: SyntheticLaunchOptions? = {
+        let arguments = Set(CommandLine.arguments)
+        let flags = ["-synthetic", "-synthetic-partial", "-synthetic-lens", "-synthetic-dark", "-synthetic-zh", "-synthetic-field", "-synthetic-cosmos", "-synthetic-settings"]
+        guard flags.contains(where: arguments.contains) else { return nil }
+        return SyntheticLaunchOptions(
+            partial: arguments.contains("-synthetic-partial"),
+            lens: arguments.contains("-synthetic-lens"),
+            dark: arguments.contains("-synthetic-dark"),
+            simplifiedChinese: arguments.contains("-synthetic-zh"),
+            field: arguments.contains("-synthetic-field"),
+            cosmos: arguments.contains("-synthetic-cosmos"),
+            settings: arguments.contains("-synthetic-settings")
+        )
+    }()
+
+    let partial: Bool
+    let lens: Bool
+    let dark: Bool
+    let simplifiedChinese: Bool
+    let field: Bool
+    let cosmos: Bool
+    let settings: Bool
+
+    var remoteDevices: [RemoteDeviceStatus] {
+        guard partial else { return [] }
+        return [
+            RemoteDeviceStatus(deviceID: "studio", displayName: "Mac Studio", lastWrite: nil, state: .partial),
+            RemoteDeviceStatus(deviceID: "mini", displayName: "Mac mini", lastWrite: nil, state: .stale),
+        ]
+    }
+
+    func isolateProcessPaths() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TokenTakenSynthetic-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        let support = root.appendingPathComponent("Application Support", isDirectory: true)
+        let sync = root.appendingPathComponent("Sync", isDirectory: true)
+        try? FileManager.default.createDirectory(at: sync, withIntermediateDirectories: true)
+        setenv("TOKEN_TAKEN_SUPPORT_DIR", support.path, 1)
+        setenv("TOKEN_TAKEN_SYNC_ROOT", sync.path, 1)
+    }
+
+    func makeDefaults() -> UserDefaults {
+        let suiteName = "io.github.elijah7x.TokenTaken.synthetic.debug"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            fatalError("Could not create the synthetic defaults suite.")
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.setPersistentDomain([
+            "theme": cosmos ? AppTheme.cosmos.rawValue : (field ? AppTheme.field.rawValue : AppTheme.liquidGlass.rawValue),
+            "liquidView": lens ? LiquidView.lens.rawValue : LiquidView.confluence.rawValue,
+            "appearance": dark ? AppAppearance.dark.rawValue : AppAppearance.light.rawValue,
+            "appLanguage": simplifiedChinese ? AppLanguage.simplifiedChinese.rawValue : AppLanguage.english.rawValue,
+            "numberUnits": NumberUnits.automatic.rawValue,
+            "syncEnabled": partial,
+            "cursorAccountCollection": false,
+            "mobileReportEnabled": false,
+            "autoUpdateEnabled": false,
+        ], forName: suiteName)
+        return defaults
+    }
+}
+#endif
 
 @main
 struct TokenTakenApp: App {
@@ -11,6 +77,25 @@ struct TokenTakenApp: App {
     @State private var router = MainWindowRouter()
 
     init() {
+        #if DEBUG
+        if let synthetic = SyntheticLaunchOptions.current {
+            synthetic.isolateProcessPaths()
+            let settings = AppSettings(defaults: synthetic.makeDefaults())
+            let model = AppModel(
+                store: SyntheticUsageStore(),
+                syntheticRemoteDevices: synthetic.remoteDevices
+            )
+            _settings = State(initialValue: settings)
+            _model = State(initialValue: model)
+            _refreshCoordinator = State(initialValue: nil)
+            let router = MainWindowRouter()
+            if synthetic.settings { router.route = .settings }
+            _router = State(initialValue: router)
+            appDelegate.configureSynthetic(settings: settings, model: model)
+            return
+        }
+        #endif
+
         let settings = AppSettings()
         let coordinator: RefreshCoordinator?
         do {
@@ -161,8 +246,14 @@ private struct CheckForUpdatesCommand: View {
         Button("Check for Updates…") {
             router.settingsSection = .about
             router.openSettings(using: openWindow)
+            #if DEBUG
+            guard SyntheticLaunchOptions.current == nil else { return }
+            #endif
             Task { await UpdateChecker.shared.checkNow() }
         }
+        #if DEBUG
+        .disabled(SyntheticLaunchOptions.current != nil)
+        #endif
     }
 }
 
@@ -172,6 +263,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private weak var model: AppModel?
     private var refreshCoordinator: RefreshCoordinator?
     private var didStartUpdater = false
+    #if DEBUG
+    private var isSynthetic = false
+    #endif
     private nonisolated(unsafe) var dayChangedObserver: NSObjectProtocol?
 
     deinit {
@@ -186,8 +280,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.refreshCoordinator = refreshCoordinator
     }
 
+    #if DEBUG
+    func configureSynthetic(settings: AppSettings, model: AppModel) {
+        configure(settings: settings, model: model, refreshCoordinator: nil)
+        isSynthetic = true
+    }
+    #endif
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         settings?.applyAppearance()
+        #if DEBUG
+        guard !isSynthetic else { return }
+        #endif
         if dayChangedObserver == nil {
             dayChangedObserver = NotificationCenter.default.addObserver(
                 forName: .NSCalendarDayChanged,
@@ -219,6 +323,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        #if DEBUG
+        guard !isSynthetic else { return }
+        #endif
         _ = AppUpdater.shared.installStagedOnQuit()
     }
 }

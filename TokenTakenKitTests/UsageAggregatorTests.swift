@@ -425,6 +425,73 @@ final class UsageAggregatorTests: XCTestCase {
         XCTAssertTrue(slice.bySource.allSatisfy { $0.cacheSavingsUSD == nil })
         XCTAssertTrue(slice.byDevice.allSatisfy { $0.cacheSavingsUSD == nil })
     }
+
+    func testDailyOnlySourceSkipsHourlyZeroFillAndMarksDaySeriesUnknown() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = try SQLiteUsageStore(url: directory.appendingPathComponent("usage.sqlite"))
+        var viewer = Calendar(identifier: .gregorian)
+        viewer.timeZone = .current
+        let day = "2026-11-09"
+        let dayStart = try XCTUnwrap(UsageDay.date(from: day, in: viewer.timeZone))
+        let now = dayStart.addingTimeInterval(12 * 3_600)
+        let device = Device(id: "device-local", name: "Test Mac")
+
+        let deepSeekRecord = UsageRecord(
+            day: day,
+            timeZoneID: viewer.timeZone.identifier,
+            deviceID: device.id,
+            sourceID: "deepseek-cli",
+            modelID: "deepseek-chat",
+            counts: TokenCounts(uncategorized: 500),
+            eventCount: 2
+        )
+        let claudeRecord = UsageRecord(
+            day: day,
+            timeZoneID: viewer.timeZone.identifier,
+            deviceID: device.id,
+            sourceID: "claude",
+            modelID: "claude-sonnet-4-5",
+            counts: TokenCounts(input: 100),
+            eventCount: 1
+        )
+        let runner = CollectionRunner(
+            store: store,
+            device: device,
+            collectors: [
+                FixedBatchCollector(
+                    sourceIDs: ["deepseek-cli"],
+                    batch: CollectionBatch(daily: [deepSeekRecord], hourly: [], skippedRecords: 0)
+                ),
+                FixedBatchCollector(
+                    sourceIDs: ["claude"],
+                    batch: CollectionBatch(daily: [claudeRecord], hourly: [], skippedRecords: 0)
+                ),
+            ]
+        )
+
+        let health = await runner.runAll(now: now)
+        XCTAssertEqual(health.first { $0.sourceID == "deepseek-cli" }?.state, .ok)
+        XCTAssertEqual(health.first { $0.sourceID == "claude" }?.state, .ok)
+
+        let hourly = try store.hourly()
+        XCTAssertTrue(hourly.filter { $0.sourceID == "deepseek-cli" }.isEmpty)
+        XCTAssertEqual(hourly.filter { $0.sourceID == "claude" }.count, 48)
+
+        let summary = try UsageAggregator(store: store, calendar: viewer, now: now).summary(for: .day)
+        XCTAssertEqual(summary.total.uncategorized, 500)
+        XCTAssertEqual(summary.total.input, 100)
+        XCTAssertFalse(summary.series.isEmpty)
+        XCTAssertTrue(summary.series.allSatisfy { !$0.isKnown })
+    }
+}
+
+private struct FixedBatchCollector: UsageCollector {
+    let sourceIDs: [String]
+    let batch: CollectionBatch
+    func collect() async throws -> CollectionBatch { batch }
 }
 
 private struct GranularityStore: UsageStore {

@@ -15,13 +15,20 @@ struct MenuBarContent: View {
 
     private var today: UsageSummary { model.todaySummary }
 
+    private var showsUpdaterUI: Bool {
+        #if DEBUG
+        if SyntheticLaunchOptions.current != nil { return false }
+        #endif
+        return true
+    }
+
     private var activeSources: [Breakdown] {
         today.bySource.filter { $0.counts.total > 0 }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let notice = AppUpdater.shared.justUpdated {
+            if showsUpdaterUI, let notice = AppUpdater.shared.justUpdated {
                 justUpdatedRow(version: notice.version)
             }
 
@@ -287,7 +294,7 @@ struct MenuBarContent: View {
 
     private var actionRow: some View {
         VStack(spacing: 6) {
-            if case .ready = AppUpdater.shared.phase {
+            if showsUpdaterUI, case .ready = AppUpdater.shared.phase {
                 MenuBarPrimaryButton(title: "Restart to Update") {
                     AppUpdater.shared.installNowAndRelaunch()
                 }

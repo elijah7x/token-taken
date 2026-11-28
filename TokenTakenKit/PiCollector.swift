@@ -84,7 +84,7 @@ struct PiFormatScan: Sendable {
     /// Placeholder epoch timestamps used to land usage in 1970; treated as missing.
     static let minimumTimestamp = Date(timeIntervalSince1970: 1_577_836_800)
     /// Bumped whenever the persisted incremental state layout or scan semantics change.
-    static let stateFormatVersion = 5
+    static let stateFormatVersion = 6
 
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
@@ -712,9 +712,11 @@ struct PiFormatScan: Sendable {
         let output: JSONInteger?
         let reasoningTokens: JSONInteger?
         let reasoning: JSONInteger?
+        let totalTokens: JSONInteger?
+        let total_tokens: JSONInteger?
 
         enum CodingKeys: String, CodingKey {
-            case input, cacheRead, cacheWrite, output, reasoningTokens, reasoning
+            case input, cacheRead, cacheWrite, output, reasoningTokens, reasoning, totalTokens, total_tokens
         }
 
         init(from decoder: Decoder) throws {
@@ -725,6 +727,8 @@ struct PiFormatScan: Sendable {
             output = try values.decodeIfPresent(JSONInteger.self, forKey: .output)
             reasoningTokens = try values.decodeIfPresent(JSONInteger.self, forKey: .reasoningTokens)
             reasoning = try values.decodeIfPresent(JSONInteger.self, forKey: .reasoning)
+            totalTokens = try values.decodeIfPresent(JSONInteger.self, forKey: .totalTokens)
+            total_tokens = try values.decodeIfPresent(JSONInteger.self, forKey: .total_tokens)
         }
     }
 
@@ -905,7 +909,8 @@ struct PiFormatScan: Sendable {
                 }
             case .usage:
                 if keyEquals("input", key) || keyEquals("cacheRead", key) || keyEquals("cacheWrite", key)
-                    || keyEquals("output", key) || keyEquals("reasoningTokens", key) || keyEquals("reasoning", key) {
+                    || keyEquals("output", key) || keyEquals("reasoningTokens", key) || keyEquals("reasoning", key)
+                    || keyEquals("totalTokens", key) || keyEquals("total_tokens", key) {
                     return .number
                 }
             }
@@ -1421,32 +1426,88 @@ struct PiFormatScan: Sendable {
             return CollectionBatch(daily: dailyRecords, hourly: hourlyRecords, skippedRecords: skippedRecords)
         }
 
-        /// Splits reasoning out of output. pi and oh-my-pi both report reasoning as a breakdown of
-        /// `output`: their `totalTokens` is `input + cacheRead + cacheWrite + output`, so reasoning is
-        /// already inside it and adding it again would double count.
+        /// Normalizes cache-inclusive input and reasoning/output split using `totalTokens` when present.
+        /// pi and oh-my-pi normally report exclusive input and reasoning inside `output`, but some
+        /// providers log cache-inclusive `input` or exclusive `reasoning`; `totalTokens` disambiguates
+        /// both without double counting.
         static func tokenCounts(from usage: ScanUsage) -> (TokenCounts, Bool)? {
             let input = usage.input?.value ?? 0
             let cacheRead = usage.cacheRead?.value ?? 0
             let cacheWrite = usage.cacheWrite?.value ?? 0
             let rawOutput = usage.output?.value ?? 0
             let reportedReasoning = usage.reasoningTokens?.value ?? usage.reasoning?.value
+            let reportedTotal = (usage.totalTokens ?? usage.total_tokens)?.value
+            if let total = reportedTotal, total < 0 {
+                return nil
+            }
             guard input >= 0, cacheRead >= 0, cacheWrite >= 0, rawOutput >= 0, (reportedReasoning ?? 0) >= 0 else {
                 return nil
             }
+
+            func checkedSum(_ terms: Int64...) -> Int64? {
+                var sum: Int64 = 0
+                for term in terms {
+                    let (next, overflow) = sum.addingReportingOverflow(term)
+                    if overflow { return nil }
+                    sum = next
+                }
+                return sum
+            }
+
+            var effectiveInput = input
+            if let total = reportedTotal, total > 0 {
+                let r = reportedReasoning ?? 0
+                let outSums: [Int64]
+                if r > 0, let combined = checkedSum(rawOutput, r) {
+                    outSums = [rawOutput, combined]
+                } else {
+                    outSums = [rawOutput]
+                }
+                let matchesExclusive = outSums.contains {
+                    checkedSum(input, cacheRead, cacheWrite, $0) == total
+                }
+                if !matchesExclusive {
+                    if cacheRead > 0, input >= cacheRead,
+                       outSums.contains(where: { checkedSum(input, cacheWrite, $0) == total }) {
+                        effectiveInput = input - cacheRead
+                    } else if let cacheTotal = checkedSum(cacheRead, cacheWrite),
+                              cacheTotal > 0, input >= cacheTotal,
+                              outSums.contains(where: { checkedSum(input, $0) == total }) {
+                        effectiveInput = input - cacheTotal
+                    }
+                }
+            }
+
+            let output: Int64
             let reasoning: Int64
             let reasoningKnown: Bool
-            if let reportedReasoning, reportedReasoning <= rawOutput {
-                reasoning = reportedReasoning
-                reasoningKnown = true
+            if let r = reportedReasoning {
+                if r > 0, let total = reportedTotal,
+                   checkedSum(effectiveInput, cacheRead, cacheWrite, rawOutput, r) == total,
+                   checkedSum(effectiveInput, cacheRead, cacheWrite, rawOutput) != total {
+                    output = rawOutput
+                    reasoning = r
+                    reasoningKnown = true
+                } else if r <= rawOutput {
+                    output = rawOutput - r
+                    reasoning = r
+                    reasoningKnown = true
+                } else {
+                    output = rawOutput
+                    reasoning = 0
+                    reasoningKnown = false
+                }
             } else {
+                output = rawOutput
                 reasoning = 0
                 reasoningKnown = false
             }
+
             let counts = TokenCounts(
-                input: input,
+                input: effectiveInput,
                 cacheRead: cacheRead,
                 cacheWrite: cacheWrite,
-                output: rawOutput - reasoning,
+                output: output,
                 reasoning: reasoning
             )
             return (counts, reasoningKnown)

@@ -4,19 +4,18 @@ import os
 
 public struct TokscaleCollector: UsageCollector {
     public static let defaultClients = [
-        "claude", "codex", "kimi", "opencode", "gemini", "droid",
+        "claude", "codex", "kimi", "opencode", "droid",
         "dsh", "fx",
     ]
 
     /// Engine client id to Token Taken source id. Clients sharing a source are always collected in one engine run:
     /// tokscale deduplicates the Antigravity family by response id only across clients requested together.
-    /// Devin (ADR-0009) and Grok (ADR-0014) are collected natively, so they are no longer engine clients.
+    /// Devin (ADR-0009), Grok (ADR-0014), and Gemini (ADR-0020) are collected natively, so they are no longer engine clients.
     private static let sourceMap = [
         "claude": "claude",
         "codex": "codex",
         "kimi": "kimi",
         "opencode": "opencode",
-        "gemini": "gemini",
         "droid": "factory",
         "dsh": "dsh",
         "fx": "fx",
@@ -38,9 +37,9 @@ public struct TokscaleCollector: UsageCollector {
     private let fingerprint: @Sendable (String) -> ClientFingerprint
 
     /// Bump when the per-client fingerprint or output mapping changes.
-    static let stateFormatVersion = 4
+    static let stateFormatVersion = 5
     /// Must match engine/engine.lock.json; a new engine forces a full collection.
-    static let engineVersion = "4.21.0"
+    static let engineVersion = "4.23.1"
     private static let logger = Logger(subsystem: "io.github.elijah7x.TokenTaken", category: "collection")
 
     struct ClientFingerprint: Codable, Hashable, Sendable {
@@ -348,12 +347,21 @@ public struct TokscaleCollector: UsageCollector {
                   entry.hour.hasSuffix(":00"), entry.messageCount >= 0 else {
                 throw CollectorError.invalidOutput("tokscale output was invalid")
             }
-            let counts = TokenCounts(input: entry.input, cacheRead: entry.cacheRead, cacheWrite: entry.cacheWrite, output: entry.output)
+            let counts = TokenCounts(
+                input: entry.input,
+                cacheRead: entry.cacheRead,
+                cacheWrite: entry.cacheWrite,
+                output: entry.output,
+                reasoning: entry.reasoning ?? 0
+            )
             guard valid(counts) else { throw CollectorError.invalidOutput("tokscale output was invalid") }
             guard hour <= currentHour else { continue }
-            var row = totals[hour] ?? HourlyUsage(hourStart: hour, deviceID: deviceID, sourceID: sourceID, counts: .zero, eventCount: 0, reasoningKnown: false)
+            var row = totals[hour] ?? HourlyUsage(
+                hourStart: hour, deviceID: deviceID, sourceID: sourceID, counts: .zero, eventCount: 0, reasoningKnown: true
+            )
             row.counts += counts
             row.eventCount += entry.messageCount
+            row.reasoningKnown = row.reasoningKnown && (entry.reasoning != nil)
             totals[hour] = row
         }
         return totals.values.sorted { $0.hourStart < $1.hourStart }
@@ -364,12 +372,20 @@ public struct TokscaleCollector: UsageCollector {
     }
 
     // Paths and environment overrides follow tokscale-core/src/clients.rs and scanner.rs.
-    static func sourceAvailable(client: String) -> Bool {
-        roots(client: client).contains { FileManager.default.fileExists(atPath: $0.path) }
+    static func sourceAvailable(
+        client: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        roots(client: client, home: home, environment: environment).contains { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// Metadata-only walk of everything tokscale reads for a client; file contents are never opened.
-    static func fingerprint(client: String) -> ClientFingerprint {
+    static func fingerprint(
+        client: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ClientFingerprint {
         var result = ClientFingerprint(fileCount: 0, totalSize: 0, latestModification: 0)
         let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey]
         func add(_ url: URL) {
@@ -385,7 +401,8 @@ public struct TokscaleCollector: UsageCollector {
             mix((values.contentModificationDate?.timeIntervalSinceReferenceDate ?? 0).bitPattern)
             result.filesHash &+= hash
         }
-        for root in roots(client: client) + extraFingerprintRoots(client: client) {
+        for root in roots(client: client, home: home, environment: environment)
+            + extraFingerprintRoots(client: client, home: home, environment: environment) {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory) else { continue }
             if isDirectory.boolValue {
@@ -399,19 +416,36 @@ public struct TokscaleCollector: UsageCollector {
         return result
     }
 
-    /// Secondary inputs tokscale 4.21.0 also reads (scanner.rs); they decide change detection, not availability.
-    private static func extraFingerprintRoots(client: String) -> [URL] {
+    /// Secondary inputs tokscale 4.23.1 also reads (scanner.rs); they decide change detection, not availability.
+    static func extraFingerprintRoots(
+        client: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [URL] {
+        func root(_ variable: String, _ fallback: String) -> URL {
+            if let path = environment[variable], !path.isEmpty { return URL(fileURLWithPath: path) }
+            return home.appendingPathComponent(fallback)
+        }
         switch client {
+        case "claude":
+            // tokscale 4.23.1 skips Claude Agent SDK transcripts claimed by OpenCode DBs (#1597) and also scans
+            // ~/.claude/transcripts; availability via roots(client: "claude") stays [.claude/projects] only.
+            let claudeBase = root("CLAUDE_CONFIG_DIR", ".claude")
+            let xdgDataBase = root("XDG_DATA_HOME", ".local/share")
+            return [claudeBase.appendingPathComponent("transcripts")]
+                + discoverOpenCodeDBs(in: xdgDataBase.appendingPathComponent("opencode"))
         case "devin-desktop":
             // The desktop parser resolves sessions through the CLI database; its own fingerprint is the CLI's.
-            return roots(client: "devin-cli")
+            return roots(client: "devin-cli", home: home, environment: environment)
         default: return []
         }
     }
 
-    static func roots(client: String) -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let environment = ProcessInfo.processInfo.environment
+    static func roots(
+        client: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> [URL] {
         func root(_ variable: String, _ fallback: String) -> URL {
             if let path = environment[variable], !path.isEmpty { return URL(fileURLWithPath: path) }
             return home.appendingPathComponent(fallback)
@@ -757,6 +791,7 @@ public struct TokscaleCollector: UsageCollector {
         let output: Int64
         let cacheRead: Int64
         let cacheWrite: Int64
+        let reasoning: Int64?
         let messageCount: Int64
     }
 }

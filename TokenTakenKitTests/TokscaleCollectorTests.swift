@@ -87,15 +87,9 @@ final class TokscaleCollectorTests: XCTestCase {
 
         let daily = try TokscaleCollector.parse(data: fixture("tokscale-gemini-droid-graph"),
             clients: ["gemini", "droid"], deviceID: "device-a", timeZone: zone)
+        // Gemini is native (ADR-0016); its engine rows are ignored here while droid -> factory stays mapped.
+        XCTAssertFalse(daily.contains { $0.sourceID == "gemini" })
         let expectedDaily: [(day: String, sourceID: String, modelID: String, counts: TokenCounts, events: Int64)] = [
-            ("2026-11-09", "gemini", "gemini-2.5-pro",
-                TokenCounts(input: 1_000, cacheRead: 400, cacheWrite: 0, output: 250, reasoning: 80), 1),
-            ("2026-11-09", "gemini", "gemini-2.5-flash",
-                TokenCounts(input: 600, cacheRead: 150, cacheWrite: 0, output: 120, reasoning: 40), 1),
-            ("2026-11-10", "gemini", "gemini-2.5-pro",
-                TokenCounts(input: 1_500, cacheRead: 500, cacheWrite: 0, output: 320, reasoning: 110), 1),
-            ("2026-11-10", "gemini", "gemini-2.5-flash",
-                TokenCounts(input: 800, cacheRead: 200, cacheWrite: 0, output: 180, reasoning: 60), 1),
             ("2026-11-09", "factory", "claude-sonnet-4-5",
                 TokenCounts(input: 2_100, cacheRead: 900, cacheWrite: 300, output: 480, reasoning: 120), 2),
             ("2026-11-10", "factory", "claude-opus-4-5",
@@ -113,17 +107,11 @@ final class TokscaleCollectorTests: XCTestCase {
         }
 
         let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-10T16:30:00Z"))
-        let geminiHourly = try TokscaleCollector.parseHourly(data: fixture("tokscale-gemini-droid-hourly-gemini"),
-            client: "gemini", deviceID: "device-a", timeZone: zone, now: now)
+        XCTAssertThrowsError(try TokscaleCollector.parseHourly(data: fixture("tokscale-gemini-droid-hourly-gemini"),
+            client: "gemini", deviceID: "device-a", timeZone: zone, now: now))
         let droidHourly = try TokscaleCollector.parseHourly(data: fixture("tokscale-gemini-droid-hourly-droid"),
             client: "droid", deviceID: "device-a", timeZone: zone, now: now)
         let expectedHourly: [(rows: [HourlyUsage], sourceID: String, hours: [String], counts: [TokenCounts], events: [Int64])] = [
-            (geminiHourly, "gemini", ["2026-11-09T02:00:00Z", "2026-11-09T03:00:00Z", "2026-11-10T01:00:00Z", "2026-11-10T05:00:00Z"],
-                [TokenCounts(input: 1_000, cacheRead: 400, cacheWrite: 0, output: 250),
-                 TokenCounts(input: 600, cacheRead: 150, cacheWrite: 0, output: 120),
-                 TokenCounts(input: 1_500, cacheRead: 500, cacheWrite: 0, output: 320),
-                 TokenCounts(input: 800, cacheRead: 200, cacheWrite: 0, output: 180)],
-                [1, 1, 1, 1]),
             (droidHourly, "factory", ["2026-11-09T06:00:00Z", "2026-11-10T07:00:00Z"],
                 [TokenCounts(input: 2_100, cacheRead: 900, cacheWrite: 300, output: 480),
                  TokenCounts(input: 1_600, cacheRead: 700, cacheWrite: 250, output: 350)],
@@ -189,13 +177,14 @@ final class TokscaleCollectorTests: XCTestCase {
 
     func testSourceIDsExcludeNativeCollectorsAndMapDroid() {
         let collector = TokscaleCollector(executableURL: URL(fileURLWithPath: "/unused"),
-            configDirectory: URL(fileURLWithPath: "/unused"), clients: ["claude", "droid", "zcode", "pi", "omp"], deviceID: "test")
+            configDirectory: URL(fileURLWithPath: "/unused"), clients: ["claude", "droid", "zcode", "pi", "omp", "gemini"], deviceID: "test")
         XCTAssertEqual(collector.sourceIDs, ["claude", "factory"])
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("pi"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("omp"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("devin-cli"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("devin-desktop"))
         XCTAssertFalse(TokscaleCollector.defaultClients.contains("grok"))
+        XCTAssertFalse(TokscaleCollector.defaultClients.contains("gemini"))
     }
 
     func testSubprocessErrorsDoNotIncludeStderrOrPaths() async throws {
@@ -939,11 +928,11 @@ final class TokscaleCollectorTests: XCTestCase {
             device: Device(id: "device-a", name: "Test Mac"),
             collectors: [ThrowingCollector(
                 sourceIDs: ["claude"],
-                error: CollectorError.engineUnavailable("tokscale 4.99.0 does not match pinned 4.21.0")
+                error: CollectorError.engineUnavailable("tokscale 4.99.0 does not match pinned 4.23.1")
             )]
         ).runAll(now: now)
         XCTAssertEqual(results.first?.state, .failed)
-        XCTAssertEqual(results.first?.errorMessage, "tokscale 4.99.0 does not match pinned 4.21.0")
+        XCTAssertEqual(results.first?.errorMessage, "tokscale 4.99.0 does not match pinned 4.23.1")
     }
 
     func testZeroUsageClientWithCachedZeroCoverageIsNotMarkedFailed() async throws {
@@ -1015,6 +1004,108 @@ final class TokscaleCollectorTests: XCTestCase {
             .runAll(now: now.addingTimeInterval(180))
         XCTAssertEqual(fourth.first?.state, .ok)
         XCTAssertFalse(FileManager.default.fileExists(atPath: invocationsURL.path))
+    }
+
+    func testClaudeExtraFingerprintRootsCoverTranscriptsAndOpenCodeDBsWithoutAffectingAvailability() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let transcriptsDir = home.appendingPathComponent(".claude/transcripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: transcriptsDir, withIntermediateDirectories: true)
+        let transcriptFile = transcriptsDir.appendingPathComponent("session-1.jsonl")
+        try Data("{}\n".utf8).write(to: transcriptFile)
+
+        let openCodeDir = home.appendingPathComponent(".local/share/opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: openCodeDir, withIntermediateDirectories: true)
+        let openCodeDB = openCodeDir.appendingPathComponent("opencode.db")
+        let openCodeDevDB = openCodeDir.appendingPathComponent("opencode-dev.db")
+        let ignoredDB = openCodeDir.appendingPathComponent("other.db")
+        try Data(count: 32).write(to: openCodeDB)
+        try Data(count: 16).write(to: openCodeDevDB)
+        try Data(count: 8).write(to: ignoredDB)
+
+        let env: [String: String] = [:]
+        XCTAssertEqual(
+            TokscaleCollector.roots(client: "claude", home: home, environment: env).map { $0.resolvingSymlinksInPath().path },
+            [home.appendingPathComponent(".claude/projects").resolvingSymlinksInPath().path]
+        )
+        XCTAssertEqual(
+            TokscaleCollector.extraFingerprintRoots(client: "claude", home: home, environment: env).map { $0.resolvingSymlinksInPath().path },
+            [transcriptsDir, openCodeDevDB, openCodeDB].map { $0.resolvingSymlinksInPath().path }
+        )
+
+        // Secondary roots never make an uninstalled claude client appear available.
+        XCTAssertFalse(TokscaleCollector.sourceAvailable(client: "claude", home: home, environment: env))
+
+        let baseline = TokscaleCollector.fingerprint(client: "claude", home: home, environment: env)
+        XCTAssertEqual(baseline.fileCount, 3)
+
+        try Data("{}\n{}\n".utf8).write(to: transcriptFile)
+        let afterTranscript = TokscaleCollector.fingerprint(client: "claude", home: home, environment: env)
+        XCTAssertNotEqual(baseline, afterTranscript)
+
+        try Data(count: 24).write(to: openCodeDir.appendingPathComponent("opencode.db-wal"))
+        let afterMainDBWAL = TokscaleCollector.fingerprint(client: "claude", home: home, environment: env)
+        XCTAssertNotEqual(afterTranscript, afterMainDBWAL)
+
+        try Data(count: 48).write(to: openCodeDevDB)
+        let afterDevDB = TokscaleCollector.fingerprint(client: "claude", home: home, environment: env)
+        XCTAssertNotEqual(afterMainDBWAL, afterDevDB)
+        XCTAssertFalse(TokscaleCollector.sourceAvailable(client: "claude", home: home, environment: env))
+
+        try FileManager.default.createDirectory(
+            at: home.appendingPathComponent(".claude/projects", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        XCTAssertTrue(TokscaleCollector.sourceAvailable(client: "claude", home: home, environment: env))
+
+        // Environment overrides apply to both CLAUDE_CONFIG_DIR and XDG_DATA_HOME.
+        let customClaude = home.appendingPathComponent("custom-claude", isDirectory: true)
+        let customXDG = home.appendingPathComponent("custom-xdg", isDirectory: true)
+        let customOpenCode = customXDG.appendingPathComponent("opencode", isDirectory: true)
+        try FileManager.default.createDirectory(at: customOpenCode, withIntermediateDirectories: true)
+        let customDB = customOpenCode.appendingPathComponent("opencode.db")
+        try Data(count: 12).write(to: customDB)
+        let overrideEnv = ["CLAUDE_CONFIG_DIR": customClaude.path, "XDG_DATA_HOME": customXDG.path]
+        XCTAssertEqual(
+            TokscaleCollector.extraFingerprintRoots(client: "claude", home: home, environment: overrideEnv).map { $0.resolvingSymlinksInPath().path },
+            [customClaude.appendingPathComponent("transcripts"), customDB].map { $0.resolvingSymlinksInPath().path }
+        )
+    }
+
+    func testParseHourlyPreservesOptionalReasoningAndTracksReasoningKnown() throws {
+        let data = Data(#"""
+            {"entries":[
+              {"hour":"2026-11-10 08:00","input":100,"output":20,"cacheRead":30,"cacheWrite":5,"reasoning":45,"messageCount":2},
+              {"hour":"2026-11-10 09:00","input":10,"output":2,"cacheRead":0,"cacheWrite":0,"reasoning":12,"messageCount":1},
+              {"hour":"2026-11-10 09:00","input":15,"output":3,"cacheRead":0,"cacheWrite":0,"reasoning":0,"messageCount":1},
+              {"hour":"2026-11-10 10:00","input":20,"output":4,"cacheRead":0,"cacheWrite":0,"reasoning":25,"messageCount":1},
+              {"hour":"2026-11-10 10:00","input":30,"output":6,"cacheRead":0,"cacheWrite":0,"messageCount":1},
+              {"hour":"2026-11-10 11:00","input":40,"output":8,"cacheRead":0,"cacheWrite":0,"messageCount":1}
+            ]}
+            """#.utf8)
+        let utc = TimeZone(identifier: "UTC")!
+        let now = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-11-10T12:30:00Z"))
+        let rows = try TokscaleCollector.parseHourly(data: data, client: "claude", deviceID: "test", timeZone: utc, now: now)
+        XCTAssertEqual(rows.count, 4)
+
+        XCTAssertEqual(rows[0].counts, TokenCounts(input: 100, cacheRead: 30, cacheWrite: 5, output: 20, reasoning: 45))
+        XCTAssertTrue(rows[0].reasoningKnown)
+
+        XCTAssertEqual(rows[1].counts, TokenCounts(input: 25, cacheRead: 0, cacheWrite: 0, output: 5, reasoning: 12))
+        XCTAssertEqual(rows[1].eventCount, 2)
+        XCTAssertTrue(rows[1].reasoningKnown)
+
+        XCTAssertEqual(rows[2].counts, TokenCounts(input: 50, cacheRead: 0, cacheWrite: 0, output: 10, reasoning: 25))
+        XCTAssertEqual(rows[2].eventCount, 2)
+        XCTAssertFalse(rows[2].reasoningKnown)
+
+        XCTAssertEqual(rows[3].counts, TokenCounts(input: 40, cacheRead: 0, cacheWrite: 0, output: 8, reasoning: 0))
+        XCTAssertFalse(rows[3].reasoningKnown)
+
+        let negative = Data(#"{"entries":[{"hour":"2026-11-10 08:00","input":1,"output":1,"cacheRead":0,"cacheWrite":0,"reasoning":-1,"messageCount":1}]}"#.utf8)
+        XCTAssertThrowsError(try TokscaleCollector.parseHourly(data: negative, client: "claude", deviceID: "test", timeZone: utc, now: now))
     }
 }
 

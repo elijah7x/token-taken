@@ -40,7 +40,7 @@ run() {
 }
 
 # The CLI opens the store read-only, so the script owns store creation. Schema matches
-# TokenTakenKit/SQLiteUsageStore.swift (user_version 6).
+# TokenTakenKit/SQLiteUsageStore.swift (user_version 8).
 create_store() {
     if [ -f "$database" ]; then
         return 0
@@ -70,12 +70,23 @@ CREATE TABLE IF NOT EXISTS hourly_usage (
     event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
     PRIMARY KEY (device_id, source_id, hour_start)
 );
+CREATE TABLE IF NOT EXISTS hourly_history (
+    device_id TEXT NOT NULL, source_id TEXT NOT NULL, hour_start INTEGER NOT NULL,
+    input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+    output INTEGER NOT NULL, reasoning INTEGER NOT NULL, uncategorized INTEGER NOT NULL,
+    event_count INTEGER NOT NULL, reasoning_known INTEGER NOT NULL,
+    PRIMARY KEY (device_id, source_id, hour_start)
+);
+CREATE TABLE IF NOT EXISTS hourly_history_epochs (
+    device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
+    PRIMARY KEY (device_id, source_id)
+);
 CREATE TABLE IF NOT EXISTS history_epochs (
     device_id TEXT NOT NULL, source_id TEXT NOT NULL, epoch TEXT NOT NULL,
     time_zone TEXT,
     PRIMARY KEY (device_id, source_id)
 );
-PRAGMA user_version = 6;
+PRAGMA user_version = 8;
 SQL
 }
 

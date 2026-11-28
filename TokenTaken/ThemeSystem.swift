@@ -135,7 +135,7 @@ enum RadiusRole {
 enum ThemeChrome {
     /// Gap between the window edge and the floating tray. Cosmos docks the tray flush.
     static var trayInset: CGFloat { ThemeKind.current == .cosmos ? 0 : 8 }
-    /// Series rows carry a colour dot and a proportion bar, except in Cosmos, which uses ruled rows.
+    /// Source and model presentations can show identity swatches; Cosmos uses monochrome ruled rows.
     static var showsSeriesSwatches: Bool { ThemeKind.current != .cosmos }
     /// Hairline width for ruled containers.
     static var ruleWidth: CGFloat { ThemeKind.current == .liquidGlass ? 0.5 : 1 }

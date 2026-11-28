@@ -55,6 +55,9 @@ final class AppModel {
     }
 
     var remoteDevices: [RemoteDeviceStatus] {
+        #if DEBUG
+        if !syntheticRemoteDevices.isEmpty { return syntheticRemoteDevices }
+        #endif
         guard settings?.syncEnabled == true else { return [] }
         return refreshCoordinator?.remoteSnapshots.map(\.status) ?? []
     }
@@ -162,6 +165,9 @@ final class AppModel {
     @ObservationIgnored private weak var refreshCoordinator: RefreshCoordinator?
     @ObservationIgnored private var refreshGeneration: UInt64 = 0
     @ObservationIgnored private var refreshTask: Task<Void, Never>?
+    #if DEBUG
+    @ObservationIgnored private var syntheticRemoteDevices: [RemoteDeviceStatus] = []
+    #endif
 
     init(store: any UsageStore = SyntheticUsageStore(), period: Period = .month) {
         settings = nil
@@ -176,6 +182,17 @@ final class AppModel {
         cachedLensBuckets = loaded.snapshot.lensBucketsByPeriod
         isEmpty = loaded.snapshot.isEmpty
     }
+
+    #if DEBUG
+    convenience init(
+        store: any UsageStore = SyntheticUsageStore(),
+        period: Period = .month,
+        syntheticRemoteDevices: [RemoteDeviceStatus]
+    ) {
+        self.init(store: store, period: period)
+        self.syntheticRemoteDevices = syntheticRemoteDevices
+    }
+    #endif
 
     init(settings: AppSettings, store: SQLiteUsageStore?, period: Period = .month, storageError: String? = nil) {
         self.settings = settings

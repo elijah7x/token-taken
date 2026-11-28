@@ -6,9 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Reworked share cards into achievement-led posters with safer theme framing, explicit public-reference rank context, token-story footnotes and two-line share evidence.
+- Moved share-sheet aggregation and Cosmos snapshot rendering off the main actor, with generation checks preventing stale previews or exports.
+- All themes now use 4:3 landscape and 3:4 portrait share cards, and the square share option has been removed.
+- Simplified the main window around a short total, cost and device notices, with exact values in on-demand popovers and a single-column breakdown with Show all / Show less controls.
+- Replaced Lens's persistent three-column card with a flat time chart and whole-period composition strip. Hover or pin a slice for details without filtering the full-period summary; Confluence and Lens now share the same exact-value data cards.
+- Improved chart readability with clearer axes, small-segment rendering and explicit missing-coverage and hourly model-limit states.
+- Simplified Settings into flat sections with consistent 28pt controls and no nested cards, and removed duplicate source, sync, version and release-note presentation.
+- Refined Field with an unframed landscape, single-line wooden plot signs, quieter scenery, a flat composition strip and appearance-specific paper palettes.
+- Added Claude, Codex, Zcode, Pi, Kimi (light and dark), Devin, Antigravity, Cursor, MiniMax Code, DeepSeek, oh-my-pi, Grok and OpenCode family icons to harness rows. Gemini, Factory, FX and other sources without a mapped asset keep their monogram badges.
+- Upgraded the bundled `tokscale` collection engine from 4.21.0 to 4.23.1 and moved Gemini CLI to a native Swift collector (`GeminiCollector`) with hourly reasoning support ([ADR-0020](docs/decisions/0020-native-gemini-and-engine-4-23-1.md)).
+
 ### Fixed
 
+- Lens hover cards now track every bucket during continuous sweeps without the transient overlay capturing the pointer; pin a slice to interact with its composition details.
+- Dock, Finder, and Launchpad now keep the bundled default app icon in every theme. A one-time migration removes only recognized legacy theme icons while preserving other custom Finder icons, preventing icon flipping and signature pollution.
+- Hover previews open immediately on entry, close shortly after leaving, and remain open when the pointer returns to their trigger. Escape releases a pinned Lens selection without dismissing the main window.
+- The breakdown's remaining-item summary follows the selected app language, including list separators and ellipsis.
 - A usage cache created by an early schema-7 build lacked the `hourly_history_epochs` table, so every collection on that Mac failed with "no such table" and its usage stopped syncing. The cache schema is now version 8, which creates the missing table in place and keeps existing usage.
+- Eliminated OpenCode `claude-agent` double counting via `tokscale` 4.23.1 (`#1597`) and included OpenCode databases in Claude's change-detection fingerprint.
+- Fixed Gemini CLI headless 2× double counting and cache-inclusive input inflation by preferring per-turn messages over `stats` summaries and normalizing cached input in `GeminiCollector`.
+- Normalized `totalTokens`-aware inclusive input and inclusive/exclusive reasoning splits in the native Grok, `pi`, and `oh-my-pi` collectors.
+- Stopped fabricating 48 zero-count hourly coverage rows for daily-only sources (`deepseek-cli`), so days containing their usage report unknown hourly coverage rather than zero.
+- Isolated runs using an overridden `TOKEN_TAKEN_SUPPORT_DIR` from production `UserDefaults` device IDs and iCloud Drive sync unless `TOKEN_TAKEN_SYNC_ROOT` is also explicitly set.
 
 ## [0.3.1] - 2026-11-23
 

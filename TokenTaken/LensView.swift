@@ -2,8 +2,8 @@ import AppKit
 import SwiftUI
 import TokenTakenKit
 
-/// Liquid Glass Lens view: a fixed-height three-column glass readout card above a dual-pass Canvas
-/// stacked time-bar chart with an interactive Liquid Glass magnifier.
+/// Liquid Glass Lens view: a dual-pass stacked time-bar chart with an interactive magnifier,
+/// an on-demand slice overlay, and a bare whole-period composition strip.
 struct LensView: View {
     let buckets: [LensBucket]
     let dimension: BreakdownDimension
@@ -36,6 +36,9 @@ struct LensView: View {
     @State private var pinnedHead: Int?
     @State private var hoverBucket: Int?
     @State private var hoverPoint: CGPoint?
+    @State private var hoverPointCoalescer = LensHoverPointCoalescer()
+    @State private var hoverCloseTask: Task<Void, Never>?
+    @State private var isSliceOverlayHovered = false
     @State private var releasedUntilMove = false
     @State private var releaseOrigin: CGPoint?
 
@@ -62,19 +65,31 @@ struct LensView: View {
     @State private var isSettling = false
     @State private var lastStepDate: Date?
     @State private var windowVisible = true
+    @State private var derivedDataCache = LensDerivedDataCache()
     @State private var layoutCache = LensBarLayoutCache()
     @State private var sliceCache = LensSliceCache()
+    @State private var sliceOverlaySize: CGSize = .zero
 
     @FocusState private var isChartFocused: Bool
-
-    private static let readoutHeight: CGFloat = 104
-    private static let readoutHeightWithUncategorized: CGFloat = 122
 
     private var canAnimate: Bool {
         appearsActive && controlActiveState == .key && windowVisible && !reduceMotion
     }
 
+    private var derivedData: LensDerivedData {
+        derivedDataCache.data(
+            buckets: buckets,
+            dimension: dimension,
+            period: period,
+            locale: locale
+        )
+    }
+
     private var pinnedRange: ClosedRange<Int>? {
+        resolvedPinnedRange(maxNonFutureIndex: derivedData.maxNonFutureIndex)
+    }
+
+    private func resolvedPinnedRange(maxNonFutureIndex: Int?) -> ClosedRange<Int>? {
         guard let anchor = pinnedAnchor, let head = pinnedHead, !buckets.isEmpty else { return nil }
         let maxIdx = maxNonFutureIndex ?? (buckets.count - 1)
         let lo = min(max(0, min(anchor, head)), maxIdx)
@@ -83,42 +98,46 @@ struct LensView: View {
     }
 
     private var maxNonFutureIndex: Int? {
-        buckets.lastIndex(where: { !$0.isFuture })
+        derivedData.maxNonFutureIndex
     }
 
     private var peakNonFutureIndex: Int? {
-        guard let maxIdx = maxNonFutureIndex else { return nil }
-        var best = 0
-        var bestTotal: Int64 = -1
-        for idx in 0...maxIdx where !buckets[idx].isFuture {
-            if buckets[idx].total > bestTotal {
-                bestTotal = buckets[idx].total
-                best = idx
-            }
-        }
-        return best
+        derivedData.peakNonFutureIndex
     }
 
-    /// Active slice range shown in the readout card (`nil` when unpinned and not hovering -> whole period).
+    /// Active slice range shown in the overlay; resting on the peak does not create a slice.
     private var activeSliceRange: ClosedRange<Int>? {
+        resolvedActiveSliceRange(
+            pinnedRange: pinnedRange,
+            maxNonFutureIndex: derivedData.maxNonFutureIndex
+        )
+    }
+
+    private func resolvedActiveSliceRange(
+        pinnedRange: ClosedRange<Int>?,
+        maxNonFutureIndex: Int?
+    ) -> ClosedRange<Int>? {
         if let pinnedRange {
             return pinnedRange
         }
         if let hoverBucket, !releasedUntilMove, !buckets.isEmpty {
-            let clamped = clampToNonFuture(hoverBucket)
+            let clamped = clampToNonFuture(hoverBucket, maxNonFutureIndex: maxNonFutureIndex)
             return clamped...clamped
         }
         return nil
     }
 
     /// Range where the visual lens sits (falls back to peak non-future bucket at rest when period has usage).
-    private var visualLensRange: ClosedRange<Int>? {
-        if let activeSliceRange {
-            return activeSliceRange
+    private func visualLensRange(
+        activeRange: ClosedRange<Int>?,
+        derivedData: LensDerivedData
+    ) -> ClosedRange<Int>? {
+        if let activeRange {
+            return activeRange
         }
         guard !releasedUntilMove,
-              model.summary.total.total > 0 || buckets.contains(where: { !$0.isFuture && $0.total > 0 }),
-              let peak = peakNonFutureIndex
+              model.summary.total.total > 0 || derivedData.hasNonFutureUsage,
+              let peak = derivedData.peakNonFutureIndex
         else {
             return nil
         }
@@ -139,26 +158,29 @@ struct LensView: View {
     }
 
     var body: some View {
-        let activeSlice = activeSliceRange.map(resolveSlice)
-        let hasUncategorized = model.summary.total.uncategorized > 0
-            || (activeSlice?.counts.uncategorized ?? 0) > 0
-        let cardHeight = hasUncategorized ? Self.readoutHeightWithUncategorized : Self.readoutHeight
-
+        let resolvedDerivedData = derivedData
         VStack(alignment: .leading, spacing: 10) {
-            LensReadoutCard(
-                summary: model.summary,
-                period: period,
-                dimension: dimension,
-                buckets: buckets,
-                activeSlice: activeSlice,
-                isPinned: pinnedRange != nil,
-                increasedContrast: contrast == .increased,
-                onRelease: { releasePin() }
-            )
-            .frame(height: cardHeight)
-
-            timeBarStage
+            timeBarStage(derivedData: resolvedDerivedData)
                 .frame(maxWidth: .infinity, minHeight: 110, maxHeight: .infinity)
+
+            DataHoverPopover(width: 280) {
+                LensCompositionStrip(
+                    counts: model.summary.total,
+                    reasoningKnown: resolvedDerivedData.periodReasoningKnown,
+                    increasedContrast: contrast == .increased,
+                    height: 5
+                )
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
+            } content: {
+                LensCompositionDetails(
+                    counts: model.summary.total,
+                    reasoningKnown: resolvedDerivedData.periodReasoningKnown,
+                    increasedContrast: contrast == .increased
+                )
+            }
+            .accessibilityLabel(Text("Composition"))
+            .accessibilityValue(Text("\(model.summary.total.total.formatted(.number.locale(locale))) tokens"))
+            .accessibilityHint(Text("Shows composition details"))
         }
         .background {
             WindowVisibilityProbe { visible in
@@ -168,11 +190,16 @@ struct LensView: View {
         .onChange(of: period) { _, _ in
             releasePin(snapImmediately: true)
         }
+        .onChange(of: activeSliceRange) { _, newRange in
+            if newRange == nil {
+                sliceOverlaySize = .zero
+            }
+        }
         .onChange(of: buckets.count) { _, newCount in
             if newCount == 0 {
                 releasePin(snapImmediately: true)
             } else if let anchor = pinnedAnchor, let head = pinnedHead {
-                let maxIdx = maxNonFutureIndex ?? (newCount - 1)
+                let maxIdx = resolvedDerivedData.maxNonFutureIndex ?? (newCount - 1)
                 pinnedAnchor = min(max(0, anchor), maxIdx)
                 pinnedHead = min(max(0, head), maxIdx)
             }
@@ -191,12 +218,18 @@ struct LensView: View {
                 releasePin()
             }
         }
+        .onDisappear(perform: resetHover)
     }
 
     // MARK: - Time Bar Stage
 
-    private var timeBarStage: some View {
-        GeometryReader { proxy in
+    private func timeBarStage(derivedData: LensDerivedData) -> some View {
+        let pinnedRange = resolvedPinnedRange(maxNonFutureIndex: derivedData.maxNonFutureIndex)
+        let activeRange = resolvedActiveSliceRange(
+            pinnedRange: pinnedRange,
+            maxNonFutureIndex: derivedData.maxNonFutureIndex
+        )
+        return GeometryReader { proxy in
             let layout = layoutCache.layout(
                 buckets: buckets,
                 dimension: dimension,
@@ -205,8 +238,16 @@ struct LensView: View {
                 summarySources: model.summary.bySource,
                 summaryModels: model.summary.byModel
             )
-            let lensRange = visualLensRange
-            let targetFrame = lensRange.map { targetLensMetrics(for: $0, in: layout) }
+            let lensRange = visualLensRange(activeRange: activeRange, derivedData: derivedData)
+            let activeSlice = activeRange.map(resolveSlice)
+            let targetFrame = lensRange.map {
+                targetLensMetrics(
+                    for: $0,
+                    in: layout,
+                    isPinned: pinnedRange != nil,
+                    hasActiveSlice: activeRange != nil
+                )
+            }
             let resolvedX = lensInitialized && canAnimate ? lensX : (targetFrame?.centerX ?? layout.plotRect.midX)
             let resolvedW = lensInitialized && canAnimate ? lensWidth : (targetFrame?.width ?? 64)
             let stretch = canAnimate ? mercuryStretch : 0
@@ -222,6 +263,15 @@ struct LensView: View {
                 width: effectiveW,
                 height: effectiveH
             )
+            let targetLensRect = targetFrame.map { target in
+                let width = max(36, target.width)
+                return CGRect(
+                    x: target.centerX - width * 0.5,
+                    y: lensCenterY - lensHeight * 0.5,
+                    width: width,
+                    height: lensHeight
+                )
+            }
             let isRange = (lensRange?.count ?? 0) >= 2
             let lensCornerRadius = isRange
                 ? min(effectiveW * 0.5, effectiveH * 0.5, 18)
@@ -235,7 +285,7 @@ struct LensView: View {
                     drawBasePass(
                         in: &context,
                         layout: layout,
-                        activeRange: activeSliceRange,
+                        activeRange: activeRange,
                         lensRect: showLens ? lensRect : nil,
                         lensCornerRadius: lensCornerRadius
                     )
@@ -256,12 +306,12 @@ struct LensView: View {
                     }
                     .frame(width: lensRect.width, height: lensRect.height)
                     .offset(x: lensRect.minX, y: lensRect.minY)
-                    .opacity(activeSliceRange == nil ? 0.92 : 1.0)
+                    .opacity(activeRange == nil ? 0.25 : 0.82)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
                 }
 
-                // Pass 2: Magnified vector bars clipped inside the lens + refraction bevels, handles, and range sum.
+                // Pass 2: Magnified vector bars clipped inside the lens + refraction bevels and range sum.
                 if showLens, let lensRange {
                     Canvas { context, _ in
                         drawMagnifiedPass(
@@ -271,7 +321,8 @@ struct LensView: View {
                             lensRect: lensRect,
                             lensCornerRadius: lensCornerRadius,
                             isPinned: pinnedRange != nil,
-                            isResting: activeSliceRange == nil
+                            isResting: activeRange == nil,
+                            isSettling: isSettling
                         )
                     }
                     .allowsHitTesting(false)
@@ -296,7 +347,60 @@ struct LensView: View {
                 }
 
                 // Per-bucket accessibility elements for VoiceOver.
-                bucketAccessibilityOverlay(layout: layout)
+                bucketAccessibilityOverlay(
+                    layout: layout,
+                    activeRange: activeRange,
+                    descriptions: derivedData.accessibilityDescriptions
+                )
+
+                if showLens, let activeSlice {
+                    let overlayWidth = min(280, max(1, proxy.size.width - 8))
+                    let hasMeasuredSize = sliceOverlaySize.width > 0 && sliceOverlaySize.height > 0
+                    let measuredSize = hasMeasuredSize
+                        ? CGSize(width: min(sliceOverlaySize.width, overlayWidth), height: sliceOverlaySize.height)
+                        : CGSize(width: overlayWidth, height: 200)
+                    let origin = sliceOverlayOrigin(
+                        lensRect: targetLensRect ?? lensRect,
+                        overlaySize: measuredSize,
+                        chartSize: proxy.size
+                    )
+
+                    LensSliceOverlay(
+                        slice: activeSlice,
+                        summary: model.summary,
+                        period: period,
+                        buckets: buckets,
+                        dimension: dimension,
+                        width: overlayWidth,
+                        maxHeight: max(1, proxy.size.height - 8),
+                        isPinned: pinnedRange != nil,
+                        increasedContrast: contrast == .increased,
+                        onRelease: { releasePin() }
+                    )
+                    .onGeometryChange(for: CGSize.self, of: \.size) { newSize in
+                        if sliceOverlaySize != newSize {
+                            sliceOverlaySize = newSize
+                        }
+                    }
+                    .opacity(hasMeasuredSize ? 1 : 0)
+                    .accessibilityHidden(!hasMeasuredSize)
+                    .offset(x: origin.x, y: origin.y)
+                    .allowsHitTesting(hasMeasuredSize && pinnedRange != nil)
+                    .onHover { hovering in
+                        guard pinnedRange != nil else {
+                            isSliceOverlayHovered = false
+                            return
+                        }
+                        isSliceOverlayHovered = hovering
+                        if hovering {
+                            cancelHoverClose()
+                        } else {
+                            scheduleHoverClose()
+                        }
+                    }
+                    .onDisappear { isSliceOverlayHovered = false }
+                    .zIndex(2)
+                }
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .contentShape(Rectangle())
@@ -362,22 +466,39 @@ struct LensView: View {
                 guard dragMode == nil else { return }
                 switch phase {
                 case .active(let point):
-                    hoverPoint = point
+                    cancelHoverClose()
                     if releasedUntilMove, let origin = releaseOrigin {
                         if hypot(point.x - origin.x, point.y - origin.y) > 5 {
                             releasedUntilMove = false
                         }
                     }
-                    if pinnedRange == nil && !releasedUntilMove && !buckets.isEmpty {
-                        hoverBucket = clampToNonFuture(layout.bucketIndex(atX: point.x))
+                    let nextBucket = pinnedRange == nil && !isSliceOverlayHovered && !releasedUntilMove && !buckets.isEmpty
+                        ? clampToNonFuture(
+                            layout.bucketIndex(atX: point.x),
+                            maxNonFutureIndex: derivedData.maxNonFutureIndex
+                        )
+                        : nil
+                    if let nextBucket, hoverBucket != nextBucket {
+                        hoverPointCoalescer.cancel()
+                        hoverPoint = point
+                        hoverBucket = nextBucket
+                    } else {
+                        hoverPointCoalescer.submit(point) { latestPoint in
+                            hoverPoint = latestPoint
+                        }
                     }
                 case .ended:
+                    hoverPointCoalescer.cancel()
                     hoverPoint = nil
-                    hoverBucket = nil
                     releasedUntilMove = false
+                    scheduleHoverClose()
                 }
             }
-            .gesture(chartDragGesture(layout: layout, currentLensRect: showLens ? lensRect : nil))
+            .gesture(chartDragGesture(
+                layout: layout,
+                currentLensRect: showLens ? lensRect : nil,
+                maxNonFutureIndex: derivedData.maxNonFutureIndex
+            ))
             .focusable(interactions: .activate)
             .focused($isChartFocused)
             .onKeyPress(keys: [.leftArrow, .rightArrow, .return, .space, .escape], phases: [.down, .repeat]) { press in
@@ -410,6 +531,31 @@ struct LensView: View {
         }
     }
 
+    private func sliceOverlayOrigin(
+        lensRect: CGRect,
+        overlaySize: CGSize,
+        chartSize: CGSize
+    ) -> CGPoint {
+        let inset: CGFloat = 4
+        let gap: CGFloat = 10
+        let bounds = CGRect(
+            x: inset,
+            y: inset,
+            width: max(0, chartSize.width - inset * 2),
+            height: max(0, chartSize.height - inset * 2)
+        )
+        let fittedWidth = min(overlaySize.width, max(0, bounds.width))
+        let fittedHeight = min(overlaySize.height, max(0, bounds.height))
+        let maxX = max(bounds.minX, bounds.maxX - fittedWidth)
+        let maxY = max(bounds.minY, bounds.maxY - fittedHeight)
+        let aboveY = lensRect.minY - gap - overlaySize.height
+        let preferredY = aboveY >= bounds.minY ? aboveY : lensRect.maxY + gap
+        return CGPoint(
+            x: min(max(lensRect.midX - fittedWidth * 0.5, bounds.minX), maxX),
+            y: min(max(preferredY, bounds.minY), maxY)
+        )
+    }
+
     // MARK: - Target Geometry & Physics
 
     private struct LensTargetMetrics: Equatable {
@@ -417,10 +563,15 @@ struct LensView: View {
         let width: CGFloat
     }
 
-    private func targetLensMetrics(for range: ClosedRange<Int>, in layout: LensBarLayout) -> LensTargetMetrics {
+    private func targetLensMetrics(
+        for range: ClosedRange<Int>,
+        in layout: LensBarLayout,
+        isPinned: Bool,
+        hasActiveSlice: Bool
+    ) -> LensTargetMetrics {
         let base = layout.lensBounds(for: range)
         var cx = base.centerX
-        if pinnedRange == nil, activeSliceRange != nil, let hoverPoint, range.count == 1 {
+        if !isPinned, hasActiveSlice, let hoverPoint, range.count == 1 {
             let pullLimit = layout.slotWidth * 0.22
             let rawPull = (hoverPoint.x - base.centerX) * 0.28
             let pull = min(max(rawPull, -pullLimit), pullLimit)
@@ -475,12 +626,45 @@ struct LensView: View {
     // MARK: - Pointer & Keyboard Interactions
 
     private func clampToNonFuture(_ index: Int) -> Int {
+        clampToNonFuture(index, maxNonFutureIndex: maxNonFutureIndex)
+    }
+
+    private func clampToNonFuture(_ index: Int, maxNonFutureIndex: Int?) -> Int {
         guard !buckets.isEmpty else { return 0 }
         let limit = maxNonFutureIndex ?? (buckets.count - 1)
         return min(max(0, index), limit)
     }
 
+    private func scheduleHoverClose() {
+        cancelHoverClose()
+        hoverCloseTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(160))
+            guard !Task.isCancelled else { return }
+            hoverCloseTask = nil
+            guard pinnedRange == nil, hoverPoint == nil, !isSliceOverlayHovered else { return }
+            hoverBucket = nil
+        }
+    }
+
+    private func cancelHoverClose() {
+        hoverCloseTask?.cancel()
+        hoverCloseTask = nil
+    }
+
+    private func resetHover() {
+        cancelHoverClose()
+        hoverPointCoalescer.cancel()
+        hoverBucket = nil
+        hoverPoint = nil
+        isSliceOverlayHovered = false
+        releasedUntilMove = false
+        releaseOrigin = nil
+    }
+
     private func releasePin(snapImmediately: Bool = false) {
+        cancelHoverClose()
+        hoverPointCoalescer.flush()
+        isSliceOverlayHovered = false
         pinnedAnchor = nil
         pinnedHead = nil
         dragMode = nil
@@ -500,12 +684,17 @@ struct LensView: View {
         }
     }
 
-    private func chartDragGesture(layout: LensBarLayout, currentLensRect: CGRect?) -> some Gesture {
+    private func chartDragGesture(
+        layout: LensBarLayout,
+        currentLensRect: CGRect?,
+        maxNonFutureIndex: Int?
+    ) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 guard !buckets.isEmpty, maxNonFutureIndex != nil else { return }
                 let startPt = value.startLocation
                 let curPt = value.location
+                hoverPointCoalescer.cancel()
                 hoverPoint = curPt
                 releasedUntilMove = false
 
@@ -522,11 +711,17 @@ struct LensView: View {
                         } else if rect.contains(CGPoint(x: startPt.x, y: rect.midY)) {
                             dragMode = .moveRange(initialRange: pinned)
                         } else {
-                            let startBucket = clampToNonFuture(layout.bucketIndex(atX: startPt.x))
+                            let startBucket = clampToNonFuture(
+                                layout.bucketIndex(atX: startPt.x),
+                                maxNonFutureIndex: maxNonFutureIndex
+                            )
                             dragMode = .brush(startBucket: startBucket)
                         }
                     } else {
-                        let startBucket = clampToNonFuture(layout.bucketIndex(atX: startPt.x))
+                        let startBucket = clampToNonFuture(
+                            layout.bucketIndex(atX: startPt.x),
+                            maxNonFutureIndex: maxNonFutureIndex
+                        )
                         dragMode = .brush(startBucket: startBucket)
                     }
                 }
@@ -536,7 +731,10 @@ struct LensView: View {
                     didDrag = true
                 }
 
-                let currentBucket = clampToNonFuture(layout.bucketIndex(atX: curPt.x))
+                let currentBucket = clampToNonFuture(
+                    layout.bucketIndex(atX: curPt.x),
+                    maxNonFutureIndex: maxNonFutureIndex
+                )
                 switch dragMode {
                 case .resizeLeft(let fixedUpper):
                     pinnedAnchor = fixedUpper
@@ -579,7 +777,10 @@ struct LensView: View {
                         lastClickTime = 0
                         releasePin()
                     } else {
-                        let target = clampToNonFuture(layout.bucketIndex(atX: value.location.x))
+                        let target = clampToNonFuture(
+                            layout.bucketIndex(atX: value.location.x),
+                            maxNonFutureIndex: maxNonFutureIndex
+                        )
                         pinnedAnchor = target
                         pinnedHead = target
                         lastClickTime = now
@@ -657,17 +858,19 @@ struct LensView: View {
             ? Color.white.opacity(increased ? 0.16 : 0.068)
             : Color(hex: "#0F172A").opacity(increased ? 0.15 : 0.065)
         let tickColor = Palette.ink3
-        let steps = 4
 
-        for s in 0...steps {
-            let y = (plot.maxY - (plot.height * CGFloat(s)) / CGFloat(steps)).rounded() + 0.5
+        for value in layout.yAxisValues {
+            let fraction = CGFloat(value / layout.yMax)
+            let y = (plot.maxY - plot.height * fraction).rounded() + 0.5
             var line = Path()
             line.move(to: CGPoint(x: plot.minX, y: y))
             line.addLine(to: CGPoint(x: plot.maxX, y: y))
             context.stroke(line, with: .color(gridColor), lineWidth: increased ? 1.2 : 1.0)
 
             if !layout.isEmpty {
-                let tickValue = s == 0 ? "0" : LensBarLayout.axisLabel(layout.yMax * Double(s) / Double(steps))
+                let tickValue = value == 0
+                    ? "0"
+                    : LensBarLayout.axisLabel(value, step: layout.yAxisStep, upperBound: layout.yMax)
                 let resolved = context.resolve(
                     Text(verbatim: tickValue)
                         .font(.system(size: 10.5, weight: .regular))
@@ -700,8 +903,16 @@ struct LensView: View {
                 layer.clip(to: inverse, style: FillStyle(eoFill: true))
             }
 
-            let baseOpacity = increased ? 0.52 : (isDark ? 0.28 : 0.34)
             for bar in layout.bars {
+                let isSelected = activeRange?.contains(bar.index) == true
+                let opacity: Double
+                if activeRange == nil {
+                    opacity = increased ? 0.68 : (isDark ? 0.48 : 0.58)
+                } else if isSelected {
+                    opacity = increased ? 0.96 : 0.86
+                } else {
+                    opacity = increased ? 0.44 : (isDark ? 0.26 : 0.30)
+                }
                 drawBucketBar(
                     in: &layer,
                     bar: bar,
@@ -710,8 +921,8 @@ struct LensView: View {
                     centerX: bar.slotCenterX,
                     barWidth: bar.baseBarWidth,
                     verticalScale: 1.0,
-                    opacity: baseOpacity,
-                    isHighlighted: false,
+                    opacity: opacity,
+                    isHighlighted: isSelected,
                     isDark: isDark,
                     increasedContrast: increased
                 )
@@ -726,7 +937,8 @@ struct LensView: View {
         lensRect: CGRect,
         lensCornerRadius: CGFloat,
         isPinned: Bool,
-        isResting: Bool
+        isResting: Bool,
+        isSettling: Bool
     ) {
         let isDark = scheme == .dark
         let increased = contrast == .increased
@@ -745,12 +957,17 @@ struct LensView: View {
 
             // Subtle interior refraction tint when transparency is active.
             if !reduceTransparency {
+                let interiorColors: [Color] = if isDark {
+                    [Color(hex: "#3A4C70").opacity(0.20), Color(hex: "#121826").opacity(0.26)]
+                } else if isRange {
+                    [Color.white.opacity(0.36), Color(hex: "#EBF2FF").opacity(0.18)]
+                } else {
+                    [Color.white.opacity(0.12), Color(hex: "#EBF2FF").opacity(0.06)]
+                }
                 mag.fill(
                     Path(lensRect),
                     with: .linearGradient(
-                        Gradient(colors: isDark
-                            ? [Color(hex: "#3A4C70").opacity(0.20), Color(hex: "#121826").opacity(0.26)]
-                            : [Color.white.opacity(0.58), Color(hex: "#EBF2FF").opacity(0.32)]),
+                        Gradient(colors: interiorColors),
                         startPoint: CGPoint(x: lensCx, y: lensRect.minY),
                         endPoint: CGPoint(x: lensCx, y: lensRect.maxY)
                     )
@@ -762,14 +979,14 @@ struct LensView: View {
             let gridColor = isDark
                 ? Color.white.opacity(increased ? 0.20 : 0.09)
                 : Color(hex: "#0F172A").opacity(increased ? 0.18 : 0.075)
-            for s in 0...4 {
-                let gy = plot.maxY - ((plot.height * CGFloat(s)) / 4.0) * gridMag
+            for value in layout.yAxisValues {
+                let gy = plot.maxY - (plot.height * CGFloat(value / layout.yMax)) * gridMag
                 guard gy >= lensRect.minY - 4 else { continue }
                 var curve = Path()
                 curve.move(to: CGPoint(x: lensRect.minX - 4, y: gy))
                 curve.addQuadCurve(
                     to: CGPoint(x: lensRect.maxX + 4, y: gy),
-                    control: CGPoint(x: lensCx, y: gy + (s == 0 ? 0 : -1.2))
+                    control: CGPoint(x: lensCx, y: gy + (value == 0 ? 0 : -1.2))
                 )
                 mag.stroke(curve, with: .color(gridColor), lineWidth: increased ? 1.2 : 1)
             }
@@ -811,7 +1028,7 @@ struct LensView: View {
                     }
                 }
 
-                let barOpacity = inRange ? 0.96 : (increased ? 0.62 : 0.44)
+                let barOpacity = inRange || isResting ? 0.96 : (increased ? 0.62 : 0.44)
                 let topY = drawBucketBar(
                     in: &mag,
                     bar: bar,
@@ -829,7 +1046,7 @@ struct LensView: View {
                 if inRange && !bar.isFuture && bar.total > 0 {
                     if !isRange {
                         // Single-bucket top value label.
-                        if plot.maxY - topY > 2, topY > lensRect.minY + 12 {
+                        if !isSettling, plot.maxY - topY > 2, topY > lensRect.minY + 12 {
                             let labelText = TokenFormat.short(bar.total)
                             let resolved = mag.resolve(
                                 Text(verbatim: labelText)
@@ -879,7 +1096,7 @@ struct LensView: View {
                     mag.fill(
                         Path(lensRect),
                         with: .radialGradient(
-                            Gradient(colors: [.clear, Color.white.opacity(isDark ? 0.13 : 0.56)]),
+                            Gradient(colors: [.clear, Color.white.opacity(isDark ? 0.08 : 0.12)]),
                             center: CGPoint(x: lensCx, y: lensRect.midY),
                             startRadius: min(lensRect.width, lensRect.height) * 0.28,
                             endRadius: maxDim * 0.68
@@ -888,10 +1105,11 @@ struct LensView: View {
                 }
 
                 let sheenRect = CGRect(x: lensRect.minX, y: lensRect.minY, width: lensRect.width, height: 24)
+                let sheenOpacity = isRange ? (isDark ? 0.16 : 0.36) : (isDark ? 0.08 : 0.14)
                 mag.fill(
                     Path(sheenRect),
                     with: .linearGradient(
-                        Gradient(colors: [Color.white.opacity(isDark ? 0.22 : 0.72), .clear]),
+                        Gradient(colors: [Color.white.opacity(sheenOpacity), .clear]),
                         startPoint: CGPoint(x: lensCx, y: sheenRect.minY),
                         endPoint: CGPoint(x: lensCx, y: sheenRect.maxY)
                     )
@@ -899,61 +1117,35 @@ struct LensView: View {
             }
         }
 
-        // Lens border: 2pt roleAccent under Reduce Transparency; subtle dispersion & rim otherwise.
+        // Lens border: 2pt roleAccent under Reduce Transparency; dark-only dispersion & rim otherwise.
         if reduceTransparency {
             context.stroke(lensPath, with: .color(Palette.roleAccent), lineWidth: 2)
         } else {
-            context.stroke(
-                lensPath.offsetBy(dx: 1.0, dy: 0),
-                with: .color(Color(.sRGB, red: 1.0, green: 0.36, blue: 0.55, opacity: isDark ? 0.22 : 0.18)),
-                lineWidth: 1.0
-            )
-            context.stroke(
-                lensPath.offsetBy(dx: -1.0, dy: 0),
-                with: .color(Color(.sRGB, red: 0.30, green: 0.65, blue: 1.0, opacity: isDark ? 0.24 : 0.20)),
-                lineWidth: 1.0
-            )
+            if isDark {
+                context.stroke(
+                    lensPath.offsetBy(dx: 1.0, dy: 0),
+                    with: .color(Color(.sRGB, red: 1.0, green: 0.36, blue: 0.55, opacity: 0.22)),
+                    lineWidth: 1.0
+                )
+                context.stroke(
+                    lensPath.offsetBy(dx: -1.0, dy: 0),
+                    with: .color(Color(.sRGB, red: 0.30, green: 0.65, blue: 1.0, opacity: 0.24)),
+                    lineWidth: 1.0
+                )
+            }
 
             let rimStroke: Color = if isPinned {
                 Palette.roleAccent.opacity(increased ? (isDark ? 0.95 : 0.88) : (isDark ? 0.78 : 0.58))
             } else if increased {
                 isDark ? Color.white.opacity(0.65) : Palette.ink1.opacity(0.55)
             } else {
-                Color.white.opacity(isDark ? (isResting ? 0.28 : 0.38) : 0.92)
+                Color.white.opacity(isDark ? (isResting ? 0.28 : 0.38) : (isResting ? 0.48 : 0.72))
             }
             context.stroke(
                 lensPath,
                 with: .color(rimStroke),
                 lineWidth: increased ? 1.6 : (isPinned ? 1.5 : 1.15)
             )
-        }
-
-        // Draggable left & right grip handles when pinned.
-        if isPinned {
-            let handleH = min(28, lensRect.height * 0.26)
-            for edgeX in [lensRect.minX, lensRect.maxX] {
-                let handleRect = CGRect(x: edgeX - 4, y: lensRect.midY - handleH * 0.5, width: 8, height: handleH)
-                let handlePath = Path(roundedRect: handleRect, cornerRadius: 4, style: .continuous)
-                context.fill(
-                    handlePath,
-                    with: .color(
-                        isDark
-                            ? Color(hex: "#42567A").opacity(increased ? 1.0 : 0.95)
-                            : Color.white.opacity(increased ? 1.0 : 0.96)
-                    )
-                )
-                context.stroke(
-                    handlePath,
-                    with: .color(Palette.roleAccent.opacity(increased ? 0.95 : (isDark ? 0.70 : 0.50))),
-                    lineWidth: increased ? 1.5 : 1
-                )
-
-                let grooveColor = Palette.roleAccent.opacity(increased ? 1.0 : (isDark ? 0.85 : 0.70))
-                let g1 = CGRect(x: edgeX - 1.5, y: lensRect.midY - 4.5, width: 1, height: 9)
-                let g2 = CGRect(x: edgeX + 0.5, y: lensRect.midY - 4.5, width: 1, height: 9)
-                context.fill(Path(roundedRect: g1, cornerRadius: 0.5), with: .color(grooveColor))
-                context.fill(Path(roundedRect: g2, cornerRadius: 0.5), with: .color(grooveColor))
-            }
         }
 
         // Single range-sum pill above the selected range in multi-bucket mode.
@@ -1161,33 +1353,153 @@ struct LensView: View {
 
     // MARK: - Per-Bucket VoiceOver Elements
 
-    private func bucketAccessibilityOverlay(layout: LensBarLayout) -> some View {
+    private func bucketAccessibilityOverlay(
+        layout: LensBarLayout,
+        activeRange: ClosedRange<Int>?,
+        descriptions: [String]
+    ) -> some View {
         ZStack(alignment: .topLeading) {
             ForEach(layout.bars) { bar in
                 let bucket = buckets[bar.index]
-                let isSelected = activeSliceRange?.contains(bar.index) == true
-                Color.clear
+                let isSelected = activeRange?.contains(bar.index) == true
+                let element = Color.clear
                     .frame(width: max(4, layout.slotWidth), height: max(20, layout.plotRect.height))
                     .offset(x: bar.slotRect.minX, y: layout.plotRect.minY)
                     .allowsHitTesting(false)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(Text(verbatim: bucketAccessibilityDescription(for: bucket)))
-                    .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-                    .accessibilityAction {
-                        guard !bucket.isFuture else { return }
-                        if pinnedRange == (bar.index...bar.index) {
-                            releasePin()
-                        } else {
-                            releasedUntilMove = false
-                            pinnedAnchor = bar.index
-                            pinnedHead = bar.index
+                    .accessibilityLabel(Text(verbatim: descriptions[bar.index]))
+                if bucket.isFuture {
+                    element
+                } else {
+                    element
+                        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                        .accessibilityAction {
+                            if pinnedRange == (bar.index...bar.index) {
+                                releasePin()
+                            } else {
+                                releasedUntilMove = false
+                                pinnedAnchor = bar.index
+                                pinnedHead = bar.index
+                            }
                         }
-                    }
+                }
             }
         }
     }
+}
 
-    private func bucketAccessibilityDescription(for bucket: LensBucket) -> String {
+// MARK: - Pure-Value Bar Layout
+
+private struct LensDerivedData {
+    let maxNonFutureIndex: Int?
+    let peakNonFutureIndex: Int?
+    let hasNonFutureUsage: Bool
+    let periodReasoningKnown: Bool
+    let accessibilityDescriptions: [String]
+}
+
+@MainActor
+private final class LensHoverPointCoalescer {
+    private var pending: (point: CGPoint, apply: (CGPoint) -> Void)?
+    private var task: Task<Void, Never>?
+
+    func submit(_ point: CGPoint, apply: @escaping (CGPoint) -> Void) {
+        pending = (point, apply)
+        guard task == nil else { return }
+        task = Task { @MainActor [weak self] in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            self?.flush()
+        }
+    }
+
+    func flush() {
+        task?.cancel()
+        task = nil
+        guard let pending else { return }
+        self.pending = nil
+        pending.apply(pending.point)
+    }
+
+    func cancel() {
+        task?.cancel()
+        task = nil
+        pending = nil
+    }
+}
+
+@MainActor
+private final class LensDerivedDataCache {
+    private struct Key: Equatable {
+        let buckets: [LensBucket]
+        let dimension: BreakdownDimension
+        let period: Period
+        let locale: Locale
+        let calendar: Calendar
+        let timeZone: TimeZone
+    }
+
+    private var cachedKey: Key?
+    private var cachedData: LensDerivedData?
+
+    func data(
+        buckets: [LensBucket],
+        dimension: BreakdownDimension,
+        period: Period,
+        locale: Locale
+    ) -> LensDerivedData {
+        let key = Key(
+            buckets: buckets,
+            dimension: dimension,
+            period: period,
+            locale: locale,
+            calendar: .current,
+            timeZone: .current
+        )
+        if let cachedData, cachedKey == key {
+            return cachedData
+        }
+
+        var maxNonFutureIndex: Int?
+        var peakNonFutureIndex: Int?
+        var peakTotal: Int64 = -1
+        var hasNonFutureUsage = false
+        var periodReasoningKnown = true
+        for (index, bucket) in buckets.enumerated() where !bucket.isFuture {
+            maxNonFutureIndex = index
+            if bucket.total > peakTotal {
+                peakTotal = bucket.total
+                peakNonFutureIndex = index
+            }
+            hasNonFutureUsage = hasNonFutureUsage || bucket.total > 0
+            periodReasoningKnown = periodReasoningKnown && bucket.reasoningKnown
+        }
+
+        let resolved = LensDerivedData(
+            maxNonFutureIndex: maxNonFutureIndex,
+            peakNonFutureIndex: peakNonFutureIndex,
+            hasNonFutureUsage: hasNonFutureUsage,
+            periodReasoningKnown: periodReasoningKnown,
+            accessibilityDescriptions: buckets.map {
+                accessibilityDescription(
+                    for: $0,
+                    dimension: dimension,
+                    period: period,
+                    locale: locale
+                )
+            }
+        )
+        cachedKey = key
+        cachedData = resolved
+        return resolved
+    }
+
+    private func accessibilityDescription(
+        for bucket: LensBucket,
+        dimension: BreakdownDimension,
+        period: Period,
+        locale: Locale
+    ) -> String {
         let timeLabel = LensDateFormatter.singleBucketLabel(bucket, period: period, locale: locale)
         if bucket.isFuture {
             return String(localized: "\(timeLabel), upcoming", locale: locale)
@@ -1195,16 +1507,17 @@ struct LensView: View {
         if !bucket.isKnown && bucket.total <= 0 {
             return String(localized: "\(timeLabel), missing hourly coverage", locale: locale)
         }
-        let spokenTokens = TokenFormat.spoken(bucket.total)
-        let topNames = topBucketNames(for: bucket)
+        let spokenTokens = bucket.total.formatted(.number.locale(locale))
+        let coverageNote = bucket.isKnown ? "" : ", \(String(localized: "Partial hourly coverage", locale: locale))"
+        let topNames = topBucketNames(for: bucket, dimension: dimension)
         if topNames.isEmpty {
-            return String(localized: "\(timeLabel), \(spokenTokens) tokens", locale: locale)
+            return String(localized: "\(timeLabel), \(spokenTokens) tokens", locale: locale) + coverageNote
         }
         let joined = topNames.joined(separator: locale.language.languageCode == .chinese ? "、" : ", ")
-        return String(localized: "\(timeLabel), \(spokenTokens) tokens, top: \(joined)", locale: locale)
+        return String(localized: "\(timeLabel), \(spokenTokens) tokens, top: \(joined)", locale: locale) + coverageNote
     }
 
-    private func topBucketNames(for bucket: LensBucket) -> [String] {
+    private func topBucketNames(for bucket: LensBucket, dimension: BreakdownDimension) -> [String] {
         guard bucket.total > 0 else { return [] }
         switch dimension {
         case .sources:
@@ -1223,8 +1536,6 @@ struct LensView: View {
         }
     }
 }
-
-// MARK: - Pure-Value Bar Layout
 
 /// Caches the resolved active slice so the 120fps spring does not re-aggregate buckets every frame.
 @MainActor
@@ -1360,21 +1671,6 @@ private final class LensBarLayoutCache {
     }
 }
 
-private final class LensModelColorCache {
-    private var idSet: Set<String> = []
-    private var valid = false
-    private var cached: [String: Color] = [:]
-
-    func colors(for ids: [String]) -> [String: Color] {
-        let key = Set(ids)
-        if valid, key == idSet { return cached }
-        idSet = key
-        valid = true
-        cached = Palette.modelColors(for: ids)
-        return cached
-    }
-}
-
 struct LensBarLayout {
     static let singleMagnification: CGFloat = 1.35
     static let rangeMagnification: CGFloat = 1.20
@@ -1412,6 +1708,8 @@ struct LensBarLayout {
     let plotRect: CGRect
     let slotWidth: CGFloat
     let yMax: Double
+    let yAxisStep: Double
+    let yAxisValues: [Double]
     let isDayModelDegraded: Bool
     let isEmpty: Bool
     let bars: [BucketBar]
@@ -1448,7 +1746,10 @@ struct LensBarLayout {
         }
         let hasKnownCoverageGap = buckets.contains { !$0.isFuture && !$0.isKnown }
         self.isEmpty = buckets.isEmpty || (maxRaw <= 0 && !hasKnownCoverageGap)
-        self.yMax = Self.niceCeil(Double(max(1, maxRaw)) * Double(Self.singleMagnification) * 1.08)
+        let axis = Self.axisScale(for: Double(max(1, maxRaw)) * Double(Self.singleMagnification) * 1.08)
+        self.yMax = axis.upperBound
+        self.yAxisStep = axis.step
+        self.yAxisValues = axis.values
 
         let padRatio: CGFloat = count > 20 ? 0.20 : (count > 10 ? 0.23 : 0.27)
         let computedBarW = min(44, max(2, bw * (1 - padRatio * 2)))
@@ -1614,44 +1915,88 @@ struct LensBarLayout {
         return min(max(centerX, minCx), maxCx)
     }
 
-    static func niceCeil(_ value: Double) -> Double {
-        guard value > 0, value.isFinite else { return 1 }
-        let exp = floor(log10(value))
-        let base = pow(10, exp)
-        for mult in [1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0] {
-            if mult * base >= value {
-                return mult * base
-            }
+    private static func axisScale(for target: Double) -> (upperBound: Double, step: Double, values: [Double]) {
+        guard target > 4, target.isFinite else {
+            return (4, 1, [0, 1, 2, 3, 4])
         }
-        return 10 * base
+
+        let desiredStep = target / 4
+        let base = pow(10, floor(log10(desiredStep)))
+        let normalized = desiredStep / base
+        let multipliers = [1.0, 2.0, 2.5, 5.0, 10.0]
+        let multiplier = multipliers.first(where: { $0 >= normalized }) ?? 10
+        let step = max(1, multiplier * base)
+        let upperBound = ceil(target / step - 0.000_000_001) * step
+        let count = max(1, Int((upperBound / step).rounded()))
+        return (upperBound, step, (0...count).map { Double($0) * step })
     }
 
-    static func axisLabel(_ value: Double) -> String {
+    static func axisLabel(_ value: Double, step: Double, upperBound: Double) -> String {
         guard value.isFinite, abs(value) >= 0.5 else { return "0" }
-        let clamped = min(max(value.rounded(), Double(Int64.min)), Double(Int64.max))
-        return TokenFormat.short(Int64(clamped))
+
+        let divisor: Double
+        let suffix: String
+        switch TokenFormat.unitStyle {
+        case .international:
+            if upperBound >= 1_000_000_000 {
+                (divisor, suffix) = (1_000_000_000, "B")
+            } else if upperBound >= 1_000_000 {
+                (divisor, suffix) = (1_000_000, "M")
+            } else if upperBound >= 1_000 {
+                (divisor, suffix) = (1_000, "K")
+            } else {
+                (divisor, suffix) = (1, "")
+            }
+        case .chinese:
+            if upperBound >= 1_000_000_000_000 {
+                (divisor, suffix) = (1_000_000_000_000, "万亿")
+            } else if upperBound >= 100_000_000 {
+                (divisor, suffix) = (100_000_000, "亿")
+            } else if upperBound >= 10_000 {
+                (divisor, suffix) = (10_000, "万")
+            } else {
+                (divisor, suffix) = (1, "")
+            }
+        }
+
+        let scaledStep = step / divisor
+        var fractionDigits = 0
+        while fractionDigits < 3 {
+            let factor = pow(10, Double(fractionDigits))
+            if abs(scaledStep * factor - (scaledStep * factor).rounded()) < 0.000_001 {
+                break
+            }
+            fractionDigits += 1
+        }
+        let scaled = value / divisor
+        let number = scaled.formatted(
+            .number
+                .precision(.fractionLength(fractionDigits))
+                .grouping(.automatic)
+                .locale(Locale(identifier: "en_US_POSIX"))
+        )
+        return number + suffix
     }
 }
 
-// MARK: - Three-Column Docked Readout Card
+// MARK: - Slice Overlay
 
-private struct LensReadoutCard: View {
+private struct LensSliceOverlay: View {
+    let slice: LensSlice
     let summary: UsageSummary
     let period: Period
-    let dimension: BreakdownDimension
     let buckets: [LensBucket]
-    let activeSlice: LensSlice?
+    let dimension: BreakdownDimension
+    let width: CGFloat
+    let maxHeight: CGFloat
     let isPinned: Bool
     let increasedContrast: Bool
     let onRelease: () -> Void
 
     @Environment(\.locale) private var locale
-    @Environment(\.colorScheme) private var scheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @State private var modelColorCache = LensModelColorCache()
 
     private var displayCounts: TokenCounts {
-        activeSlice?.counts ?? summary.total
+        slice.counts
     }
 
     private var displayTotal: Int64 {
@@ -1660,81 +2005,71 @@ private struct LensReadoutCard: View {
 
     /// False when the selection includes an elapsed bucket without full coverage: zero is then unknown.
     private var coverageKnown: Bool {
-        activeSlice?.isKnown ?? true
+        slice.isKnown
     }
 
     private var reasoningKnown: Bool {
-        activeSlice?.reasoningKnown ?? true
+        slice.reasoningKnown
     }
 
     private var displayCost: CostEstimate? {
-        if let activeSlice {
-            return activeSlice.cost
-        }
-        return summary.cost
+        slice.cost
     }
 
     private var hasModelDetail: Bool {
-        if let activeSlice {
-            return activeSlice.hasModelDetail
-        }
-        return true
+        slice.hasModelDetail
     }
 
     private var rankedItems: [Breakdown] {
-        let raw: [Breakdown] = switch (dimension, activeSlice) {
-        case (.sources, let slice?): slice.bySource
-        case (.sources, nil): summary.bySource
-        case (.models, let slice?): slice.byModel
-        case (.models, nil): summary.byModel
-        }
+        let raw = dimension == .sources ? slice.bySource : slice.byModel
         return raw.filter { $0.counts.total > 0 }
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-
-        HStack(alignment: .top, spacing: 14) {
-            leftColumn
-                .frame(minWidth: 168, idealWidth: 215, maxWidth: 245, maxHeight: .infinity, alignment: .topLeading)
-
-            columnDivider
-
-            middleColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-            columnDivider
-
-            rightColumn
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        DataHoverCard(width: width) {
+            ViewThatFits(in: .vertical) {
+                sliceContent
+                ScrollView {
+                    sliceContent
+                }
+            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .modifier(LensReadoutSurface(
-            reduceTransparency: reduceTransparency,
-            isDark: scheme == .dark,
-            increasedContrast: increasedContrast,
-            shape: shape
-        ))
+        .frame(maxHeight: maxHeight)
     }
 
-    private var columnDivider: some View {
-        Rectangle()
-            .fill(Palette.hairline)
-            .frame(width: increasedContrast ? 1.5 : 1)
-            .padding(.vertical, 2)
-            .accessibilityHidden(true)
+    private var sliceContent: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            summarySection
+            rankingSection
+            DataHoverPopover(width: min(width, 280)) {
+                LensCompositionStrip(
+                    counts: displayCounts,
+                    reasoningKnown: reasoningKnown,
+                    increasedContrast: increasedContrast,
+                    height: 4
+                )
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .center)
+            } content: {
+                LensCompositionDetails(
+                    counts: displayCounts,
+                    reasoningKnown: reasoningKnown,
+                    increasedContrast: increasedContrast
+                )
+            }
+            .accessibilityLabel(Text("Composition"))
+            .accessibilityValue(Text("\(displayTotal.formatted(.number.locale(locale))) tokens"))
+            .accessibilityHint(Text("Shows composition details"))
+        }
     }
 
-    // MARK: Left Column: Time Range, Total Tokens, Share of Period, Cost
+    // MARK: Time Range, Total Tokens, Share of Period, Cost
 
-    private var leftColumn: some View {
+    private var summarySection: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 6) {
                 timeRangeLabel
                     .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(activeSlice != nil ? Palette.roleAccent : Palette.ink2)
+                    .foregroundStyle(Palette.roleAccent)
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
@@ -1764,6 +2099,7 @@ private struct LensReadoutCard: View {
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
                     .help(Text("Release lens (Esc)"))
                     .accessibilityLabel(Text("Release lens"))
                 }
@@ -1787,19 +2123,29 @@ private struct LensReadoutCard: View {
 
                 Group {
                     if coverageKnown {
-                        Text("\(Share.percent(displayTotal, of: summary.total.total)) of period")
+                        Text("\(Share.percent(displayTotal, of: summary.total.total, locale: locale)) of period")
                     } else {
                         Text("Partial hourly coverage")
                     }
                 }
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(activeSlice != nil ? Palette.roleAccent : Palette.ink3)
+                    .foregroundStyle(Palette.roleAccent)
                     .monospacedDigit()
                     .lineLimit(1)
             }
             .padding(.top, 4)
 
-            Spacer(minLength: 2)
+            let exactTotal = !coverageKnown && displayTotal == 0
+                ? "-"
+                : displayTotal.formatted(.number.locale(locale))
+            Text("\(exactTotal) tokens")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.ink3)
+                .monospacedDigit()
+                .lineLimit(1)
+                .padding(.top, 2)
+
+            Color.clear.frame(height: 8)
 
             if let cost = displayCost, cost.unpricedTokens > 0, cost.unpricedTokens >= displayTotal {
                 Text("No prices for these models")
@@ -1816,8 +2162,8 @@ private struct LensReadoutCard: View {
                         .lineLimit(1)
                     if cost.unpricedTokens > 0 {
                         Text("\(TokenFormat.short(cost.unpricedTokens)) unpriced")
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Palette.ink3)
+                            .font(.system(size: 11))
+                            .foregroundStyle(Palette.ink2)
                             .monospacedDigit()
                             .lineLimit(1)
                     }
@@ -1829,57 +2175,42 @@ private struct LensReadoutCard: View {
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(Palette.ink2)
                     Text("Hourly granularity has no model pricing")
-                        .font(.system(size: 10.5))
+                        .font(.system(size: 11))
                         .foregroundStyle(Palette.ink3)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
             }
+
+            if let displayCost {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("estimate, not a bill")
+                    Text("Price table \(displayCost.priceTableVersion)")
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.ink3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            }
         }
         .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder
     private var timeRangeLabel: some View {
-        if let slice = activeSlice {
-            Text(verbatim: LensDateFormatter.sliceLabel(
-                slice: slice,
-                buckets: buckets,
-                period: period,
-                locale: locale
-            ))
-        } else {
-            Text(periodSummaryDescription)
-        }
+        Text(verbatim: LensDateFormatter.sliceLabel(
+            slice: slice,
+            buckets: buckets,
+            period: period,
+            locale: locale
+        ))
     }
 
-    private var periodSummaryDescription: LocalizedStringKey {
-        let start = summary.start
-        switch period {
-        case .day:
-            return "Today · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .week:
-            let today = Calendar.current.date(byAdding: .day, value: -1, to: summary.end) ?? start
-            if Calendar.current.isDate(start, inSameDayAs: today) || today <= start {
-                return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-            }
-            return "This week · \(start.formatted(.dateTime.locale(locale).month(.abbreviated).day()))–\(today.formatted(.dateTime.locale(locale).month(.abbreviated).day()))"
-        case .month:
-            return "This month · \(start.formatted(.dateTime.locale(locale).year().month(.wide)))"
-        case .year:
-            return "This year · \(start.formatted(.dateTime.locale(locale).year()))"
-        case .all:
-            return "All time · since \(start.formatted(.dateTime.locale(locale).year().month(.abbreviated).day()))"
-        }
-    }
+    // MARK: Top 3 in Current Dimension
 
-    // MARK: Middle Column: Top 3 in Current Dimension with Color Bars
-
-    private var middleColumn: some View {
+    private var rankingSection: some View {
         let topThree = Array(rankedItems.prefix(3))
-        let maxTokens = max(topThree.first?.counts.total ?? 1, 1)
         let modelColors = dimension == .models
-            ? modelColorCache.colors(for: summary.byModel.map(\.id) + topThree.map(\.id))
+            ? Palette.modelColors(for: summary.byModel.map(\.id) + topThree.map(\.id))
             : [:]
 
         return VStack(alignment: .leading, spacing: 5) {
@@ -1898,19 +2229,15 @@ private struct LensReadoutCard: View {
             }
 
             if dimension == .models && !hasModelDetail {
-                Spacer(minLength: 0)
                 Text("Hourly collection has no model breakdown")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
                     .lineLimit(2)
-                Spacer(minLength: 0)
             } else if topThree.isEmpty {
-                Spacer(minLength: 0)
                 Text(coverageKnown ? "No usage in this period" : "Hourly coverage is missing for this time")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Palette.ink3)
                     .lineLimit(1)
-                Spacer(minLength: 0)
             } else {
                 VStack(alignment: .leading, spacing: 5) {
                     ForEach(topThree) { item in
@@ -1932,12 +2259,6 @@ private struct LensReadoutCard: View {
                                 .truncationMode(dimension == .models ? .middle : .tail)
                                 .frame(maxWidth: .infinity, alignment: .leading)
 
-                            LensMiniBar(
-                                ratio: Double(item.counts.total) / Double(maxTokens),
-                                color: itemColor
-                            )
-                            .frame(width: 42, height: 4)
-
                             Text(TokenFormat.short(item.counts.total))
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(Palette.ink2)
@@ -1948,157 +2269,122 @@ private struct LensReadoutCard: View {
                         .accessibilityElement(children: .combine)
                     }
                 }
-                Spacer(minLength: 0)
             }
-        }
-    }
-
-    // MARK: Right Column: Five-Category Composition Strip
-
-    private var rightColumn: some View {
-        let total = displayCounts.total
-        let categories = TokenCategory.allCases
-
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .center, spacing: 6) {
-                Text("Composition")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .foregroundStyle(Palette.ink2)
-                    .lineLimit(1)
-                Spacer(minLength: 4)
-                let reasoning = displayCounts[.reasoning]
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Palette.color(for: .reasoning))
-                        .frame(width: 5.5, height: 5.5)
-                        .accessibilityHidden(true)
-                    Text(TokenCategory.reasoning.title)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(Palette.ink2)
-                        .lineLimit(1)
-                    Text(verbatim: reasoningKnown ? Share.percent(reasoning, of: total) : "-")
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundStyle(Palette.ink1)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                }
-                .accessibilityElement(children: .combine)
-            }
-
-            // Segmented horizontal strip across all 5 categories (+ uncategorized when present).
-            GeometryReader { proxy in
-                let width = proxy.size.width
-                if total <= 0 {
-                    Capsule()
-                        .fill(Palette.barTrack)
-                        .frame(width: width, height: 6)
-                } else {
-                    let uncategorizedColor = Palette.ink3.opacity(increasedContrast ? 0.80 : 0.45)
-                    let activeParts: [(id: String, value: Int64, color: Color)] = categories.compactMap { cat in
-                        let v = displayCounts[cat]
-                        return v > 0 ? (cat.rawValue, v, Palette.color(for: cat)) : nil
-                    } + (displayCounts.uncategorized > 0
-                        ? [("uncategorized", displayCounts.uncategorized, uncategorizedColor)]
-                        : [])
-                    let gaps = CGFloat(max(0, activeParts.count - 1)) * 1.5
-                    let usable = max(0, width - gaps)
-
-                    HStack(spacing: 1.5) {
-                        ForEach(activeParts, id: \.id) { part in
-                            RoundedRectangle(cornerRadius: 2, style: .continuous)
-                                .fill(part.color)
-                                .frame(width: max(2, usable * CGFloat(part.value) / CGFloat(total)), height: 6)
-                        }
-                    }
-                    .clipShape(Capsule())
-                }
-            }
-            .frame(height: 6)
-            .accessibilityHidden(true)
-
-            // Compact 2x2 + reasoning legend for the 5 categories (+ uncategorized when present).
-            let gridCategories: [TokenCategory] = [.input, .cacheRead, .cacheWrite, .output]
-            let uncategorizedLegendColor = Palette.ink3.opacity(increasedContrast ? 0.80 : 0.45)
-            let legendItems: [(id: String, title: LocalizedStringKey, color: Color, value: Int64)] =
-                gridCategories.map { category in
-                    (category.rawValue, category.title, Palette.color(for: category), displayCounts[category])
-                } + (total > 0 && displayCounts.uncategorized > 0
-                    ? [("uncategorized", LocalizedStringKey("Uncategorized"), uncategorizedLegendColor, displayCounts.uncategorized)]
-                    : [])
-            LazyVGrid(
-                columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)],
-                alignment: .leading,
-                spacing: 4
-            ) {
-                ForEach(legendItems, id: \.id) { item in
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(item.color)
-                            .frame(width: 5.5, height: 5.5)
-                            .accessibilityHidden(true)
-                        Text(item.title)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(Palette.ink2)
-                            .lineLimit(1)
-                        Spacer(minLength: 2)
-                        Text(Share.percent(item.value, of: total))
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundStyle(Palette.ink1)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-
-            Spacer(minLength: 0)
         }
     }
 }
 
-private struct LensMiniBar: View {
-    let ratio: Double
-    let color: Color
+private struct LensCompositionStrip: View {
+    let counts: TokenCounts
+    let reasoningKnown: Bool
+    let increasedContrast: Bool
+    let height: CGFloat
 
     var body: some View {
-        let clamped = min(max(ratio, 0), 1)
         GeometryReader { proxy in
-            let w = proxy.size.width
-            let h = proxy.size.height
-            let fillW = clamped > 0 ? max(h, w * CGFloat(clamped)) : 0
-            ZStack(alignment: .leading) {
-                Capsule().fill(Palette.barTrack)
-                if fillW > 0 {
-                    Capsule()
-                        .fill(color)
-                        .frame(width: min(w, fillW), height: h)
+            let total = counts.total
+            if total <= 0 {
+                Capsule()
+                    .fill(Palette.barTrack)
+                    .frame(width: proxy.size.width, height: height)
+            } else {
+                let uncategorizedColor = Palette.ink3.opacity(increasedContrast ? 0.80 : 0.45)
+                let parts: [(id: String, value: Int64, color: Color)] =
+                    TokenCategory.allCases.compactMap { category in
+                        let value = counts[category]
+                        guard value > 0 else { return nil }
+                        let isKnown = category != .reasoning || reasoningKnown
+                        let color = Palette.color(for: category).opacity(isKnown ? 1 : 0.42)
+                        return (category.rawValue, value, color)
+                    } + (counts.uncategorized > 0
+                        ? [("uncategorized", counts.uncategorized, uncategorizedColor)]
+                        : [])
+                let gap: CGFloat = 1
+                let gaps = CGFloat(max(0, parts.count - 1)) * gap
+                let usable = max(0, proxy.size.width - gaps)
+
+                HStack(spacing: gap) {
+                    ForEach(parts, id: \.id) { part in
+                        RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                            .fill(part.color)
+                            .frame(
+                                width: max(1, usable * CGFloat(part.value) / CGFloat(total)),
+                                height: height
+                            )
+                    }
                 }
+                .clipShape(Capsule())
             }
         }
+        .frame(height: height)
         .accessibilityHidden(true)
     }
 }
 
-private struct LensReadoutSurface<S: InsettableShape>: ViewModifier {
-    let reduceTransparency: Bool
-    let isDark: Bool
+private struct LensCompositionDetails: View {
+    let counts: TokenCounts
+    let reasoningKnown: Bool
     let increasedContrast: Bool
-    let shape: S
 
-    func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background { shape.fill(Palette.cardSurface) }
-                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: increasedContrast ? 1.5 : 1) }
-        } else {
-            let tintOpacity = isDark
-                ? (increasedContrast ? 0.68 : 0.45)
-                : (increasedContrast ? 0.65 : 0.38)
-            content
-                .background { shape.fill(Palette.cardSurface.opacity(tintOpacity)) }
-                .glassEffect(.regular, in: shape)
-                .overlay { shape.strokeBorder(Palette.hairline, lineWidth: increasedContrast ? 1.25 : 0.5) }
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(TokenCategory.allCases) { category in
+                row(
+                    title: category.title,
+                    value: counts[category],
+                    color: Palette.color(for: category),
+                    isKnown: category != .reasoning || reasoningKnown
+                )
+            }
+            if counts.uncategorized > 0 {
+                row(
+                    title: "Uncategorized",
+                    value: counts.uncategorized,
+                    color: Palette.ink3.opacity(increasedContrast ? 0.80 : 0.45),
+                    isKnown: true
+                )
+            }
         }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func row(
+        title: LocalizedStringKey,
+        value: Int64,
+        color: Color,
+        isKnown: Bool
+    ) -> some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.ink2)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Group {
+                if isKnown {
+                    Text(verbatim: value.formatted(.number.locale(locale)))
+                } else {
+                    Text("Unavailable")
+                }
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(Palette.ink1)
+            .monospacedDigit()
+            .lineLimit(1)
+            Text(verbatim: isKnown ? Share.percent(value, of: counts.total, locale: locale) : "-")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.ink2)
+                .monospacedDigit()
+                .frame(width: 46, alignment: .trailing)
+                .lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 

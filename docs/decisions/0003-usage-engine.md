@@ -96,6 +96,10 @@ Devin and Antigravity move off the engine to native Swift collectors; [ADR-0009]
 
 Cursor is no longer deferred. [ADR-0010](0010-cursor-account-usage.md) accepts a native, opt-in Swift collector that reads Cursor's own sign-in on this Mac, downloads the account's usage export once per collection, and writes it to an account device so two Macs on one account count it once. The engine still never requests Cursor, so the source is never collected twice. The rest of this ADR stands: the engine's client list, its pinned version, and the reconciliation bar in `docs/contracts/statistics.md`.
 
+## Native Gemini CLI and tokscale 4.23.1 (2026-11-28)
+
+[ADR-0020](0020-native-gemini-and-engine-4-23-1.md) upgrades the pinned `tokscale` engine from `4.21.0` (`b26c433d`) to `4.23.1` (`b265e836`) and moves Gemini CLI off the engine to a native Swift collector (`GeminiCollector`). Upgrading to `4.23.1` fixes the upstream OpenCode `claude-agent` overlap (`#1597`), and the adapter fingerprints OpenCode SQLite databases for Claude change detection so OpenCode-routed Claude activity triggers collection. Removing `gemini` from `TokscaleCollector` drops its `+tokscale-<version>` epoch suffix automatically, and remaining `tokscale`-collected sources move to `1+tokscale-4.23.1` so recent days rebaseline once under [ADR-0008](0008-retained-history.md).
+
 ## Consequences
 
 - Engine-dependent agent coverage, packaging, refresh behavior, and sync timestamp support remain open.

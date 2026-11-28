@@ -163,10 +163,11 @@ final class OmpCollectorTests: XCTestCase {
         // output 12 less reasoning 2: reasoning stays inside output and is split out, not added.
         XCTAssertEqual(glm.counts, TokenCounts(input: 40, cacheRead: 5, output: 10, reasoning: 2))
 
-        // The worker reply, a `model_usage` auxiliary call and the model-less compaction, all on the
-        // session's model.
+        // The worker reply, a `model_usage` auxiliary call (where totalTokens == input + output proves
+        // input 445 includes cacheRead 3, normalizing to 442), and the model-less compaction, all on
+        // the session's model.
         let gemini = try record(both, modelID: "gemini-3.8-flash")
-        XCTAssertEqual(gemini.counts, TokenCounts(input: 583, cacheRead: 3, output: 23, reasoning: 4))
+        XCTAssertEqual(gemini.counts, TokenCounts(input: 580, cacheRead: 3, output: 23, reasoning: 4))
         XCTAssertEqual(gemini.eventCount, 3)
 
         XCTAssertEqual(both.daily.reduce(Int64(0)) { $0 + $1.eventCount }, 7)
@@ -219,12 +220,81 @@ final class OmpCollectorTests: XCTestCase {
         XCTAssertEqual(batch.daily.map(\.modelID), ["gemini-3.8-flash", "unknown"])
         XCTAssertEqual(
             try record(batch, modelID: "gemini-3.8-flash").counts,
-            TokenCounts(input: 445, cacheRead: 3, output: 1)
+            TokenCounts(input: 442, cacheRead: 3, output: 1)
         )
         XCTAssertEqual(
             try record(batch, modelID: "unknown").counts,
             TokenCounts(input: 9, output: 2)
         )
+    }
+
+    func testLargeLineProjectionPreservesTotalTokensAndExclusiveReasoning() async throws {
+        let root = directory.appendingPathComponent("omp-large-totals", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+
+        // > 64 KB line with cacheRead-inclusive input and exclusive reasoning > rawOutput.
+        let firstEntry: [String: Any] = [
+            "type": "message",
+            "id": "omp-large-1",
+            "timestamp": "2026-11-10T10:00:00Z",
+            "message": [
+                "role": "assistant",
+                "model": "gemini-3.8-flash",
+                "content": String(repeating: "x", count: 80 * 1_024),
+                "usage": [
+                    "input": 445,
+                    "cacheRead": 3,
+                    "cacheWrite": 10,
+                    "output": 20,
+                    "reasoningTokens": 60,
+                    "totalTokens": 535,
+                ],
+            ],
+        ]
+        // > 64 KB line with snake_case total_tokens, input including both cacheRead and cacheWrite,
+        // and exclusive reasoning <= rawOutput.
+        let secondEntry: [String: Any] = [
+            "type": "message",
+            "id": "omp-large-2",
+            "timestamp": "2026-11-10T11:00:00Z",
+            "message": [
+                "role": "assistant",
+                "model": "gpt-5",
+                "content": String(repeating: "y", count: 80 * 1_024),
+                "usage": [
+                    "input": 500,
+                    "cacheRead": 100,
+                    "cacheWrite": 50,
+                    "output": 80,
+                    "reasoning": 30,
+                    "total_tokens": 610,
+                ],
+            ],
+        ]
+        let firstLine = try JSONSerialization.data(withJSONObject: firstEntry)
+        let secondLine = try JSONSerialization.data(withJSONObject: secondEntry)
+        XCTAssertGreaterThan(firstLine.count, 64 << 10)
+        XCTAssertGreaterThan(secondLine.count, 64 << 10)
+
+        var payload = Data()
+        payload.append(firstLine)
+        payload.append(0x0A)
+        payload.append(secondLine)
+        payload.append(0x0A)
+        try payload.write(to: root.appendingPathComponent("session.jsonl"))
+
+        let batch = try await collector(root: root).collect()
+        XCTAssertEqual(batch.skippedRecords, 0)
+        XCTAssertEqual(
+            try record(batch, modelID: "gemini-3.8-flash").counts,
+            TokenCounts(input: 442, cacheRead: 3, cacheWrite: 10, output: 20, reasoning: 60)
+        )
+        XCTAssertEqual(
+            try record(batch, modelID: "gpt-5").counts,
+            TokenCounts(input: 350, cacheRead: 100, cacheWrite: 50, output: 80, reasoning: 30)
+        )
+        XCTAssertEqual(batch.hourly.count, 2)
+        XCTAssertTrue(batch.hourly.allSatisfy(\.reasoningKnown))
     }
 
     func testNonCountedControlAndStringMessageTimestampDoNotMarkPartial() async throws {

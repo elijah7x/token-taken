@@ -67,6 +67,12 @@
     },
     "%@ of total" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ of total"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -77,6 +83,12 @@
     },
     "%@ tokens" : {
       "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ tokens"
+          }
+        },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
@@ -1821,7 +1833,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按小时采集不含模型拆分"
+            "value" : "小时数据不含模型细分"
           }
         }
       }
@@ -1853,7 +1865,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "小时粒度不含模型定价"
+            "value" : "小时数据不含模型定价"
           }
         }
       }
@@ -2040,18 +2052,18 @@
         }
       }
     },
-    "Landscape 3:2" : {
+    "Landscape 4:3" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Landscape 3:2"
+            "value" : "Landscape 4:3"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "横版 3:2"
+            "value" : "横版 4:3"
           }
         }
       }
@@ -3016,18 +3028,18 @@
         }
       }
     },
-    "Portrait 2:3" : {
+    "Portrait 3:4" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Portrait 2:3"
+            "value" : "Portrait 3:4"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "竖版 2:3"
+            "value" : "竖版 3:4"
           }
         }
       }
@@ -3305,7 +3317,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "释放"
+            "value" : "取消固定"
           }
         }
       }
@@ -3321,7 +3333,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "释放透镜"
+            "value" : "取消固定透镜"
           }
         }
       }
@@ -3337,7 +3349,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "释放透镜 (Esc)"
+            "value" : "取消固定透镜（Esc）"
           }
         }
       }
@@ -3594,6 +3606,22 @@
         }
       }
     },
+    "Show all" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show all"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示全部"
+          }
+        }
+      }
+    },
     "Show all %lld ›" : {
       "localizations" : {
         "en" : {
@@ -3622,6 +3650,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示费用估算"
+          }
+        }
+      }
+    },
+    "Show less" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show less"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收起"
           }
         }
       }
@@ -3690,6 +3734,22 @@
         }
       }
     },
+    "Shows composition details" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shows composition details"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示构成详情"
+          }
+        }
+      }
+    },
     "Sign in to iCloud on this Mac to publish" : {
       "localizations" : {
         "en" : {
@@ -3744,22 +3804,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "部分文字需重新启动后切换。"
-          }
-        }
-      }
-    },
-    "Square 1:1" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Square 1:1"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "方形 1:1"
           }
         }
       }
@@ -4397,7 +4441,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "活跃工具"
+            "value" : "最常用工具"
           }
         }
       }
@@ -4423,7 +4467,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "活跃模型"
+            "value" : "最常用模型"
           }
         }
       }
@@ -4588,6 +4632,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未定价"
+          }
+        }
+      }
+    },
+    "Unpriced tokens" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unpriced tokens"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未定价的 Token"
           }
         }
       }
@@ -4853,7 +4913,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用量时间条"
+            "value" : "用量时间轴"
           }
         }
       }
@@ -5589,6 +5649,262 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "占全部 %@"
+          }
+        }
+      }
+    },
+    "%@ and %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ and %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 和 %2$@"
+          }
+        }
+      }
+    },
+    "%@ and %lld others" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ and %2$lld others"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 和另外 %2$lld 个"
+          }
+        }
+      }
+    },
+    "%@ and one other" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ and one other"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 和另一个"
+          }
+        }
+      }
+    },
+    "Across your whole token story, %@ share the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Across your whole token story, %@ share the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整段 Token 故事里，%@ 并列领跑。"
+          }
+        }
+      }
+    },
+    "Across your whole token story, %@ takes the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Across your whole token story, %@ takes the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整段 Token 故事里，%@ 是主角。"
+          }
+        }
+      }
+    },
+    "In the %@ token story, %@ share the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In the %1$@ token story, %2$@ share the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 年的 Token 故事里，%2$@ 并列领跑。"
+          }
+        }
+      }
+    },
+    "In the %@ token story, %@ takes the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In the %1$@ token story, %2$@ takes the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 年的 Token 故事里，%2$@ 是主角。"
+          }
+        }
+      }
+    },
+    "In this %@’s token story, %@ share the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In this %1$@’s token story, %2$@ share the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 %1$@ 的 Token 故事里，%2$@ 并列领跑。"
+          }
+        }
+      }
+    },
+    "In this %@’s token story, %@ takes the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In this %1$@’s token story, %2$@ takes the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个 %1$@ 的 Token 故事里，%2$@ 是主角。"
+          }
+        }
+      }
+    },
+    "In this week’s token story, %@ share the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In this week’s token story, %@ share the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这周的 Token 故事里，%@ 并列领跑。"
+          }
+        }
+      }
+    },
+    "In this week’s token story, %@ takes the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In this week’s token story, %@ takes the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这周的 Token 故事里，%@ 是主角。"
+          }
+        }
+      }
+    },
+    "In today’s token story, %@ share the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In today’s token story, %@ share the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天的 Token 故事里，%@ 并列领跑。"
+          }
+        }
+      }
+    },
+    "In today’s token story, %@ takes the lead." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In today’s token story, %@ takes the lead."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天的 Token 故事里，%@ 是主角。"
+          }
+        }
+      }
+    },
+    "About top %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About top %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约前 %@"
+          }
+        }
+      }
+    },
+    "Public usage reference" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Public usage reference"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "公开用量参考"
+          }
+        }
+      }
+    },
+    "Last 30 days of tokens · estimate" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last 30 days of tokens · estimate"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "近 30 天 Token 用量 · 估算"
           }
         }
       }

@@ -275,7 +275,7 @@ struct LensShareGraphic: View {
         let increased = effectiveContrast == .increased
 
         // Scale logical coordinates so LensBarLayout's bar widths, bevels, and radii stay proportional
-        // across 1080x1620, 1080x1080, and 1620x1080 share card canvases.
+        // across 1080x1440 and 1440x1080 share card canvases.
         let scale = min(max(min(size.width / 380, size.height / 205), 1.0), 2.30)
         let logicalSize = CGSize(width: size.width / scale, height: size.height / scale)
         context.scaleBy(x: scale, y: scale)
