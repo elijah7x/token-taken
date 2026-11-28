@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-28
+
 ### Changed
 
 - Reworked share cards into achievement-led posters with safer theme framing, explicit public-reference rank context, token-story footnotes and two-line share evidence.
